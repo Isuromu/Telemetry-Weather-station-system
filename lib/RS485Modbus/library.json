@@ -1,0 +1,18 @@
+{
+  "name": "RS485Bus",
+  "version": "1.0.0",
+  "description": "RS-485 Modbus RTU transport: send/receive raw bytes, capture big buffer, extract frames by prefix, CRC16 helper",
+  "keywords": ["rs485", "modbus", "rtu", "serial", "crc16"],
+  "authors": [
+    { "name": "Project Internal" }
+  ],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "PrintController": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}
