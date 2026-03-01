@@ -1,0 +1,39 @@
+# Protocol Index (All Sensors / Items)
+This index lists every sensor/manual/item currently provided. For each RS485 sensor, the **Baseline Read** is the first read group recommended for driver bring-up (request shown WITHOUT CRC).
+
+**Common references:**
+- `modbus_cheatsheet.md` (CRC/prefix/length validation)
+- `range_protection.md` (value sanity checks / fault detection)
+
+| Sensor / Item | Measures | Interface | Default Addr | Baseline Read (no CRC) | Protocol file |
+|---|---|---|---:|---|---|
+| JXBS-3001-YMSD Leaf Surface Humidity Transmitter (RS485) | Leaf surface humidity and leaf surface temperature. | RS485 / Modbus RTU (function 0x03 for reads). | 0x01 | 01 03 00 20 00 02 | JXBS_3001_YMSD_Leaf_Surface_Humidity_Transmitter_RS485.md |
+| RS485 Temperature & Humidity Sensor (JXCT family) | Air/soil temperature and humidity (per manual naming). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 00 00 02 | RS485_Temperature_Humidity_Sensor_JXCT_family.md |
+| RS485 Wind Speed Sensor | Wind speed. | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 16 00 01 | RS485_Wind_Speed_Sensor.md |
+| RS485 Wind Direction Sensor | Wind direction angle (degrees). | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 00 00 01 | RS485_Wind_Direction_Sensor.md |
+| RS485 Illuminance Sensor | Illuminance (Lux), delivered as 32-bit across two registers. | RS485 / Modbus RTU (0x03). | 0x01 (example; typical factory default) | 01 03 00 07 00 02 | RS485_Illuminance_Sensor.md |
+| RS485 UV Rays Sensor | UV radiation intensity; manual also lists temperature & humidity registers in the same device family. | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 08 00 01 | RS485_UV_Rays_Sensor.md |
+| RS485 Photosynthetically Active Radiation (PAR) Sensor | Photosynthetically active radiation (PAR). | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 06 00 01 | RS485_Photosynthetically_Active_Radiation_PAR_Sensor.md |
+| RS485 Total Solar Radiation Sensor | Total solar radiation intensity. | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 00 00 01 | RS485_Total_Solar_Radiation_Sensor.md |
+| RS485 Evaporation Sensor (JXCT family) | Evaporation measurement system; register example reads a single value (often water weight or evaporation-related). | RS485 / Modbus RTU (0x03). | 0x01 (factory default) | 01 03 00 06 00 01 | RS485_Evaporation_Sensor_JXCT_family.md |
+| RS485 Optical Rain Sensor | Rainfall accumulation (0.1 mm resolution per manual) and optional pulse mode (0.1mm per pulse). | RS485 / Modbus RTU (0x03 reads, 0x06 write clear). | 0x01 (factory default) | 01 03 00 03 00 01 | RS485_Optical_Rain_Sensor.md |
+| RS485 Atmospheric Pressure Sensor (manual appears to include T/H + pressure) | Atmospheric pressure (and in this manual, also humidity/temperature registers appear). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 00 00 0C | RS485_Atmospheric_Pressure_Sensor_manual_appears_to_include_T_H_pressure.md |
+| JXBS-3001 PM2.5/PM10 Sensor (Shutter Box, RS485) | PM2.5 and PM10 concentrations. | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 04 00 01 | JXBS_3001_PM2_5_PM10_Sensor_Shutter_Box_RS485.md |
+| RS485 TVOC Sensor (multi-parameter air quality board) | Humidity, temperature, PM2.5, PM10, CO2, TVOC (and possibly more depending on variant). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 06 00 01 | RS485_TVOC_Sensor_multi_parameter_air_quality_board.md |
+| JXBS-3001-O3 Ozone Sensor (RS485) | Ozone concentration (plus humidity and temperature registers in the same device family). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 06 00 01 | JXBS_3001_O3_Ozone_Sensor_RS485.md |
+| JXBS-3001-NH3 Ammonia Sensor (RS485) | Ammonia concentration (NH3) + humidity + temperature. | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 06 00 01 | JXBS_3001_NH3_Ammonia_Sensor_RS485.md |
+| JXBS-3001-CO Carbon Monoxide Sensor (RS485) | Carbon monoxide concentration (CO). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 06 00 01 | JXBS_3001_CO_Carbon_Monoxide_Sensor_RS485.md |
+| JXBS-3001-PH-RS Water pH Sensor (RS485 Modbus) | Water pH and temperature. | RS485 / Modbus RTU (0x03 reads). | 0x01 (example; typical factory default) | 01 03 00 02 00 01 | JXBS_3001_PH_RS_Water_pH_Sensor_RS485_Modbus.md |
+| JXBS-3001-NPK-RS Soil Multi-parameter Sensor (RS485) | Soil pH, moisture, temperature, conductivity, N/P/K. | RS485 / Modbus RTU (0x03 reads). | 0x01 (example; typical factory default) | 01 03 00 12 00 02 | JXBS_3001_NPK_RS_Soil_Multi_parameter_Sensor_RS485.md |
+| JXBS-3001-TR Soil Comprehensive Sensor (RS485) | Soil temperature, moisture, conductivity, pH, and N/P/K (7 parameters). | RS485 / Modbus RTU (0x03 reads). | 0x01 (factory default) | 01 03 00 12 00 02 | JXBS_3001_TR_Soil_Comprehensive_Sensor_RS485.md |
+| JXSZ-1001-SS Water Suspended Solids Sensor (RS485) | Suspended solids concentration (and temperature). | RS485 / Modbus RTU (0x03 reads). | 0x01 (example; typical factory default) | 01 03 00 02 00 01 | JXSZ_1001_SS_Water_Suspended_Solids_Sensor_RS485.md |
+| JXEC-T Series Conductivity Probe (Water EC/TDS/Temp) (RS485) | Water EC or TDS and water temperature. | RS485 / Modbus RTU (stated, but register map not present in extractable text). | UNCERTAIN | UNCERTAIN | JXEC_T_Series_Conductivity_Probe_Water_EC_TDS_Temp_RS485.md |
+| 485 Instrument Shelter (Temp/Humi/Luxmeter, RS485 output) | Humidity, temperature, illuminance (lux) inside instrument shelter. | RS485 / Modbus RTU (0x03 reads). | 0x01 (example; typical factory default) | 01 03 00 00 00 02 | 485_Instrument_Shelter_Temp_Humi_Luxmeter_RS485_output.md |
+| JXBS-3001-NO2 Nitrogen Dioxide Sensor (RS485 variant required, manual provided is analog) | Nitrogen dioxide concentration (NO2). | RS485 / Modbus RTU (PROJECT REQUIREMENT), but provided document describes analog outputs only. | UNCERTAIN | UNCERTAIN | JXBS_3001_NO2_Nitrogen_Dioxide_Sensor_RS485_variant_required_manual_provided_is_analog.md |
+| SO2 Gas Sensor (RS485 variant required, manual provided is analog) | Sulfur dioxide concentration (SO2). | RS485 / Modbus RTU (PROJECT REQUIREMENT), but provided document describes analog outputs only. | UNCERTAIN | UNCERTAIN | SO2_Gas_Sensor_RS485_variant_required_manual_provided_is_analog.md |
+| Soil 7-in-1 Sensor (LoRa variant) | Soil multi-parameter (7-in-1) over LoRa transport (per project bill of materials). | LoRa (not RS485/Modbus). | N/A | UNCERTAIN | Soil_7_in_1_Sensor_LoRa_variant.md |
+| LoRa Module (radio module, station accessory) | RF transceiver module used by stations. | UART/SPI (device-specific), not RS485/Modbus. | N/A | UNCERTAIN | LoRa_Module_radio_module_station_accessory.md |
+| LoRa Gateway with Ethernet Output | LoRa network gateway to Ethernet/IP backend. | Ethernet/IP, not RS485/Modbus. | N/A | UNCERTAIN | LoRa_Gateway_with_Ethernet_Output.md |
+| Basic Assembly Accessories for Shutter Box (non-sensor item) | Mechanical/electrical accessories for PM sensor shutter box. | N/A | N/A | UNCERTAIN | Basic_Assembly_Accessories_for_Shutter_Box_non_sensor_item.md |
+| Water EC Sensor (RS485) (project item; maps to conductivity probe doc) | Water electrical conductivity (EC) or TDS and temperature. | RS485 / Modbus RTU (project requirement; register map missing in extractable text). | UNCERTAIN | UNCERTAIN | Water_EC_Sensor_RS485_project_item_maps_to_conductivity_probe_doc.md |
+| PJ2-COM TTL-RS485 Converter Module (transport accessory) | TTL UART to RS485 transceiver module used as interface hardware. | Not Modbus by itself; it transports UART bytes over RS485. Config depends on host MCU UART settings. | N/A | UNCERTAIN | PJ2_COM_TTL_RS485_Converter_Module_transport_accessory.md |

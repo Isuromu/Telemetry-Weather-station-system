@@ -1,0 +1,418 @@
+1 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+JXBS-3001-RS
+Soil Sensor User Manual
+RS485 Modbus
+Version: 2.0
+Date: 2020-10-24
+Status: Released
+www.jxct-iot.com
+
+2 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+I.BRIEF INTRODUCTION
+1.1 Product Overview
+Soil EC water temperature PH nitrogen, phosphorus and potassium seven-in-one sensor is suitable for
+measuring soil temperature, moisture, total salt content (conductivity), soil PH, and nitrogen,
+phosphorus and potassium. Soil seven-in-one
+sensors creatively measure conductivity, moisture, temperature, ph 、 nitrogen,
+phosphorus and potassium parameters together, greatly facilitating the customer system to assess the
+soil situation. .
+Compared with the original high precision sensor in Germany and the actual drying weighing method
+of soil, the sensor has high precision, fast response and stable output: it is less affected by the salt
+content of soil and is suitable for all kinds of soil quality. Can be buried in the soil for a long time,
+resistance to long-term electrolysis, corrosion resistance, vacuum filling, completely waterproof.
+1.2 Scope of application
+It is widely used in scientific experiments, water-saving irrigation, greenhouse, flowers and vegetables,
+grassland pasture, soil rapid measurement, plant culture, sewage treatment, grain storage and the
+measurement of water content and temperature of various particulate matter.
+1.3 Measurement parameters and hardware parameters
+3 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+Parameters Content
+Power supply 12-24V DC
+Output signal RS485
+Temperature range -40℃-80℃
+Temperature accuracy ±0.5℃
+Temperature resolution 0.1℃
+Water measurement range 0-100%
+Moisture accuracy ±3% Within 0-53%; ±5% within 53-100%
+Water resolution 0.10%
+Electrical conductivity measurement range 0-10000us/cm
+Conductivity resolution 10us/cm
+PH measurement range 3-9pH
+PH measurement accuracy ±0.3pH
+PH resolution 0.01pH
+Measurement range of NPK 0-1999mg/kg
+Measurement accuracy of NPK ±2%F.s
+Resolution of NPK 1mg/kg(mg/l)
+Storage environment -20℃-60℃
+Working Pressure Range 0.9-1.1atm
+Response Time <1s
+Protection Level IP68
+4 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+Note: This is the details of all the measurable parameters of this series of products, please refer to the
+actual purchase of products.
+When measuring the frozen ice soil layer, the water value will be low and inaccurate, which needs to
+be compensated by the user.
+Factory default products are suitable for measuring common loess, black soil, red soil. It is not suitable
+for absolute moisture measurement of saline-alkali soil, sandy land or other powder-like objects with
+large salt content.
+1.4 Method and Meaning of Soil Water Calculation
+The soil moisture calculated by this sensor is soil volume moisture content (also called soil volume
+moisture content), which is commonly referred to as "soil moisture" and "soil moisture ".
+The calculation method of soil volume moisture content is the ratio of the volume of water in soil to the
+total volume of soil. 0% represents completely dry soil without any moisture ,100% represents
+completely water without any soil.
+1.5 System framework diagram
+This sensor can be connected to use alone, first use 12 V DC power supply, the equipment can be
+directly connected with the PLC, with 485 interface can be connected to the through 485 interface
+chip. Through the modbus protocol specified after the MCU and PLC programming can be used in
+conjunction with the sensor. At the same time use USB turn 485 can connect with the computer, use
+our company to provide sensor configuration tools for configuration and testing.
+
+5 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+This product can also be used by multiple sensors combined in a 485 bus. In theory, one bus can
+connect more than 16 485 sensors. If more 485 sensors are needed, more 485 devices can be
+expanded using 485 repeaters. The other end is
+connected to the PLC、with 485 interface chip through 485 interface chip, or can be
+connected to the computer by using USB to 485, the sensor configuration tools provided by our
+company to configure and test.
+
+6 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+II . Instruction of Wiring & Installation
+2.1 Interface description
+A wide voltage power supply can be supplied 12-24 V. 485 signal line wiring attention A/B two lines
+can not be connected back, the bus between multiple devices address can not conflict. The
+sequence is illustrated in the following picture:
+Function Cable Color Specs
+Power
+Brown Power supply +
+Black Power supply -
+Communication
+Yellow (grey) 485-A
+Blue 485-B
+Note: Please be careful not to connect the wrong wiring sequence, the wrong wiring will cause the
+equipment to burn down.
+Factory default to provide 1.25 meters long wire, customers can be required to extend the wire or
+sequential wiring.
+Note that there is no yellow line in the line sequence that may be provided in some factory batches,
+where the gray line is equivalent to replacing the yellow line.
+
+7 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+2.3 Surface Measurement Method
+Select the appropriate measurement location, avoid the stone, ensure that the steel needle will not
+touch the hard object, throw off the topsoil according to the required measurement depth, keep the
+original soil tightness under the ground, hold the sensor vertically into the soil, insert It is not allowed to
+sway from side to side. It is recommended to measure the average for multiple measurements within a
+small range of one measurement point.
+2.4 Buried Measurement Method
+Vertically dig pits with a diameter of >20cm, insert the sensor steel needle horizontally into the pit wall
+at a given depth, fill the pits tightly, and stabilize for a period of time, then measure and record for
+several days, months or even longer.
+2.5 Remarks
+1. The steel needle must be inserted into the soil during the measurement.
+2. Avoid strong sunlight directly on the sensor for high temperature. Use in the field to prevent lightning
+strikes.
+8 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+3. Do not violently bend the steel needle, do not pull the sensor lead wire, do not beat or violently hit
+the sensor.
+4. The sensor protection class IP68 can soak the sensor in the water.
+5. Due to the presence of radio frequency electromagnetic radiation in the air, it is not suitable to be
+energized in the air for a long time.
+III. CONFIGURATION SOFTWARE
+Our company provides the matching "SENSOR MONITORING SOFTWARE", which can conveniently
+use the computer to read the parameters of the sensor, and flexibly modify the device ID and address
+of the sensor.
+3.1 Sensor Access Computer
+After the sensor is properly connected to the computer via USB to 485 and powered, you can see the
+correct COM port in the computer ("My Computer - Properties - Device Manager - Port" to view the
+COM port).
+As shown in the figure above, your serial port number is COM10 at this time. Please remember this
+serial port. You need to fill in the serial port number in the sensor monitoring software.
+If the COM port is not found in the device manager, it means that you have not plugged in the USB to
+485 or did not install the driver correctly, please contact the technical staff for assistance.
+3.2 Use of sensor monitoring software
+The configuration interface is shown in the figure. first get the serial port
+9 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+number and select the correct serial port according to the method section 3.1. then click automatically
+to get the current baud rate and address to automatically detect all devices and baud rates on the
+current 485 bus. Note that you need to ensure that there is only one sensor on the 485 bus when
+using software to automatically acquire.
+Then click on the connected device to get sensor data information in real time. If your device is a gas
+concentration sensor, please select“ Gas Concentration Sensor” at the sensor type, “Formaldehyde
+Transmitter” for the formaldehyde sensor, “Analog Transmitter Module” for the analog transmitter,
+and “Atmospheric Pressure” for the atmospheric pressure sensor.“Sensor”, the illuminance sensor
+selects “Optical Light 20W”, the oxygen sensor selects “Oxygen Transmitter”, and the other sensors
+select the default“ No Other Sensor”.
+3.3 Change baud rate and device ID
+Click on the device baud rate and set address in the communication settings to complete the relevant
+settings in the case of disconnecting the device, please note that after the settings please restart the
+device, and then "automatically get the current baud rate and address" after you can find that the
+address and baud rate have been changed to the address and baud rate you need.
+10 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+IV COMMUNICATION PROTOCOL
+4.1 Communication Basic Parameters
+Parameters Content
+Coding 8-bit binary
+Data bit 8-bit
+Parity bit no
+Stop bit 1-bit
+Error check CRC(redundant cyclic code)
+BAUD RATE
+2400bps/4800bps/9600bps can be set, the factory default is
+9600bps
+4.2 Data frame format definition
+Adopt Modbus-RTU communication protocol, the format is as follows:
+Initial structure ≥ 4 bytes of time
+Address code = 1 byte
+Function code = 1 byte
+Data area = N bytes
+Error check = 16-bit CRC code
+End structure ≥ 4 bytes of time
+Address code: is the address of the transmitter, which is unique in the communication network
+(factory default 0x01).
+Function code: The instruction function of the command sent by the host.
+This transmitter only uses function code 0x03 (read register data).
+Data area: The data area is the specific communication data. Note that the 16-bit data high byte is in
+front!
+CRC code: Two-byte check code.
+11 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+Inquiry Frame
+Address Code Function Code Register start address Register Length CRC_L CRC_H
+1bit 1bit 2bit 2bit 1bit 1bit
+Answer Frames
+Address Code Function
+Code
+Effective
+number of
+bytes
+Data
+area
+Second Data
+Area
+Nth Data
+Area Check Code
+1bit 1bit 1bit 2bits 2bits 2bits 2bits
+4.3 Register address
+Register
+Address
+PLC or Configuration
+Address
+Content Operation
+0006H 40007(40007) PH Values (unit 0.01pH) Read-Only
+0012H 40013(40019) Soil Moisture(unit 0.1%RH) Read-Only
+0013H 40014(40020) Soil Temperature(unit 0.1℃) Read-Only
+0015H 40016(40022) Soil Conductivity(unit 1us/cm) Read-Only
+001EH 4001F(40031) Soil Nitrogen (unit mg/kg) Read-Only
+001FH 40020(40032) Soil Phosphorus (unit mg/kg) Read-Only
+0020H 40021(40033) Soil Potassium (unit mg/kg) Read-Only
+0100H 40101(40257) Equipment Address (0-255) Read & Write
+0101H 40102(40258) Baud Rate ( 2400/4800/9600) Read & Write
+12 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+4.4 Examples of communication protocols and explanations
+4.4.1 Reading soil temperature & humidity value from device address
+0x01
+Inquiry Frame
+Address
+Code
+Functional
+Code
+Register
+Start
+Address
+Register
+Length
+CRC_L CRC_H
+0X01 0X03 0X00 0X12 0X00 0X02 0x65 0xCB
+Answer Frame ((e.g. read temperature -10.1℃ and humidity RH 65.8%)
+Address
+Code
+Function
+Code
+Effective
+number of
+bytes
+Humidity
+Values
+Temperature
+Values
+CRC_L CRC_H
+0x01 0x03 0x04 0x02 0x92 0Xff 0x9B 0x5A 0x3D
+Soil temperature:
+Upload as a complement when temperature is below zero
+FF9BH( Hexadecimal)=-101=> Temperature=-10.1℃ Soil
+humidity:
+292H( Hexadecimal)=658=>Humidity=65.8%RH
+4.4.2 Reading the value of soil moisture from device address 0x01
+Inquiry frame
+Address
+code
+Functional
+code
+Register start
+address Register length CRC_L CRC_H
+0x01 0x03 0x00 0x12 0x00 0x01 0x25 0xCA
+Answer Frame (e.g. reading RH 7.4% humidity)
+Address
+Code
+Functional Code Effective Number
+of Bytes
+Humidity Values CRC_L CRC_H
+0x01 0x03 0x02 0x00 0x4A 0x39 0xB3
+Soil humidity:
+4AH( Hexadecimal)=74=>Humidity=7.4%RH
+13 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+4.4.3 Read Soil electrical conductivity value from device address 0x01
+Inquiry frame
+Address Functional Register Register CRC_L CRC_H
+code code start length
+address
+0x01 0x03 0x00 0x00 0x95 0xCE
+0x15 0x01
+Answer Frames (e.g. reading conductivity of us/cm 1500)
+Address Functional Effective
+number of
+Electrical CRC_L CRC_H
+code code conductivity
+bytes
+0x01 0x03 0x02 0x05 0xBA 0x8D
+0xDC
+Soil conductivity:
+5DCH( Hexadecimal)= 1500=> Electrical conductivity=1500us/cm
+4.4.4 Read the value of soil PH from device address 0x01
+Inquiry frame
+Address Functional Register Register CRC_L CRC_H
+code code start length
+address
+0x01 0x03 0x00 0x00 0x64 0x0B
+0x06 0x01
+Answer Frames (e.g. reading pH 3.08 pH)
+Address
+code
+Functional
+code
+Effective
+number of
+bytes PH CRC_L CRC_H
+0x01 0x03 0x02
+0x01
+0x34 0xB8 0x15
+PH calculation instructions:
+0047H( Hexadecimal)=308=>PH=3.08pH
+14 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+4.4.5 Read the value of soil NPK from device address 0x01
+Inquiry frame
+Address Functional Register Register CRC_L CRC_H
+code code start length
+address
+0x01 0x03 0x00 0x00 0x34 0x0D
+0x1E 0x03
+Answer Frames
+( For example: read that nitrogen is 32 mg/kg, phosphorus is 37 mg/kg, potassium is 48
+mg/kg)
+Address Nitrogen Phosphorus Potassium CRC CRC_
+Function
+Effective
+number of
+code content content content _L H
+code bytes
+0x01 0x03 0x06 0x00 0x00 0x00 0xB 0x15
+0x20 0x25 0x30 8
+Nitrogen, phosphorus and potassium content:
+0020 H(hexadecimal)=32=>N=32mg/kg 0025 H
+(hexadecimal)=37=>P=37mg/kg
+0030 H(hexadecimal)=48=>K=48mg/kg
+4.4.6 Read the value of soil nitrogen from device address 0x01
+Inquiry frame
+Address Code
+Function
+Code
+Register
+Start address
+Register
+Length
+CRC_L CRC_H
+0x01 0x03 0x00 0x1e 0x00 0x01 0xB5 0xCC
+Answer Frames (e.g. reading that nitrogen content is 32 mg/kg)
+Address
+Code
+Function
+Code
+Effective Number
+of bytes
+Nitrogen
+Value
+CRC_L CRC_H
+0x01 0x03 0x02 0x00 0x20 0x5A 0x3D
+Nitrogen content：0020 H (hexadecimal)=32=>Nitrogen=32mg/kg 4.4.7
+15 / 15
+RS485 Modbus
+JXBS-3001-NPK-RS Soil NPK Sensor User Manual
+4.4.7 Read the value of soil phosphorus from device address 0x01
+Inquiry frame
+Address Function
+Register
+Registerstart CRC_L CRC_H
+Code Code
+address
+length
+0x01 0x03 0x00 0x1f 0x00 0xE4 0x0C
+0x01
+Answer Frames (e.g. reading that phosphorus content is 37 mg/kg)
+Address Function
+Effective
+Phosphorus
+number of CRC_L CRC_H
+Code Code content
+bytes
+0x01 0x03 0x02 0x00 0x5A 0x3D
+0x25
+Phosphorus content：
+0025 H(hexadecimal)=37=>Phosphorus=37mg/kg
+4.4.8 Reading the value of soil potassium from device address 0x01
+Inquiry frame
+Address Function
+Register
+Register
+start CRC_L CRC_H
+Code Code length
+address
+0x01 0x03 0x00 0x00 0x85 0xC0
+0x20 0x01
+Answer Frames (e.g. reading that potassium content is 48 mg/kg)
+Address Function
+Effective
+Potassium
+number of CRC_L CRC_H
+Code Code content
+bytes
+0x01 0x03 0x02 0x00 0x5A 0x3D
+0x30
+Potassium :
+0030 H（16hexadecimal）=48=>Potassium=48mg/kg

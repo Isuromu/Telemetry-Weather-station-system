@@ -1,0 +1,680 @@
+Type 485 soil
+comprehensive
+sensor
+user's Guide
+JXBS-3001-TR
+Ver1.1
+1
+Chapter 1 Product Introduction
+1.1 Product overview
+The soil integrated sensor is suitable for measuring soil
+temperature, moisture, total soil salt (conductivity), soil pH and
+nitrogen, phosphorus and potassium. The soil comprehensive
+sensor creatively measures the seven parameters of conductivity,
+moisture, temperature, ph, and nitrogen, phosphorus and
+potassium, which greatly facilitates the customer's systematic
+assessment of soil conditions. .
+Compared with the German original high-precision sensor
+and the actual soil drying weighing method calibration, the
+sensor has high accuracy, fast response and stable output: it is
+less affected by the salt content of the soil and is suitable for
+various soil qualities. Can be buried in the soil for a long time,
+resistant to long-term electrolysis, corrosion resistance, vacuum
+potting, and completely waterproof.
+1.2 Scope of application
+It is widely used in scientific experiments, water-saving
+irrigation, greenhouses, flowers and vegetables, grassland pastures,
+rapid soil testing, plant cultivation, sewage treatment, grain storage,
+and the measurement of various particulate water content and
+temperature.
+一站式物联网供应平 set
+2
+1.3 Measurement parameters and hardware
+parameters
+parameter content
+Power supply 12-24V DC
+output signal RS485
+Temperature
+measurement range
+-40℃-80℃
+Temperature
+accuracy
+±0.5℃
+Temperature
+resolution 0.1℃
+Moisture
+measurement range
+0-100%
+Moisture accuracy ±3% in the range of 0-53%; ±5% in
+the range of 53-100%
+Moisture
+resolution 0.10%
+Conductivity
+measurement
+range
+0-10000us/cm
+Conductivity
+resolution
+10us/cm
+pH measurement
+range
+3-9pH
+pH measurement
+accuracy
+±0.3pH
+pH resolution 0.01pH
+NPK measurement 0-1999mg/kg
+3
+range
+NPK measurement
+accuracy
+±2%F.s
+NPK resolution 1mg/kg（mg/l）
+Storage
+environment
+-20℃-60℃
+Working pressure
+range
+0.9-1.1atm
+Response time <1s
+Protection level IP68
+Installation method Embed all or insert all probes into
+the measured medium
+Note: The details of all measurable parameters of this
+series of products, please refer to the actual product purchased.
+When measuring frozen icy soil layers, the moisture value
+will be low and inaccurate, requiring user compensation.
+The factory default product is suitable for measuring
+ordinary yellow soil, black soil and red soil. It is not suitable for
+absolute moisture measurement on saline-alkali soils, sandy
+soils, or other powdery objects with high salinity. It can still
+characterize the relative moisture difference. For this type of
+moisture measurement, you should contact the manufacturer for
+separate calibration.
+1.4 Calculation method and meaning of soil
+moisture
+The soil moisture calculated by this sensor is soil
+一站式物联网供应平 set
+4
+volumetric moisture content (also called soil volumetric
+moisture content), which is what people call "soil moisture" and
+"soil moisture" in a popular sense.
+The calculation method of soil volumetric water content is
+the ratio of the volume of water in the soil to the total volume of
+the soil. 0% means completely dry soil without any moisture,
+and 100% means completely water without any soil.
+1.5 System framework diagram
+This sensor can be connected and used alone. First, use
+12V DC power supply. The device can be directly connected to
+a PLC with a 485 interface, and it can be connected to a single-
+chip microcomputer through a 485 interface chip. The single-
+chip microcomputer and PLC can be programmed through the
+specified modbus protocol to cooperate with the sensor. At the
+same time, use USB to 485 to connect to the computer, and use
+the sensor configuration tool provided by our company for
+configuration and testing.
+5
+This product can also be used in combination of multiple
+sensors on a 485 bus. In theory, one bus can connect more than
+16 485 sensors. If you need to connect more 485 sensors, you
+can use 485 repeaters to expand more 485 devices. One end is
+connected to the PLC with 485 interface, and the single-chip
+microcomputer is connected through the 485 interface chip, or it
+can be connected to the computer by using USB to 485. Use the
+sensor configuration tool provided by our company for
+configuration and testing.
+一站式物联网供应平 set
+6
+Chapter 2 How to Use
+2.1Inspection before equipment installation
+Please check the equipment list before installing the
+equipment:
+7
+name Quantity
+High precision
+sensor
+1set
+12V waterproof
+power supply
+1set
+（Optional）
+USB to 485
+device
+1set
+（Optional）
+Warranty
+card/certificate
+1 serving
+2.2Interface description
+The power interface is a wide-voltage power supply that
+can output 12-24V. When wiring the 485 signal line, pay
+attention to the A/B two lines can not be reversed, and the
+address of multiple set devices on the bus can not conflict. The
+line sequence description is shown in the following figure
+(table):
+Thread
+color
+Description
+pow brown Power is positive（12-
+一站式物联网供应平 set
+8
+er
+supp
+ly
+24VDC）
+black Power negative
+Com
+mun
+icati
+on
+Yellow
+(gray)
+color
+485-A
+blue 485-B
+Note: Please be careful not to connect the wrong wiring
+sequence, the wrong wiring will cause the equipment to burn.
+The factory default provides 1.25 meters of wire,
+customers can extend the wire as needed or wire in order.
+Note that there is no yellow line in the line sequence that
+may be provided in some factory batches. At this time, the gray
+line is equivalent to replace the yellow line.
+2.3Product appearance
+The picture below is the appearance of our product:
+9
+2.4Quick test method
+Select a suitable measurement location, avoid rocks, ensure
+that the steel needle does not touch hard objects, throw away the
+surface soil according to the required measurement depth, maintain
+the original tightness of the soil below, hold the sensor vertically
+and insert it into the soil. Do not shake left and right. It is
+recommended to measure multiple times for average value within a
+small range of a measuring point.
+2.5Buried measurement method
+Dig a pit with a diameter> 20cm vertically, insert the sensor
+needle horizontally into the pit wall at a predetermined depth, and
+fill the pit tightly. After a period of stability, measurement and
+recording can be carried out for several days, months or even
+longer.
+一站式物联网供应平 set
+10
+2.6Notes
+1. All steel needles must be inserted into the soil during
+measurement.
+2. Avoid strong sunlight directly shining on the sensor to
+cause excessive temperature. Pay attention to lightning protection
+in the field.
+3. Do not bend the steel needle violently, pull the lead wire of
+the sensor forcefully, and do not hit or hit the sensor violently.
+4. The sensor protection grade is IP68, and the sensor can be
+soaked in water.
+5. Due to the presence of radio frequency electromagnetic
+radiation in the air, it is not suitable to stay in the air for a long
+time with electricity.
+Chapter 3 Configuration Software
+Installation and Use
+Our company provides supporting "sensor monitoring
+software", which can easily use the computer to read the
+parameter of the sensor and modify the device ID and address
+of the sensor flexibly.
+3.1Connect the sensor to the computer
+After connecting the sensor to the computer through USB
+to 485 and providing power supply, you can see the correct
+COM port in the computer (check the COM port in "My
+Computer-Properties-Device Manager-Port").
+11
+As shown in the figure above, your serial port number is
+COM10 at this time, please remember this serial port, you need
+to fill in this serial port number in the sensor monitoring
+software.
+If the COM port is not found in the device manager, it
+means that you have not inserted the USB to 485 or the driver
+has not been installed correctly, please contact a technician for
+help.
+3.2 Use of sensor monitoring software
+The configuration interface is as shown in the figure. First,
+obtain the serial port number and select the correct serial port
+according to the method in chapter 3.1, and then click to
+automatically obtain the current baud rate and address to
+automatically detect all devices and baud rates on the current
+485 bus . Please note that you need to ensure that there is only
+one sensor on the 485 bus when using the software to
+automatically obtain it.
+一站式物联网供应平 set
+12
+Then click to connect the device to get the sensor data
+information in real time.
+If your device is a gas concentration sensor, please select
+"gas concentration sensor" in the sensor type, "formaldehyde
+transmitter" for formaldehyde sensor, "analog transmitter
+module" for analog transmitter, and "atmospheric pressure" for
+atmospheric pressure sensor Sensor", illuminance sensor selects
+"Illuminance 20W", oxygen sensor selects "Oxygen transmitter",
+and other sensors select the default "No other sensor".
+3.3Modify the baud rate and device ID
+When the device is disconnected, click the device baud rate
+and set address in the communication settings to complete the
+related settings. Please note that after setting, please restart the
+device, and then "automatically obtain the current baud rate and
+address" to find the address And the baud rate has been changed
+13
+to the address and baud rate you need.
+CHAPTER 2 Basic Communication
+2.1 Basic communication parameter
+parameter content
+coding 8-bit binary
+data bit 8-bit
+parity check bit no
+stop bid 1-bit
+error checking CRC(redundant cyclic code)
+baud rate 2400bps/4800bps/9600bps
+Can be set, the factory default is 9600bps
+2.2 Data frame format definition
+Using Modbus-RTU communication protocol, the format is
+as follows:
+Initial structure ≥ 4-byte time
+Address code = 1 byte
+Function code = 1 byte
+Data area = N bytes
+Error check = 16-bit CRC code
+End structure ≥ 4-byte time
+Address code: the address of the sensor, which is unique in
+the communication network (factory default 0x01).
+Function code: the command function instruction issued by
+the host, this transmitter only uses function code 0x03 (read
+register data).
+Data area: The data area is the specific communication data,
+一站式物联网供应平 set
+14
+pay attention to the high byte of 16bits data in front.
+CRC code: two-byte check code.
+Interrogation frame
+Address
+code
+Function
+code
+Register
+start address
+Register
+length
+Check code
+low bit
+Check code
+high bit
+1byte 1bytes 2 bytes 2 bytes 1 byte 1 byte
+Reply frame
+Addres
+s code
+Function
+code
+Quantity of
+valid byte
+Data 1
+area
+Data 2
+area
+Data N
+area
+Check
+code
+1 byte 1 byte 1 byte 2 bytes 2 bytes 2 bytes 2 bytes
+2.3 Register address
+regisiter
+address
+PLC or
+configuration
+address
+content operating
+0006H 40007（40007） pH value (unit
+0.01pH) read only
+0012H 40013（40019） soil humidity
+(unit: 0.1%RH) read only
+0013H 40014（40020） soil temperature
+(unit: 0.1℃) read only
+0015H 40016（40022） soil conductivity
+(unit: 1us/cm) read only
+001EH 4001F（40031） soil nitrogen (unit
+mg/kg) read only
+001FH 40020（40032） soil phosphorus
+(unit mg/kg) read only
+0020H 40021（40033） soil potassium
+(unit mg/kg) read only
+0100H 40101（40257） device address (0-
+255) read only
+15
+0101H 40102（40258） baud rate
+(2400/4800/9600) read and write
+2.4 Communication protocol example and
+explanation
+2.4.1 Read the soil temperature and humidity value of
+the device address 0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x12
+0x00
+0x02 0x64 0x0E
+Response frame (for example, the temperature is -10.1℃ and
+the humidity is 65.8%RH)
+Address
+code
+Function
+code
+Effective
+words
+Humidity
+value
+Tempe
+rature
+value
+Check
+code
+low
+bit
+Check
+code
+high bit
+0x01 0x03 0x04 0x02
+0x92
+0xFF
+0x9B
+0x5A 0x3D
+Soil temperature:
+Upload in the form of complement when the temperature is
+below zero
+FF9BH(hexadecimal)=-101=>temperature=-10.1℃
+一站式物联网供应平 set
+16
+Soil moisture:
+292H (hexadecimal) = 658 => humidity = 65.8%RH
+2.4.2 Read the soil moisture value of the device
+address 0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x12
+0x00
+0x01 0X24 0x0F
+Response frame (for example, the humidity is 7.4%RH)
+Address
+code
+Function
+code
+Quantity
+of byte
+Humidity
+value
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x02 0x00
+0x4A 0x39 0xB3
+Soil moisture:
+4AH (hexadecimal)=74=>humidity=7.4%RH
+2.4.3 Read the soil conductivity of the device address
+0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x15
+0x00
+0x01 0X95 0xCE
+Response frame (for example, read conductivity of 1500us/cm)
+Address
+code
+Function
+code
+Quantity
+of byte Conductivity Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x02 0x05 0xBA 0x8D
+17
+0xDC
+Soil conductivity:
+5DCH (hexadecimal) = 1500 => conductivity = 1500us/cm
+2.4.4 Read the soil pH of the device address 0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address Data length Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x06
+0x00
+0x01 0X64 0x0B
+Response frame (for example, read the pH is 3.08pH)
+Address
+code
+Function
+code
+Quantity
+of byte Conductivity Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x02 0x01
+0x34 0xB8 0x03
+Instructions for pH calculation:
+0047H (hexadecimal)=308=>pH=3.08pH
+2.4.5 Read the value of soil nitrogen, phosphorus and
+potassium at device address 0x01
+Interrogation frame
+Address
+code
+Functio
+n code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x1E
+0x00
+0x03 0x65 0xCD
+Response frame
+Addr
+ess
+code
+Func
+tion
+code
+Effe
+ctive
+word
+s
+Nitroge
+n
+content
+Phosph
+orus
+content
+Potassi
+um
+content
+Check
+code
+low bit
+Check
+code
+high bit
+一站式物联网供应平 set
+18
+0x01 0x03 0x06 0x00
+0x20
+0x00
+0x25
+0x00
+0x30 0xB1 0x6D
+Nitrogen,Phosphorus,Potassium content:
+0020 H (hexadecimal)=32=>nitrogen=32mg/kg
+0025 H (hexadecimal)=37=>phosphorus=37mg/kg
+0030 H (hexadecimal)=48=>potassium=48mg/kg
+2.4.6 Read the value of soil nitrogen at device address
+0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00
+0x1e 0x00 0x01 0xE4 0x0C
+Response frame
+Address
+code
+Func
+tion
+code
+Effective
+words
+Nitrogen
+content
+Check
+code low
+bit
+Check
+code high
+bit
+0x01 0x03 0x02 0x00
+0x20 0xB9 0x9C
+Nitrogen content:
+0020 H (hexadecimal)=32=>nitrogen=32mg/kg
+2.4.7 Read the value of soil phosphorus at device
+address 0x01
+Interrogation frame
+Address
+code
+Function
+code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00 0x1f 0x00 0x01 0xB5 0xCC
+Response frame
+19
+Addre
+ss
+code
+Function
+code
+Effecti
+ve
+words
+Phosph
+orus
+content
+Check
+code low
+bit
+Check
+code high
+bit
+0x01 0x03 0x02 0x00
+0x25
+0x79 0x9F
+Phosphorus content: 0025 H (hexadecimal) = 37 => phosphorus
+= 37mg/kg
+2.4.8 Read the value of soil potassium at device
+address 0x01
+Interrogation frame
+Address
+code
+Functio
+n code
+Initial
+address
+Data
+length
+Check code
+low bit
+Check code
+high bit
+0x01 0x03 0x00 0x20 0x00 0x01 0x85 0xC0
+Response frame
+Addre
+ss
+code
+Functi
+on
+code
+Effective
+words
+Potassi
+um
+content
+Check
+code low
+bit
+Check
+code high
+bit
+0x01 0x03 0x02 0x00
+0x30 0xB8 0x50
+Potassium content: 0030 H (hexadecimal) = 48 => phosphorus
+= 48mg/kg
+CHAPTER 3 APPENDIX
+3.1 Warranty and After-Sales
+The warranty clauses follow the sensor after-sales clauses
+of Weihai Jingxun Changtong Electronic Technology Co., Ltd.,
+一站式物联网供应平 set
+20
+two years for the sensor host circuit part, one year for gas-
+sensitive probes, and three months for accessories
+(housing/plugs/cables, etc.).
