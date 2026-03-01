@@ -66,6 +66,13 @@ bool RS485Bus::transferRaw(const uint8_t *tx, size_t txLen,
     logIOTransfer(tx, txLen);
   }
 
+  if (_log && _log->isEnabled() &&
+      _log->verbosity() >= PrintController::TRACE) {
+    _log->log(PrintController::TRACE, F("[RS485] Mode -> TX | Pre-TX Delay: "));
+    _log->print(_preTxDelayUs);
+    _log->println(F("us"));
+  }
+
   _dir.setTX(true);
   if (_preTxDelayUs)
     delayMicroseconds(_preTxDelayUs);
@@ -75,8 +82,21 @@ bool RS485Bus::transferRaw(const uint8_t *tx, size_t txLen,
   }
   _serial->flush();
 
+  if (_log && _log->isEnabled() &&
+      _log->verbosity() >= PrintController::TRACE) {
+    _log->log(PrintController::TRACE,
+              F("[RS485] TX flushed | Post-TX Delay: "));
+    _log->print(_postTxDelayUs);
+    _log->println(F("us"));
+  }
+
   if (_postTxDelayUs)
     delayMicroseconds(_postTxDelayUs);
+
+  if (_log && _log->isEnabled() &&
+      _log->verbosity() >= PrintController::TRACE) {
+    _log->logln(PrintController::TRACE, F("[RS485] Mode -> RX"));
+  }
   _dir.setTX(false);
 
   // --- RX capture ---
@@ -87,6 +107,13 @@ bool RS485Bus::transferRaw(const uint8_t *tx, size_t txLen,
   while ((millis() - tStart) < overallTimeoutMs && _rxLen < RX_BUFFER_SIZE) {
     int avail = _serial->available();
     if (avail > 0) {
+      if (!started && _log && _log->isEnabled() &&
+          _log->verbosity() >= PrintController::TRACE) {
+        _log->log(PrintController::TRACE,
+                  F("[RS485] RX Capture started after "));
+        _log->print(millis() - tStart);
+        _log->println(F("ms"));
+      }
       started = true;
       while (avail-- > 0 && _rxLen < RX_BUFFER_SIZE) {
         int c = _serial->read();
@@ -98,10 +125,25 @@ bool RS485Bus::transferRaw(const uint8_t *tx, size_t txLen,
     } else {
       // Stop early if frame already started and bus went silent
       if (started && (millis() - tLastByte) >= interByteTimeoutMs) {
+        if (_log && _log->isEnabled() &&
+            _log->verbosity() >= PrintController::TRACE) {
+          _log->log(
+              PrintController::TRACE,
+              F("[RS485] RX Capture boundary reached (inter-byte silence: "));
+          _log->print(millis() - tLastByte);
+          _log->println(F("ms)"));
+        }
         break;
       }
       delay(1);
     }
+  }
+
+  if (!started && _log && _log->isEnabled() &&
+      _log->verbosity() >= PrintController::TRACE) {
+    _log->log(PrintController::TRACE, F("[RS485] RX Timeout ("));
+    _log->print(overallTimeoutMs);
+    _log->println(F("ms reached)"));
   }
 
   bool gotAny = (_rxLen > 0);
@@ -271,6 +313,38 @@ void RS485Bus::logIOTransfer(const uint8_t *tx, size_t txLen) const {
 void RS485Bus::logTraceRaw() const {
   if (!_log)
     return;
-  _log->log(PrintController::TRACE, F("[RS485] RAW RX dump:"));
-  _log->dumpHexLines(_rxBuf, _rxLen, 16);
+  _log->log(PrintController::TRACE, F("[RS485] RAW RX used/capacity: "));
+  _log->print((unsigned long)_rxLen);
+  _log->print(F("/"));
+  _log->println((unsigned long)RX_BUFFER_SIZE);
+
+  // In TRACE mode print the whole capture array so unused slots are visible
+  // as 00 and index positions can be inspected directly.
+  _log->logln(PrintController::TRACE, F("[RS485] RAW RX full buffer (index: 16-byte row)"));
+  for (size_t i = 0; i < RX_BUFFER_SIZE; i += 16) {
+    _log->print(F("["));
+    if (i < 1000) {
+      _log->print(F("0"));
+    }
+    if (i < 100) {
+      _log->print(F("0"));
+    }
+    if (i < 10) {
+      _log->print(F("0"));
+    }
+    _log->print((unsigned long)i);
+    _log->print(F("] "));
+
+    size_t rowEnd = i + 16;
+    if (rowEnd > RX_BUFFER_SIZE) {
+      rowEnd = RX_BUFFER_SIZE;
+    }
+    for (size_t j = i; j < rowEnd; ++j) {
+      _log->printHexByte(_rxBuf[j]);
+      if (j + 1 < rowEnd) {
+        _log->print(F(" "));
+      }
+    }
+    _log->println();
+  }
 }

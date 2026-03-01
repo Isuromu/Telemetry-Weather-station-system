@@ -1,10 +1,9 @@
 #include "PrintController.h"
 #include "RS485Modbus.h"
-#include "SoilSensor7in1.h"
+#include "WaterPHSensor.h"
 #include "config.h"
 #include <Arduino.h>
 
-// All settings are in config.h — do NOT hard-code values here.
 
 #if defined(ARDUINO_ARCH_ESP32)
 HardwareSerial RS485Serial(1);
@@ -15,34 +14,29 @@ static PrintController
             static_cast<PrintController::Verbosity>(PRINT_VERBOSITY));
 static RS485Bus bus;
 static uint8_t targetAddress = SENSOR_DEFAULT_ADDRESS;
-static SoilSensor7in1 sensor(bus, targetAddress);
+static WaterPHSensor sensor(bus, targetAddress);
 
 void scanAddresses() {
   printer.logln(PrintController::TRACE,
                 F("\n--- Modbus Address Scan (1-247) ---"));
   uint8_t found = 0;
-  for (uint16_t addr = 1; addr <= 247; addr++) {
-    printer.log(PrintController::TRACE, F("[Scanner] Trying address 0x"));
-    if (addr < 16)
-      printer.print(F("0"));
-    printer.print(addr, HEX);
-    printer.print(F("... "));
-
+  for (uint8_t addr = 1; addr <= 247; addr++) {
     uint8_t req[8];
-    req[0] = static_cast<uint8_t>(addr);
+    req[0] = addr;
     req[1] = 0x03;
     req[2] = 0x00;
-    req[3] = 0x00;
+    req[3] = 0x02;
     req[4] = 0x00;
     req[5] = 0x01;
     uint16_t crc = RS485Bus::crc16Modbus(req, 6);
     req[6] = crc & 0xFF;
     req[7] = crc >> 8;
     if (bus.transferRaw(req, 8, SCAN_TIMEOUT_MS)) {
-      printer.println(F("FOUND!"));
+      printer.log(PrintController::TRACE, F("  Found at 0x"));
+      if (addr < 16)
+        printer.print(F("0"));
+      printer.println(addr, HEX);
       found++;
-    } else {
-      printer.println(F("no response"));
     }
   }
   if (found == 0)
@@ -54,25 +48,19 @@ void scanAddresses() {
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(500);
-
-  // ===== START: Firmware identification banner (shown on every reset) =====
   printer.println(F(""));
-  printer.println(F("==========================================="));
-  printer.println(F("  FIRMWARE: Soil Sensor 7-in-1 Example"));
+  printer.println(F("=================================="));
+  printer.println(F("  FIRMWARE: Water pH Sensor Example"));
   printer.println(F("  Program starts here (reset point)."));
-  printer.println(F("==========================================="));
-  // ===== END: Banner =====
-
+  printer.println(F("=================================="));
   pinMode(SCAN_BUTTON_PIN, INPUT_PULLUP);
   bus.setLogger(&printer);
-
 #if defined(ARDUINO_ARCH_ESP32)
   bus.begin(RS485Serial, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN);
 #else
   bus.begin(Serial2, RS485_BAUD);
 #endif
   bus.setDirectionControl(RS485_DE_PIN, true);
-
   printer.logln(PrintController::TRACE,
                 F("Hold SCAN button (GPIO14) within 3 s for address scan..."));
   uint32_t deadline = millis() + static_cast<uint32_t>(SCAN_WINDOW_MS);
@@ -100,35 +88,16 @@ void loop() {
   if (millis() - lastPoll >= static_cast<uint32_t>(POLL_INTERVAL_MS) ||
       lastPoll == 0) {
     lastPoll = millis();
-
-    SoilSensor7in1_Data data{};
-    printer.logln(PrintController::TRACE, F("Polling Soil Sensor 7-in-1..."));
-
+    WaterPHSensor_Data data{};
+    printer.logln(PrintController::TRACE, F("Polling Water pH Sensor..."));
     if (sensor.readAll(data)) {
-      printer.logln(PrintController::TRACE,
-                    F("\n===== SOIL SENSOR 7-IN-1 DATA ====="));
-      printer.log(PrintController::TRACE, F("Temperature  : "));
-      printer.print(data.temperatureC, 1);
+      printer.logln(PrintController::TRACE, F("\n===== WATER pH SENSOR ====="));
+      printer.log(PrintController::TRACE, F("pH          : "));
+      printer.print(data.ph, 2);
+      printer.log(PrintController::TRACE, F("Temperature : "));
+      printer.print(data.temperature_c, 1);
       printer.println(F(" C"));
-      printer.log(PrintController::TRACE, F("Humidity     : "));
-      printer.print(data.humidityPct, 1);
-      printer.println(F(" %"));
-      printer.log(PrintController::TRACE, F("Conductivity : "));
-      printer.print(data.conductivity_uScm);
-      printer.println(F(" uS/cm"));
-      printer.log(PrintController::TRACE, F("pH           : "));
-      printer.println(data.pH, 2);
-      printer.log(PrintController::TRACE, F("Nitrogen     : "));
-      printer.print(data.nitrogen_mgkg);
-      printer.println(F(" mg/kg"));
-      printer.log(PrintController::TRACE, F("Phosphorus   : "));
-      printer.print(data.phosphorus_mgkg);
-      printer.println(F(" mg/kg"));
-      printer.log(PrintController::TRACE, F("Potassium    : "));
-      printer.print(data.potassium_mgkg);
-      printer.println(F(" mg/kg"));
-      printer.logln(PrintController::TRACE,
-                    F("===================================\n"));
+      printer.logln(PrintController::TRACE, F("===========================\n"));
     } else {
       printer.logln(PrintController::TRACE, F("ERROR: Read failed."));
     }
