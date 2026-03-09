@@ -12,14 +12,14 @@
 // Baud rate for the USB debug monitor (Serial)
 #define SERIAL_BAUD 115200
 
-// PrintController verbosity level:
+// Debug level:
 //   0 = SUMMARY  — high-level status messages only
 //   1 = IO       — TX / RX hex frames included
 //   2 = TRACE    — full internal details + raw buffers
-#define PRINT_VERBOSITY 2
+#define DEBUG_LEVEL 2
 
 // Set to 0 to disable all PrintController output (silent mode)
-#define PRINT_ENABLED 1
+#define DEBUG_ENABLED 1
 
 // -------------------------------------------------------------
 //  RS-485 / Modbus

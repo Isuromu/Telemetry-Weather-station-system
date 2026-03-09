@@ -6,14 +6,14 @@
 
 // Serial / Debug
 #define SERIAL_BAUD 115200
-#define PRINT_VERBOSITY 2 // 0=SUMMARY  1=IO  2=TRACE
-#define PRINT_ENABLED 1   // 0=silent
+#define DEBUG_LEVEL 2 // 0=SUMMARY  1=IO  2=TRACE
+#define DEBUG_ENABLED 1   // 0=silent
 
 // RS-485 / Modbus
 #define RS485_BAUD 9600
 #define SENSOR_DEFAULT_ADDRESS 0x01
-#define POLL_INTERVAL_MS 3000
-#define SCAN_TIMEOUT_MS 100
+#define POLL_INTERVAL_MS 5000
+#define SCAN_TIMEOUT_MS 1000
 
 // Scan-mode button (GPIO14 → GND, internal pull-up)
 #define SCAN_BUTTON_PIN 14

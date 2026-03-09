@@ -1,8 +1,8 @@
 {
   "name": "PrintController",
   "version": "1.0.0",
-  "description": "Lightweight serial logger with 3 verbosity modes and hex dump helpers",
-  "keywords": ["logger", "serial", "debug", "hex"],
+  "description": "Simple print wrapper (no verbosity)",
+  "keywords": ["logger", "serial", "debug"],
   "authors": [
     { "name": "Project Internal" }
   ],

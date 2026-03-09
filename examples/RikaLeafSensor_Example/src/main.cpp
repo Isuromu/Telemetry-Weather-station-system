@@ -10,11 +10,8 @@
 HardwareSerial RS485Serial(1);
 #endif
 
-static PrintController
-    printer(Serial, static_cast<bool>(PRINT_ENABLED),
-            static_cast<PrintController::Verbosity>(PRINT_VERBOSITY));
-static constexpr PrintController::Verbosity LOG_LEVEL =
-    static_cast<PrintController::Verbosity>(PRINT_VERBOSITY);
+static PrintController printer(Serial, static_cast<bool>(DEBUG_ENABLED));
+
 
 static RS485Bus bus;
 static uint8_t targetAddress = SENSOR_DEFAULT_ADDRESS;
@@ -35,10 +32,15 @@ void scanAddresses() {
     scanEnd = t;
   }
 
-  printer.logln(LOG_LEVEL,
-                F("\n=================================================="));
-  printer.logln(LOG_LEVEL, F("  MODBUS ADDRESS SCANNER (Configured Range)"));
-  printer.log(LOG_LEVEL, F("  Range: 0x"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n=================================================="));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("  MODBUS ADDRESS SCANNER (Configured Range)"));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("  Range: 0x"));
+  }
   if (scanStart < 16)
     printer.print(F("0"));
   printer.print(scanStart, HEX);
@@ -46,8 +48,9 @@ void scanAddresses() {
   if (scanEnd < 16)
     printer.print(F("0"));
   printer.println(scanEnd, HEX);
-  printer.logln(LOG_LEVEL,
-                F("==================================================\n"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("==================================================\n"));
+  }
 
   uint16_t attempted = 0;
   uint16_t found = 0;
@@ -66,7 +69,9 @@ void scanAddresses() {
     req[7] = static_cast<uint8_t>(crc >> 8);
 
     // 2. Clear progress line and show what we are doing
-    printer.log(LOG_LEVEL, F("[Scanner] Trying 0x"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("[Scanner] Trying 0x"));
+  }
     if (addr < 16)
       printer.print(F("0"));
     printer.print(addr, HEX);
@@ -97,16 +102,22 @@ void scanAddresses() {
     yield();
   }
 
-  printer.logln(LOG_LEVEL,
-                F("\n--------------------------------------------------"));
-  printer.log(LOG_LEVEL, F("Attempted "));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n--------------------------------------------------"));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Attempted "));
+  }
   printer.print(attempted);
   printer.println(F(" addresses."));
-  printer.log(LOG_LEVEL, F("Scan Complete. Found "));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Scan Complete. Found "));
+  }
   printer.print(found);
   printer.println(F(" devices."));
-  printer.logln(LOG_LEVEL,
-                F("--------------------------------------------------\n"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--------------------------------------------------\n"));
+  }
   bus.flushInput();
 }
 
@@ -121,7 +132,7 @@ void setup() {
   printer.println(F("==========================================="));
 
   pinMode(SCAN_BUTTON_PIN, INPUT_PULLUP);
-  bus.setLogger(&printer);
+  bus.setDebug(&printer, static_cast<bool>(DEBUG_ENABLED), static_cast<uint8_t>(DEBUG_LEVEL));
 
 #if defined(ARDUINO_ARCH_ESP32)
   bus.begin(RS485Serial, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN);
@@ -131,9 +142,9 @@ void setup() {
 
   bus.setDirectionControl(RS485_DE_PIN, true);
 
-  printer.logln(
-      LOG_LEVEL,
-      F("Press SCAN button to enter scanning mode (wait 5 seconds)..."));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Press SCAN button to enter scanning mode (wait 5 seconds)..."));
+  }
 
   bool enteredScan = false;
   uint32_t deadline = millis() + static_cast<uint32_t>(SCAN_WINDOW_MS);
@@ -149,17 +160,23 @@ void setup() {
   }
 
   if (enteredScan) {
-    printer.logln(LOG_LEVEL, F("Scanning mode entered."));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Scanning mode entered."));
+  }
     scanAddresses();
-    printer.logln(LOG_LEVEL, F("Scan done. Continuing normal polling.\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Scan done. Continuing normal polling.\n"));
+  }
   } else {
-    printer.logln(
-        LOG_LEVEL,
-        F("Button not pressed within 5 seconds. Normal operation.\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Button not pressed within 5 seconds. Normal operation.\n"));
+  }
   }
 
   rikaLeaf.setAddress(targetAddress);
-  printer.log(LOG_LEVEL, F("Normal mode poll address: 0x"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Normal mode poll address: 0x"));
+  }
   if (targetAddress < 16) {
     printer.print(F("0"));
   }
@@ -176,19 +193,29 @@ void loop() {
     rikaLeaf.setAddress(targetAddress);
 
     RikaLeafSensor_Data data{};
-    printer.logln(LOG_LEVEL, F("Polling Rika Leaf Sensor..."));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Polling Rika Leaf Sensor..."));
+  }
 
     if (rikaLeaf.readAll(data)) {
-      printer.logln(LOG_LEVEL, F("\n===== RIKA LEAF SENSOR DATA ====="));
-      printer.log(LOG_LEVEL, F("Temperature (C): "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n===== RIKA LEAF SENSOR DATA ====="));
+  }
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Temperature (C): "));
+  }
       printer.println(data.rika_leaf_temp, 1);
-      printer.log(LOG_LEVEL, F("Humidity  (%RH): "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Humidity  (%RH): "));
+  }
       printer.println(data.rika_leaf_humid, 1);
-      printer.logln(LOG_LEVEL, F("=================================\n"));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("=================================\n"));
+  }
     } else {
-      printer.logln(
-          LOG_LEVEL,
-          F("ERROR: Read failed (CRC Error, Timeout, or Bounds Exceeded)."));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("ERROR: Read failed (CRC Error, Timeout, or Bounds Exceeded)."));
+  }
     }
   }
 }

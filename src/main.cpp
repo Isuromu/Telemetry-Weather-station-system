@@ -1,3 +1,4 @@
+#include "config.h"
 #include "LeafSensor.h"
 #include "PrintController.h"
 #include "RS485Modbus.h"
@@ -8,8 +9,8 @@
 // -------------------- Configuration --------------------
 #define SERIAL_BAUD 115200
 #define RS485_BAUD 9600
-#define PRINT_VERBOSITY 2 // 0=SUMMARY  1=IO  2=TRACE
-#define PRINT_ENABLED 1   // 0=silent
+#define DEBUG_LEVEL 2 // 0=SUMMARY  1=IO  2=TRACE
+#define DEBUG_ENABLED 1   // 0=silent
 
 // Pins for ESP32-S3
 #define RS485_RX_PIN 16
@@ -22,9 +23,7 @@
 #define SCAN_TIMEOUT_MS 100
 // -------------------------------------------------------
 
-static PrintController
-    printer(Serial, static_cast<bool>(PRINT_ENABLED),
-            static_cast<PrintController::Verbosity>(PRINT_VERBOSITY));
+static PrintController printer(Serial, static_cast<bool>(DEBUG_ENABLED));
 static RS485Bus bus;
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -37,14 +36,18 @@ static LeafSensor leaf(bus, 0x02);
 static RikaLeafSensor rikaLeaf(bus, 0x03);
 
 void scanAddresses() {
-  printer.logln(PrintController::TRACE,
-                F("\n=================================================="));
-  printer.logln(PrintController::TRACE,
-                F("  MODBUS ADDRESS SCANNER (Discovery Mode)"));
-  printer.logln(PrintController::TRACE,
-                F("  Iterating addresses 1 to 247 with FC03..."));
-  printer.logln(PrintController::TRACE,
-                F("==================================================\n"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n=================================================="));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("  MODBUS ADDRESS SCANNER (Discovery Mode)"));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("  Iterating addresses 1 to 247 with FC03..."));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("==================================================\n"));
+  }
 
   uint8_t found = 0;
   for (uint16_t addr = 1; addr <= 247; addr++) {
@@ -61,7 +64,9 @@ void scanAddresses() {
     req[7] = crc >> 8;
 
     // 2. Log Progress with Hex Request
-    printer.log(PrintController::TRACE, F("[Scanner] Trying 0x"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("[Scanner] Trying 0x"));
+  }
     if (addr < 16)
       printer.print(F("0"));
     printer.print(addr, HEX);
@@ -88,13 +93,17 @@ void scanAddresses() {
     yield();
   }
 
-  printer.logln(PrintController::TRACE,
-                F("\n--------------------------------------------------"));
-  printer.log(PrintController::TRACE, F("Scan Complete. Found "));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n--------------------------------------------------"));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Scan Complete. Found "));
+  }
   printer.print(found);
   printer.println(F(" devices."));
-  printer.logln(PrintController::TRACE,
-                F("--------------------------------------------------\n"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--------------------------------------------------\n"));
+  }
   bus.flushInput();
 }
 
@@ -111,7 +120,7 @@ void setup() {
   printer.println(F("==========================================="));
 
   pinMode(SCAN_BUTTON_PIN, INPUT_PULLUP);
-  bus.setLogger(&printer);
+  bus.setDebug(&printer, static_cast<bool>(DEBUG_ENABLED), static_cast<uint8_t>(DEBUG_LEVEL));
 
 #if defined(ARDUINO_ARCH_ESP32)
   bus.begin(RS485Serial, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN);
@@ -120,10 +129,12 @@ void setup() {
 #endif
   bus.setDirectionControl(RS485_DE_PIN, true);
 
-  printer.logln(PrintController::TRACE,
-                F("--> WAITING FOR SCAN BUTTON (GPIO14 TO GND) <--"));
-  printer.logln(PrintController::TRACE,
-                F("Hold button NOW for 5 seconds to enter DISCOVERY MODE..."));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--> WAITING FOR SCAN BUTTON (GPIO14 TO GND) <--"));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Hold button NOW for 5 seconds to enter DISCOVERY MODE..."));
+  }
 
   uint32_t deadline = millis() + 5000; // 5 second window
   bool doScan = false;
@@ -141,9 +152,9 @@ void setup() {
   if (doScan) {
     scanAddresses();
   } else {
-    printer.logln(
-        PrintController::TRACE,
-        F("No button press detected. Entering normal POLLING LOOP.\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("No button press detected. Entering normal POLLING LOOP.\n"));
+  }
   }
 }
 
@@ -152,44 +163,60 @@ void loop() {
   if (millis() - lastPoll >= 3000 || lastPoll == 0) {
     lastPoll = millis();
 
-    printer.logln(PrintController::TRACE, F("--- Polling Cycle Start ---"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--- Polling Cycle Start ---"));
+  }
 
     // 1. Soil Sensor
     SoilSensor7in1_Data soilData{};
     if (soil.readAll(soilData)) {
-      printer.log(PrintController::TRACE, F("SOIL (addr 1)   : Temp="));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("SOIL (addr 1)   : Temp="));
+  }
       printer.print(soilData.temperatureC, 1);
       printer.print(F("C, Hum="));
       printer.print(soilData.humidityPct, 1);
       printer.println(F("%"));
     } else {
-      printer.logln(PrintController::TRACE, F("SOIL (addr 1)   : FAILED"));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("SOIL (addr 1)   : FAILED"));
+  }
     }
 
     // 2. Leaf Sensor
     LeafSensor_Data leafData{};
     if (leaf.readAll(leafData)) {
-      printer.log(PrintController::TRACE, F("LEAF (addr 2)   : Temp="));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("LEAF (addr 2)   : Temp="));
+  }
       printer.print(leafData.temperatureC, 1);
       printer.print(F("C, Hum="));
       printer.print(leafData.humidityPct, 1);
       printer.println(F("%"));
     } else {
-      printer.logln(PrintController::TRACE, F("LEAF (addr 2)   : FAILED"));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("LEAF (addr 2)   : FAILED"));
+  }
     }
 
     // 3. Rika Leaf Sensor
     RikaLeafSensor_Data rikaData{};
     if (rikaLeaf.readAll(rikaData)) {
-      printer.log(PrintController::TRACE, F("RIKA LEAF (addr 3): Temp="));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("RIKA LEAF (addr 3): Temp="));
+  }
       printer.print(rikaData.rika_leaf_temp, 1);
       printer.print(F("C, Hum="));
       printer.print(rikaData.rika_leaf_humid, 1);
       printer.println(F("%"));
     } else {
-      printer.logln(PrintController::TRACE, F("RIKA LEAF (addr 3): FAILED"));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("RIKA LEAF (addr 3): FAILED"));
+  }
     }
 
-    printer.logln(PrintController::TRACE, F("--- Polling Cycle End ---\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--- Polling Cycle End ---\n"));
+  }
   }
 }

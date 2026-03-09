@@ -10,19 +10,20 @@
 HardwareSerial RS485Serial(1);
 #endif
 
-static PrintController
-    printer(Serial, static_cast<bool>(PRINT_ENABLED),
-            static_cast<PrintController::Verbosity>(PRINT_VERBOSITY));
+static PrintController printer(Serial, static_cast<bool>(DEBUG_ENABLED));
 static RS485Bus bus;
 static uint8_t targetAddress = SENSOR_DEFAULT_ADDRESS;
 static SoilSensor7in1 sensor(bus, targetAddress);
 
 void scanAddresses() {
-  printer.logln(PrintController::TRACE,
-                F("\n--- Modbus Address Scan (1-247) ---"));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n--- Modbus Address Scan (1-247) ---"));
+  }
   uint8_t found = 0;
   for (uint16_t addr = 1; addr <= 247; addr++) {
-    printer.log(PrintController::TRACE, F("[Scanner] Trying address 0x"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("[Scanner] Trying address 0x"));
+  }
     if (addr < 16)
       printer.print(F("0"));
     printer.print(addr, HEX);
@@ -46,8 +47,12 @@ void scanAddresses() {
     }
   }
   if (found == 0)
-    printer.logln(PrintController::TRACE, F("  No devices found."));
-  printer.logln(PrintController::TRACE, F("--- Scan Complete ---\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("  No devices found."));
+  }
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("--- Scan Complete ---\n"));
+  }
   bus.flushInput();
 }
 
@@ -64,7 +69,7 @@ void setup() {
   // ===== END: Banner =====
 
   pinMode(SCAN_BUTTON_PIN, INPUT_PULLUP);
-  bus.setLogger(&printer);
+  bus.setDebug(&printer, static_cast<bool>(DEBUG_ENABLED), static_cast<uint8_t>(DEBUG_LEVEL));
 
 #if defined(ARDUINO_ARCH_ESP32)
   bus.begin(RS485Serial, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN);
@@ -73,8 +78,9 @@ void setup() {
 #endif
   bus.setDirectionControl(RS485_DE_PIN, true);
 
-  printer.logln(PrintController::TRACE,
-                F("Hold SCAN button (GPIO14) within 3 s for address scan..."));
+  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Hold SCAN button (GPIO14) within 3 s for address scan..."));
+  }
   uint32_t deadline = millis() + static_cast<uint32_t>(SCAN_WINDOW_MS);
   bool scan = false;
   while (millis() < deadline) {
@@ -90,8 +96,9 @@ void setup() {
   if (scan) {
     scanAddresses();
   } else {
-    printer.logln(PrintController::TRACE,
-                  F("No button press — normal operation.\n"));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("No button press — normal operation.\n"));
+  }
   }
 }
 
@@ -102,35 +109,55 @@ void loop() {
     lastPoll = millis();
 
     SoilSensor7in1_Data data{};
-    printer.logln(PrintController::TRACE, F("Polling Soil Sensor 7-in-1..."));
+    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("Polling Soil Sensor 7-in-1..."));
+  }
 
     if (sensor.readAll(data)) {
-      printer.logln(PrintController::TRACE,
-                    F("\n===== SOIL SENSOR 7-IN-1 DATA ====="));
-      printer.log(PrintController::TRACE, F("Temperature  : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("\n===== SOIL SENSOR 7-IN-1 DATA ====="));
+  }
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Temperature  : "));
+  }
       printer.print(data.temperatureC, 1);
       printer.println(F(" C"));
-      printer.log(PrintController::TRACE, F("Humidity     : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Humidity     : "));
+  }
       printer.print(data.humidityPct, 1);
       printer.println(F(" %"));
-      printer.log(PrintController::TRACE, F("Conductivity : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Conductivity : "));
+  }
       printer.print(data.conductivity_uScm);
       printer.println(F(" uS/cm"));
-      printer.log(PrintController::TRACE, F("pH           : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("pH           : "));
+  }
       printer.println(data.pH, 2);
-      printer.log(PrintController::TRACE, F("Nitrogen     : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Nitrogen     : "));
+  }
       printer.print(data.nitrogen_mgkg);
       printer.println(F(" mg/kg"));
-      printer.log(PrintController::TRACE, F("Phosphorus   : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Phosphorus   : "));
+  }
       printer.print(data.phosphorus_mgkg);
       printer.println(F(" mg/kg"));
-      printer.log(PrintController::TRACE, F("Potassium    : "));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.print(F("Potassium    : "));
+  }
       printer.print(data.potassium_mgkg);
       printer.println(F(" mg/kg"));
-      printer.logln(PrintController::TRACE,
-                    F("===================================\n"));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("===================================\n"));
+  }
     } else {
-      printer.logln(PrintController::TRACE, F("ERROR: Read failed."));
+      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
+    printer.println(F("ERROR: Read failed."));
+  }
     }
   }
 }

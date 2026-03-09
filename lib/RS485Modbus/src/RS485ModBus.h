@@ -70,7 +70,7 @@ public:
   void setDirectionControl(int8_t dePin, bool activeHighTX = true);
 
   // Logger is optional. If nullptr, no logs.
-  void setLogger(PrintController* logger);
+  void setDebug(PrintController* logger, bool enabled, uint8_t level);
 
   // Transport tuning:
   // preTxDelayUs/postTxDelayUs are small guard times around direction switching.
@@ -117,6 +117,8 @@ private:
   HardwareSerial* _serial;
   DirectionControl _dir;
   PrintController* _log;
+  bool _debugEnabled;
+  uint8_t _debugLevel;
 
   uint16_t _preTxDelayUs;
   uint16_t _postTxDelayUs;
