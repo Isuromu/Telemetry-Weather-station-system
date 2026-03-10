@@ -1,32 +1,51 @@
 #pragma once
-#include "RS485Modbus.h"
 #include <Arduino.h>
+#include "RS485Modbus.h"
+#include "SensorDriver.h"
 
+/*
+  RikaLeafSensor - RK300-04 / RK300-02 style RS485 leaf sensor driver.
 
-// Rika Leaf Moisture / Temperature Sensor Data Structure
-// Explicitly requested exact structure variables.
-struct RikaLeafSensor_Data {
-  double rika_leaf_temp;
-  double rika_leaf_humid;
-};
+  Driver responsibilities:
+    - Build sensor-specific request arrays
+    - Call RS485Bus transport functions
+    - Parse returned bytes into engineering values
+    - Apply fallback values on failure
 
-class RikaLeafSensor {
+  This driver keeps the code intentionally simple for field diagnostics.
+*/
+
+class RikaLeafSensor : public SensorDriver {
 public:
-  RikaLeafSensor(RS485Bus &bus, uint8_t address);
+  double leaf_temp;
+  double leaf_humid;
 
-  void setAddress(uint8_t address);
-  uint8_t address() const;
+  RikaLeafSensor(RS485Bus& bus,
+                 const char* sensorId,
+                 uint8_t address,
+                 bool debugEnable = false,
+                 uint8_t powerPin = SensorDriver::PIN_UNUSED,
+                 uint8_t enablePin = SensorDriver::PIN_UNUSED,
+                 uint16_t sampleRateMin = 1,
+                 uint32_t warmUpTimeMs = 500,
+                 uint8_t maxConsecutiveErrors = 10);
 
-  // Reads Temperature and Humidity
-  bool readAll(RikaLeafSensor_Data &out);
+  bool readData() override;
+  void setFallbackValues() override;
 
-  // Broadcast command to change address (0xFF)
-  // WARNING: Sensor's white cable must be connected to positive power supply
-  // for this to work. ONLY ONE sensor should be on the bus when sending this
-  // broadcast.
-  bool changeAddress(uint8_t newAddress);
+  bool changeAddress(uint8_t newAddress,
+                     uint8_t maxRetries = 3,
+                     uint16_t readTimeoutMs = 500,
+                     uint16_t afterReqDelayMs = 20);
+
+  uint8_t scanForAddress(uint8_t startAddr = 1,
+                         uint8_t endAddr = 247,
+                         uint16_t readTimeoutMs = 120,
+                         uint16_t afterReqDelayMs = 20);
 
 private:
-  RS485Bus &_bus;
-  uint8_t _addr;
+  RS485Bus& _bus;
+  static const uint8_t READ_REQUEST_SIZE = 8;
+  static const uint8_t READ_RESPONSE_SIZE = 9;
+  static const uint8_t READ_CHECK_SIZE = 3;
 };

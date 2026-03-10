@@ -1,64 +1,43 @@
 #pragma once
 
 // =============================================================
-//  Rika Leaf Sensor Example — User Configuration
-//  Edit values here; do NOT modify main.cpp for settings.
+//  Rika Leaf Sensor Simple Example - Configuration
 // =============================================================
 
-// -------------------------------------------------------------
-//  Serial / Debug
-// -------------------------------------------------------------
+// ----- Debug Serial -----
+#define SERIAL_BAUD       115200
 
-// Baud rate for the USB debug monitor (Serial)
-#define SERIAL_BAUD 115200
+// ----- RS485 Bus -----
+#define RS485_BAUD        9600
+#define RS485_CONFIG      SERIAL_8N1
 
-// Debug level:
-//   0 = SUMMARY  — high-level status messages only
-//   1 = IO       — TX / RX hex frames included
-//   2 = TRACE    — full internal details + raw buffers
-#define DEBUG_LEVEL 2
+// ----- Sensor Settings -----
+#define SENSOR_ID         "leaf_s1"
+#define SENSOR_ADDRESS    0x80
+#define SENSOR_DEBUG      true
 
-// Set to 0 to disable all PrintController output (silent mode)
-#define DEBUG_ENABLED 1
+// ----- Address Change -----
+// Press the button at boot to change the current sensor address to NEW_ADDRESS.
+// IMPORTANT:
+//   - Only one sensor must be on the RS485 bus during address change.
+//   - The sensor white wire must be connected to V+ for address change mode.
+#define NEW_ADDRESS       0x01
+#define CHANGE_BUTTON_PIN 14
 
-// -------------------------------------------------------------
-//  RS-485 / Modbus
-// -------------------------------------------------------------
+// ----- Diagnostic Scan -----
+// If true, setup() scans addresses 1..247 and stores the found address.
+// This is only for field diagnostics and first-time setup.
+#define DO_SCAN           false
 
-// Baud rate for the RS-485 bus (must match sensor DIP switch)
-#define RS485_BAUD 9600
+// ----- Simple Polling Loop -----
+#define POLL_INTERVAL_MS  2000
 
-// Default Modbus address to poll in normal operation (1–247)
-#define SENSOR_DEFAULT_ADDRESS 0x01
+// ----- RS485 Direction Control -----
+// Set to -1 for auto-direction modules.
+#define RS485_DE_PIN      -1
 
-// Scan range for address discovery mode.
-// JXBS-3001-YMSD manual states supported address range is 0..252.
-// Set these to narrow scan if needed.
-#define SCAN_ADDRESS_MIN 0
-#define SCAN_ADDRESS_MAX 252
-
-// How often the sensor is polled in normal operation (milliseconds)
-#define POLL_INTERVAL_MS 3000
-
-// Timeout for each raw Modbus frame during address scan (milliseconds)
-#define SCAN_TIMEOUT_MS 100
-
-// -------------------------------------------------------------
-//  GPIO / Hardware
-// -------------------------------------------------------------
-
-// GPIO pin connected to the scan-mode button (button → GND).
-// Internal pull-up is enabled automatically; no external resistor needed.
-#define SCAN_BUTTON_PIN 14
-
-// How long (milliseconds) the firmware waits for button press at boot
-// before continuing to normal operation
-#define SCAN_WINDOW_MS 5000
-
-// ESP32-specific RS-485 UART pin assignment
-// (ignored on AVR targets — Serial2 is used there instead)
+// ----- ESP32 UART Pins -----
 #if defined(ARDUINO_ARCH_ESP32)
-#define RS485_RX_PIN 16
-#define RS485_TX_PIN 17
-#define RS485_DE_PIN 21 // Direction-enable (DE/RE) pin
+  #define RS485_RX_PIN    16
+  #define RS485_TX_PIN    17
 #endif

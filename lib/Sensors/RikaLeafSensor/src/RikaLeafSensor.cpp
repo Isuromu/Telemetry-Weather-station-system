@@ -1,75 +1,138 @@
 #include "RikaLeafSensor.h"
 
-RikaLeafSensor::RikaLeafSensor(RS485Bus &bus, uint8_t address)
-    : _bus(bus), _addr(address) {}
+RikaLeafSensor::RikaLeafSensor(RS485Bus& bus,
+                               const char* sensorId,
+                               uint8_t address,
+                               bool debugEnable,
+                               uint8_t powerPin,
+                               uint8_t enablePin,
+                               uint16_t sampleRateMin,
+                               uint32_t warmUpTimeMs,
+                               uint8_t maxConsecutiveErrors)
+    : SensorDriver(sensorId,
+                   address,
+                   debugEnable,
+                   powerPin,
+                   enablePin,
+                   sampleRateMin,
+                   warmUpTimeMs,
+                   maxConsecutiveErrors),
+      _bus(bus),
+      leaf_temp(0.0),
+      leaf_humid(0.0) {}
 
-void RikaLeafSensor::setAddress(uint8_t address) { _addr = address; }
+void RikaLeafSensor::setFallbackValues() {
+  leaf_temp = -99.0;
+  leaf_humid = -99.0;
+}
 
-uint8_t RikaLeafSensor::address() const { return _addr; }
+bool RikaLeafSensor::readData() {
+  markReadTime(millis());
 
-bool RikaLeafSensor::readAll(RikaLeafSensor_Data &out) {
-  // 1. Build request: [addr, 0x03, 0x00, 0x00, 0x00, 0x02, CRC_L, CRC_H]
-  uint8_t tx[8] = {_addr, 0x03, 0x00, 0x00, 0x00, 0x02, 0, 0};
-  uint16_t crcReq = RS485Bus::crc16Modbus(tx, 6);
-  tx[6] = crcReq & 0xFF;
-  tx[7] = (crcReq >> 8) & 0xFF;
+  uint8_t request[READ_REQUEST_SIZE] = {
+      _address, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00
+  };
 
-  // 2. Define expected validation bounds
-  uint8_t prefix[3] = {_addr, 0x03, 0x04}; // Expect 4 bytes of data
-  uint8_t rxFrame[9]; // 3 (prefix) + 4 (data) + 2 (CRC) = 9
+  uint8_t response[READ_RESPONSE_SIZE] = {0};
+  const uint8_t check[READ_CHECK_SIZE] = {_address, 0x03, 0x04};
 
-  // 3. Dispatch and extract safely
-  bool ok = _bus.transferAndExtractFixedFrame(tx, 8, prefix, 3, 9, rxFrame,
-                                              sizeof(rxFrame), 250, 25);
+  const bool ok = _bus.SendRequest(request,
+                                   READ_REQUEST_SIZE,
+                                   response,
+                                   READ_RESPONSE_SIZE,
+                                   check,
+                                   READ_CHECK_SIZE,
+                                   3,
+                                   2000,
+                                   _debugEnable,
+                                   20);
 
-  if (!ok)
+  if (!ok) {
+    setFallbackValues();
+    markFailure();
     return false;
+  }
 
-  // 4. Parse payload
-  // Typically for Rika leaf sensors, Reg 0 (bytes 3 & 4) is Temperature, and
-  // Reg 1 (bytes 5 & 6) is Humidity Cast to signed 16-bit for temperature to
-  // handle negative values properly
-  int16_t rawTemp = (int16_t)(((uint16_t)rxFrame[3] << 8) | rxFrame[4]);
-  double temp = (double)rawTemp / 10.0;
+  const int16_t rawTemp = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
+  const uint16_t rawHum = ((uint16_t)response[5] << 8) | response[6];
 
-  // Humidity is generally unsigned 0-100%
-  uint16_t rawHum = ((uint16_t)rxFrame[5] << 8) | rxFrame[6];
-  double hum = (double)rawHum / 10.0;
+  leaf_temp = (double)rawTemp / 10.0;
+  leaf_humid = (double)rawHum / 10.0;
 
-  // Optional: logical bounds checks based on typical Rika specifications
-  if (temp < -40.0 || temp > 80.0)
+  if (leaf_temp < -40.0 || leaf_temp > 80.0) {
+    setFallbackValues();
+    markFailure();
     return false;
-  if (hum < 0.0 || hum > 100.0)
+  }
+
+  if (leaf_humid < 0.0 || leaf_humid > 100.0) {
+    setFallbackValues();
+    markFailure();
     return false;
+  }
 
-  out.rika_leaf_temp = temp;
-  out.rika_leaf_humid = hum;
-
+  markSuccess();
   return true;
 }
 
-bool RikaLeafSensor::changeAddress(uint8_t newAddress) {
-  // Broadcast request: [0xFF, 0x06, 0x02, 0x00, 0x00, newAddress, CRC_L, CRC_H]
-  // REQUIRES white wire to be connected to positive supply.
-  uint8_t tx[8] = {0xFF, 0x06, 0x02, 0x00, 0x00, newAddress, 0, 0};
-  uint16_t crcReq = RS485Bus::crc16Modbus(tx, 6);
-  tx[6] = crcReq & 0xFF;
-  tx[7] = (crcReq >> 8) & 0xFF;
+bool RikaLeafSensor::changeAddress(uint8_t newAddress,
+                                   uint8_t maxRetries,
+                                   uint16_t readTimeoutMs,
+                                   uint16_t afterReqDelayMs) {
+  uint8_t request[8] = {0xFF, 0x06, 0x02, 0x00, 0x00, newAddress, 0x00, 0x00};
+  uint8_t response[8] = {0};
+  const uint8_t check[5] = {0xFF, 0x06, 0x02, 0x00, 0x00};
 
-  // Expected response validation based on user code
-  uint8_t prefix[5] = {0xFF, 0x06, 0x02, 0x00, 0x00};
-  uint8_t rxFrame[8];
+  const bool ok = _bus.SendRequest(request,
+                                   8,
+                                   response,
+                                   8,
+                                   check,
+                                   5,
+                                   maxRetries,
+                                   readTimeoutMs,
+                                   _debugEnable,
+                                   afterReqDelayMs);
 
-  // Dispatch Command
-  bool ok = _bus.transferAndExtractFixedFrame(
-      tx, 8, prefix, 5, 8, rxFrame, sizeof(rxFrame), 500,
-      50 // Give it a bit more time for EEPROM address saving
-  );
+  if (ok) {
+    _address = newAddress;
+  }
 
-  if (!ok)
-    return false;
+  return ok;
+}
 
-  // Update internal address tracking if successful
-  _addr = newAddress;
-  return true;
+uint8_t RikaLeafSensor::scanForAddress(uint8_t startAddr,
+                                       uint8_t endAddr,
+                                       uint16_t readTimeoutMs,
+                                       uint16_t afterReqDelayMs) {
+  if (startAddr == 0) startAddr = 1;
+  if (endAddr > 247) endAddr = 247;
+  if (startAddr > endAddr) return 0;
+
+  for (uint16_t addr = startAddr; addr <= endAddr; ++addr) {
+    uint8_t request[READ_REQUEST_SIZE] = {
+        (uint8_t)addr, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00
+    };
+    uint8_t response[READ_RESPONSE_SIZE] = {0};
+    const uint8_t check[READ_CHECK_SIZE] = {(uint8_t)addr, 0x03, 0x04};
+
+    const bool found = _bus.SendRequest(request,
+                                        READ_REQUEST_SIZE,
+                                        response,
+                                        READ_RESPONSE_SIZE,
+                                        check,
+                                        READ_CHECK_SIZE,
+                                        1,
+                                        readTimeoutMs,
+                                        _debugEnable,
+                                        afterReqDelayMs);
+    if (found) {
+      _address = (uint8_t)addr;
+      return (uint8_t)addr;
+    }
+
+    delay(5);
+  }
+
+  return 0;
 }
