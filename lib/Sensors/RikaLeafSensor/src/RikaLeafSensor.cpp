@@ -53,8 +53,8 @@ bool RikaLeafSensor::readData() {
     return false;
   }
 
-  const int16_t rawTemp = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
-  const uint16_t rawHum = ((uint16_t)response[5] << 8) | response[6];
+  const int16_t rawTemp = (int16_t)(((uint16_t)response[5] << 8) | response[6]);
+  const uint16_t rawHum = ((uint16_t)response[3] << 8) | response[4];
 
   leaf_temp = (double)rawTemp / 10.0;
   leaf_humid = (double)rawHum / 10.0;

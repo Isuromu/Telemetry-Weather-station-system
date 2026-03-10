@@ -14,7 +14,7 @@
 // ----- Sensor Settings -----
 #define SENSOR_ID         "leaf_s1"
 #define SENSOR_ADDRESS    0x80
-#define SENSOR_DEBUG      true
+#define SENSOR_DEBUG      false
 
 // ----- Address Change -----
 // Press the button at boot to change the current sensor address to NEW_ADDRESS.
