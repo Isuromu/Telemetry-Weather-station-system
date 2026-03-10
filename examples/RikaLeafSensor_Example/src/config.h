@@ -31,13 +31,3 @@
 
 // ----- Simple Polling Loop -----
 #define POLL_INTERVAL_MS  2000
-
-// ----- RS485 Direction Control -----
-// Set to -1 for auto-direction modules.
-#define RS485_DE_PIN      -1
-
-// ----- ESP32 UART Pins -----
-#if defined(ARDUINO_ARCH_ESP32)
-  #define RS485_RX_PIN    16
-  #define RS485_TX_PIN    17
-#endif
