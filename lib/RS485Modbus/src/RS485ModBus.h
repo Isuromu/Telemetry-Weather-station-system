@@ -2,25 +2,6 @@
 #include <Arduino.h>
 #include <PrintController.h>
 
-/*
-  RS485Bus - transport-only helper for RS485 / Modbus RTU.
-
-  What this library does:
-    - Starts a HardwareSerial port for RS485 work
-    - Optionally toggles a DE/RE direction pin
-    - Calculates Modbus CRC16
-    - Sends caller-provided request bytes
-    - Captures raw incoming bytes into an internal buffer
-    - Searches the internal buffer for a caller-defined valid frame
-    - Copies the clean valid frame into the caller's GetData[] buffer
-
-  What this library does NOT do:
-    - It does not know any sensor registers
-    - It does not know what payload bytes mean
-    - It does not change addresses on its own
-    - It does not apply sensor-specific rules
-*/
-
 class RS485Bus {
 public:
 #if !defined(RS485BUS_RX_BUFFER_SIZE)
@@ -125,6 +106,10 @@ private:
   void logPrintln(const __FlashStringHelper *msg, bool debug) const;
   void logPrintln(const char *msg, bool debug) const;
   void logNewLine(bool debug) const;
+
+  void logSeparator(bool debug) const;
   void logIO(const uint8_t *buf, size_t len, bool debug) const;
+  void logBufferMatrix8(const uint8_t *buf, size_t len, const char *title, bool debug) const;
+  void logWindow(const uint8_t *buf, size_t offset, size_t windowLen, bool debug) const;
   void logTraceRaw(bool debug) const;
 };

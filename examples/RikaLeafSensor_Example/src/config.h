@@ -14,7 +14,7 @@
 // ----- Sensor Settings -----
 #define SENSOR_ID         "leaf_s1"
 #define SENSOR_ADDRESS    0x80
-#define SENSOR_DEBUG      false
+#define SENSOR_DEBUG      true
 
 // ----- Address Change -----
 // Press the button at boot to change the current sensor address to NEW_ADDRESS.
@@ -27,7 +27,7 @@
 // ----- Diagnostic Scan -----
 // If true, setup() scans addresses 1..247 and stores the found address.
 // This is only for field diagnostics and first-time setup.
-#define DO_SCAN           false
+#define DO_SCAN           true
 
 // ----- Simple Polling Loop -----
-#define POLL_INTERVAL_MS  2000
+#define POLL_INTERVAL_MS  3000

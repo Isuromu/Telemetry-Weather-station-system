@@ -4,12 +4,15 @@
 #include "RS485Modbus.h"
 #include "RikaLeafSensor.h"
 
-static PrintController printer(Serial, false);
-static RS485Bus rs485;
-
 #if defined(ARDUINO_ARCH_ESP32)
 HardwareSerial RS485Port(1);
+HardwareSerial& DebugPort = Serial0; //Same UART port as USB-UART upload bridge
+#else
+#define DebugPort Serial
 #endif
+
+static PrintController printer(DebugPort, false);
+static RS485Bus rs485;
 
 static RikaLeafSensor leaf(rs485, SENSOR_ID, SENSOR_ADDRESS, SENSOR_DEBUG);
 
@@ -47,7 +50,7 @@ static void printReadResult(bool ok) {
 }
 
 void setup() {
-  Serial.begin(SERIAL_BAUD);
+  DebugPort.begin(SERIAL_BAUD);
   delay(300);
   printBanner();
 
@@ -88,7 +91,14 @@ void setup() {
 }
 
 void loop() {
+  printer.println("", true);
+  printer.println(F("---------------------------------------------"), true);
+  printer.println(F("[APP] New polling cycle"), true);
+  printer.println(F("---------------------------------------------"), true);
+
   const bool ok = leaf.readData();
   printReadResult(ok);
+
+  printer.println("", true);
   delay(POLL_INTERVAL_MS);
 }

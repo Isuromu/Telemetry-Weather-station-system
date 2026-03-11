@@ -29,50 +29,52 @@ void RikaLeafSensor::setFallbackValues() {
 bool RikaLeafSensor::readData() {
   markReadTime(millis());
 
-  uint8_t request[READ_REQUEST_SIZE] = {
-      _address, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00
-  };
+  const uint8_t DRIVER_RETRIES = 3;
 
-  uint8_t response[READ_RESPONSE_SIZE] = {0};
-  const uint8_t check[READ_CHECK_SIZE] = {_address, 0x03, 0x04};
+  for (uint8_t driverAttempt = 1; driverAttempt <= DRIVER_RETRIES; ++driverAttempt) {
+    uint8_t request[READ_REQUEST_SIZE] = {
+        _address, 0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00
+    };
 
-  const bool ok = _bus.SendRequest(request,
-                                   READ_REQUEST_SIZE,
-                                   response,
-                                   READ_RESPONSE_SIZE,
-                                   check,
-                                   READ_CHECK_SIZE,
-                                   3,
-                                   2000,
-                                   _debugEnable,
-                                   20);
+    uint8_t response[READ_RESPONSE_SIZE] = {0};
+    const uint8_t check[READ_CHECK_SIZE] = {_address, 0x03, 0x04};
 
-  if (!ok) {
-    setFallbackValues();
-    markFailure();
-    return false;
+    const bool ok = _bus.SendRequest(request,
+                                     READ_REQUEST_SIZE,
+                                     response,
+                                     READ_RESPONSE_SIZE,
+                                     check,
+                                     READ_CHECK_SIZE,
+                                     3,       // BUS retries
+                                     2000,    // BUS read timeout
+                                     _debugEnable,
+                                     20);
+
+    if (!ok) {
+      continue;
+    }
+
+    const uint16_t rawHum = ((uint16_t)response[3] << 8) | response[4];
+    const int16_t rawTemp = (int16_t)(((uint16_t)response[5] << 8) | response[6]);
+
+    leaf_humid = (double)rawHum / 10.0;
+    leaf_temp  = (double)rawTemp / 10.0;
+
+    if (leaf_temp < -40.0 || leaf_temp > 80.0) {
+      continue;
+    }
+
+    if (leaf_humid < 0.0 || leaf_humid > 100.0) {
+      continue;
+    }
+
+    markSuccess();
+    return true;
   }
 
-  const int16_t rawTemp = (int16_t)(((uint16_t)response[5] << 8) | response[6]);
-  const uint16_t rawHum = ((uint16_t)response[3] << 8) | response[4];
-
-  leaf_temp = (double)rawTemp / 10.0;
-  leaf_humid = (double)rawHum / 10.0;
-
-  if (leaf_temp < -40.0 || leaf_temp > 80.0) {
-    setFallbackValues();
-    markFailure();
-    return false;
-  }
-
-  if (leaf_humid < 0.0 || leaf_humid > 100.0) {
-    setFallbackValues();
-    markFailure();
-    return false;
-  }
-
-  markSuccess();
-  return true;
+  setFallbackValues();
+  markFailure();
+  return false;
 }
 
 bool RikaLeafSensor::changeAddress(uint8_t newAddress,

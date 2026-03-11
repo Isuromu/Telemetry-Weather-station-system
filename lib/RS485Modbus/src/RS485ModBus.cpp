@@ -57,13 +57,18 @@ void RS485Bus::flushInput() {
 void RS485Bus::CRC_Calc(uint8_t array[], size_t arraySize, bool debug) {
   if (!array || arraySize < 2) return;
 
+  logPrintln(F("[RS485] CRC_Calc() called"), debug);
+  logBufferMatrix8(array, arraySize, "Request before CRC", debug);
+
   const uint16_t crc = crc16Modbus(array, arraySize - 2);
   array[arraySize - 2] = (uint8_t)(crc & 0xFF);
   array[arraySize - 1] = (uint8_t)((crc >> 8) & 0xFF);
 
-  logPrint(F("[RS485] Request CRC updated: 0x"), debug);
+  logPrint(F("[RS485] Calculated CRC = 0x"), debug);
   logPrintHex(crc, debug);
   logNewLine(debug);
+
+  logBufferMatrix8(array, arraySize, "Request after CRC", debug);
 }
 
 void RS485Bus::Request_RS485(const uint8_t reqArray[],
@@ -72,8 +77,24 @@ void RS485Bus::Request_RS485(const uint8_t reqArray[],
                              bool debug) {
   if (!_serial || !reqArray || reqSize == 0) return;
 
-  logPrint(F("[RS485] TX -> "), debug);
-  logIO(reqArray, reqSize, debug);
+  logPrintln(F("[RS485] Request_RS485() called"), debug);
+  logPrint(F("[RS485] TX size = "), debug);
+  logPrintDec((unsigned long)reqSize, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] preTX delay us = "), debug);
+  logPrintDec((unsigned long)_preTxDelayUs, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] postTX delay us = "), debug);
+  logPrintDec((unsigned long)_postTxDelayUs, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] after request delay ms = "), debug);
+  logPrintDec((unsigned long)afterReqDelayMs, debug);
+  logNewLine(debug);
+
+  logBufferMatrix8(reqArray, reqSize, "TX request buffer", debug);
 
   flushInput();
   _dir.setTX(true);
@@ -96,6 +117,8 @@ void RS485Bus::Request_RS485(const uint8_t reqArray[],
   if (afterReqDelayMs > 0) {
     delay(afterReqDelayMs);
   }
+
+  logPrintln(F("[RS485] Request sent"), debug);
 }
 
 size_t RS485Bus::Read_RS485(uint16_t readTimeoutMs, bool debug) {
@@ -105,11 +128,13 @@ size_t RS485Bus::Read_RS485(uint16_t readTimeoutMs, bool debug) {
   _rxLen = 0;
   _lastFrameOffset = (size_t)-1;
 
-  logPrint(F("[RS485] RX wait started, timeout="), debug);
-  logPrintDec(readTimeoutMs, debug);
-  logPrintln(F(" ms"), debug);
+  logPrintln(F("[RS485] Read_RS485() called"), debug);
+  logPrint(F("[RS485] Waiting for response, timeout ms = "), debug);
+  logPrintDec((unsigned long)readTimeoutMs, debug);
+  logNewLine(debug);
 
   const unsigned long startTime = millis();
+  size_t previousLen = 0;
 
   while ((millis() - startTime) < readTimeoutMs && _rxLen < RX_BUFFER_SIZE) {
     while (_serial->available() > 0 && _rxLen < RX_BUFFER_SIZE) {
@@ -118,16 +143,27 @@ size_t RS485Bus::Read_RS485(uint16_t readTimeoutMs, bool debug) {
         _rxBuf[_rxLen++] = (uint8_t)value;
       }
     }
+
+    if (_rxLen != previousLen) {
+      logPrint(F("[RS485] RX bytes now = "), debug);
+      logPrintDec((unsigned long)_rxLen, debug);
+      logPrint(F(" at t="), debug);
+      logPrintDec((unsigned long)(millis() - startTime), debug);
+      logPrintln(F(" ms"), debug);
+      previousLen = _rxLen;
+    }
+
     delay(1);
   }
 
-  logPrint(F("[RS485] RX captured bytes="), debug);
+  logPrint(F("[RS485] Read finished, final RX length = "), debug);
   logPrintDec((unsigned long)_rxLen, debug);
   logNewLine(debug);
 
-  if (_rxLen > 0) {
-    logPrint(F("[RS485] RX raw -> "), debug);
-    logIO(_rxBuf, _rxLen, debug);
+  if (_rxLen == 0) {
+    logPrintln(F("[RS485] RX buffer is empty"), debug);
+  } else {
+    logBufferMatrix8(_rxBuf, _rxLen, "Full RX buffer", debug);
   }
 
   return _rxLen;
@@ -143,15 +179,19 @@ bool RS485Bus::Check_Res(const uint8_t resArray[],
     return false;
   }
 
+  logPrintln(F("[RS485] Check_Res() called"), debug);
+
   for (size_t i = 0; i < checkArraySize; ++i) {
+    logPrint(F("[RS485] Prefix compare idx "), debug);
+    logPrintDec((unsigned long)i, debug);
+    logPrint(F(": got 0x"), debug);
+    logPrintHexByte(resArray[i], debug);
+    logPrint(F(" expected 0x"), debug);
+    logPrintHexByte(checkArray[i], debug);
+    logNewLine(debug);
+
     if (resArray[i] != checkArray[i]) {
-      logPrint(F("[RS485] Prefix mismatch at index "), debug);
-      logPrintDec((unsigned long)i, debug);
-      logPrint(F(" : got 0x"), debug);
-      logPrintHexByte(resArray[i], debug);
-      logPrint(F(" expected 0x"), debug);
-      logPrintHexByte(checkArray[i], debug);
-      logNewLine(debug);
+      logPrintln(F("[RS485] Prefix mismatch -> frame invalid"), debug);
       return false;
     }
   }
@@ -164,13 +204,14 @@ bool RS485Bus::Check_Res(const uint8_t resArray[],
   logPrintHex(crcCalc, debug);
   logPrint(F(" recv=0x"), debug);
   logPrintHex(crcRes, debug);
+  logNewLine(debug);
 
   if (crcCalc == crcRes) {
-    logPrintln(F(" OK"), debug);
+    logPrintln(F("[RS485] CRC OK -> frame valid"), debug);
     return true;
   }
 
-  logPrintln(F(" FAIL"), debug);
+  logPrintln(F("[RS485] CRC FAIL -> frame invalid"), debug);
   return false;
 }
 
@@ -183,8 +224,7 @@ void RS485Bus::ShiftArray(uint8_t array[], size_t arraySize, bool debug) const {
   }
   array[arraySize - 1] = first;
 
-  logPrint(F("[RS485] ShiftArray applied -> "), debug);
-  logIO(array, arraySize, debug);
+  logBufferMatrix8(array, arraySize, "ShiftArray result", debug);
 }
 
 bool RS485Bus::SendRequest(uint8_t request[],
@@ -203,46 +243,98 @@ bool RS485Bus::SendRequest(uint8_t request[],
 
   memset(getData, 0, getDataSize);
 
+  logSeparator(debug);
+  logPrintln(F("[RS485] SendRequest() START"), debug);
+  logPrint(F("[RS485] requestSize = "), debug);
+  logPrintDec((unsigned long)requestSize, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] getDataSize = "), debug);
+  logPrintDec((unsigned long)getDataSize, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] checkCodeSize = "), debug);
+  logPrintDec((unsigned long)checkCodeSize, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] maxRetries = "), debug);
+  logPrintDec((unsigned long)maxRetries, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] readTimeoutMs = "), debug);
+  logPrintDec((unsigned long)readTimeoutMs, debug);
+  logNewLine(debug);
+
+  logPrint(F("[RS485] afterReqDelayMs = "), debug);
+  logPrintDec((unsigned long)afterReqDelayMs, debug);
+  logNewLine(debug);
+
+  logBufferMatrix8(request, requestSize, "Initial request buffer", debug);
+  logBufferMatrix8(checkCode, checkCodeSize, "Expected prefix/check code", debug);
+
   for (uint8_t attempt = 1; attempt <= maxRetries; ++attempt) {
-    logPrint(F("[RS485] ===== Attempt "), debug);
+    logSeparator(debug);
+    logPrint(F("[RS485] BUS attempt "), debug);
     logPrintDec((unsigned long)attempt, debug);
     logPrint(F(" of "), debug);
     logPrintDec((unsigned long)maxRetries, debug);
-    logPrintln(F(" ====="), debug);
+    logNewLine(debug);
 
     CRC_Calc(request, requestSize, debug);
     Request_RS485(request, requestSize, afterReqDelayMs, debug);
     const size_t bytesRead = Read_RS485(readTimeoutMs, debug);
 
-    if (bytesRead >= getDataSize) {
-      logTraceRaw(debug);
+    if (bytesRead == 0) {
+      logPrintln(F("[RS485] No response bytes received in this BUS attempt"), debug);
+      delay(100UL * attempt);
+      continue;
+    }
 
-      for (size_t offset = 0; offset <= (bytesRead - getDataSize); ++offset) {
-        logPrint(F("[RS485] Checking frame window at offset "), debug);
+    logTraceRaw(debug);
+
+    if (bytesRead < getDataSize) {
+      logPrint(F("[RS485] Buffer shorter than expected frame. bytesRead="), debug);
+      logPrintDec((unsigned long)bytesRead, debug);
+      logPrint(F(" expected frame len="), debug);
+      logPrintDec((unsigned long)getDataSize, debug);
+      logNewLine(debug);
+      delay(100UL * attempt);
+      continue;
+    }
+
+    for (size_t offset = 0; offset <= (bytesRead - getDataSize); ++offset) {
+      logSeparator(debug);
+      logPrint(F("[RS485] Checking frame window at offset "), debug);
+      logPrintDec((unsigned long)offset, debug);
+      logNewLine(debug);
+
+      logWindow(_rxBuf, offset, getDataSize, debug);
+
+      if (Check_Res(&_rxBuf[offset], getDataSize, checkCode, checkCodeSize, debug)) {
+        memcpy(getData, &_rxBuf[offset], getDataSize);
+        _lastFrameOffset = offset;
+
+        logPrint(F("[RS485] VALID FRAME FOUND at offset "), debug);
         logPrintDec((unsigned long)offset, debug);
         logNewLine(debug);
 
-        if (Check_Res(&_rxBuf[offset], getDataSize, checkCode, checkCodeSize, debug)) {
-          memcpy(getData, &_rxBuf[offset], getDataSize);
-          _lastFrameOffset = offset;
+        logBufferMatrix8(getData, getDataSize, "Copied getData frame", debug);
 
-          logPrint(F("[RS485] Valid frame found at offset "), debug);
-          logPrintDec((unsigned long)offset, debug);
-          logPrintln(F("."), debug);
-
-          logPrint(F("[RS485] Clean frame -> "), debug);
-          logIO(getData, getDataSize, debug);
-          return true;
-        }
+        logPrintln(F("[RS485] SendRequest() SUCCESS"), debug);
+        logSeparator(debug);
+        return true;
+      } else {
+        logPrintln(F("[RS485] This window is not valid"), debug);
       }
     }
 
-    logPrintln(F("[RS485] Valid frame not found in buffer."), debug);
+    logPrintln(F("[RS485] No valid frame found in RX buffer for this BUS attempt"), debug);
     flushInput();
     delay(100UL * attempt);
   }
 
-  logPrintln(F("[RS485] Request failed after all retries."), debug);
+  logPrintln(F("[RS485] SendRequest() FAILED after all BUS attempts"), debug);
+  logSeparator(debug);
   return false;
 }
 
@@ -301,6 +393,12 @@ void RS485Bus::logNewLine(bool debug) const {
   if (_log) _log->println("", debug);
 }
 
+void RS485Bus::logSeparator(bool debug) const {
+  if (!_log) return;
+  _log->println(F(""), debug);
+  _log->println(F("============================================================"), debug);
+}
+
 void RS485Bus::logIO(const uint8_t *buf, size_t len, bool debug) const {
   if (!_log || !buf) return;
 
@@ -313,23 +411,41 @@ void RS485Bus::logIO(const uint8_t *buf, size_t len, bool debug) const {
   _log->println("", debug);
 }
 
-void RS485Bus::logTraceRaw(bool debug) const {
-  if (!_log || _rxLen == 0) return;
+void RS485Bus::logBufferMatrix8(const uint8_t *buf, size_t len, const char *title, bool debug) const {
+  if (!_log || !buf) return;
 
-  logPrintln(F("[RS485] Raw buffer sweep:"), debug);
+  _log->print(F("[RS485] "), debug);
+  _log->println(title, debug);
 
-  for (size_t row = 0; row < _rxLen; row += 16) {
-    const size_t end = (row + 16 < _rxLen) ? (row + 16) : _rxLen;
+  if (len == 0) {
+    _log->println(F("  <empty>"), debug);
+    return;
+  }
 
-    _log->print(F("  [0x"), debug);
-    _log->print((unsigned long)row, debug, "] ", HEX);
+  for (size_t rowStart = 0; rowStart < len; rowStart += 8) {
+    size_t rowEnd = rowStart + 8;
+    if (rowEnd > len) rowEnd = len;
 
-    for (size_t col = row; col < end; ++col) {
-      _log->print(_rxBuf[col], debug, "", HEX);
-      if (col + 1 < end) {
+    _log->print(F("  ["), debug);
+    _log->print((unsigned long)rowStart, debug, "", DEC);
+    _log->print(F("] "), debug);
+
+    for (size_t i = rowStart; i < rowEnd; ++i) {
+      _log->print(buf[i], debug, "", HEX);
+      if (i + 1 < rowEnd) {
         _log->print(F(" "), debug);
       }
     }
     _log->println("", debug);
   }
+}
+
+void RS485Bus::logWindow(const uint8_t *buf, size_t offset, size_t windowLen, bool debug) const {
+  if (!_log || !buf) return;
+  logBufferMatrix8(buf + offset, windowLen, "Current frame window", debug);
+}
+
+void RS485Bus::logTraceRaw(bool debug) const {
+  if (!_log) return;
+  logBufferMatrix8(_rxBuf, _rxLen, "Full RX buffer as 8-byte matrix", debug);
 }
