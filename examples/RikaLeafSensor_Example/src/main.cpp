@@ -42,6 +42,10 @@ static void printReadResult(bool ok) {
     printer.print(leaf.getSensorId(), true, " | ");
     printer.print(F("Address: 0x"), true);
     printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
+
+    printer.println("", true);
+    printer.print(F("[APP] Successfully Read Values: "), true, "| ");
+
     printer.print(F("Temperature: "), true);
     printer.print(leaf.leaf_temp, true, " C | ", 1);
     printer.print(F("Humidity: "), true);

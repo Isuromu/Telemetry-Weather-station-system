@@ -45,6 +45,9 @@ static void printMainReadResult(bool ok) {
     printer.print(F("Address: 0x"), true);
     printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
 
+    printer.println("", true);
+    printer.print(F("[APP] Successfully Read Values: "), true, "| ");
+
     printer.print(F("Temp: "), true);
     printer.print(soil.soil_temp, true, " C | ", 1);
 

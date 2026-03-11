@@ -13,7 +13,7 @@
 
 #define SENSOR_ID         "leaf_test_00"
 #define SENSOR_ADDRESS    0x80
-#define SENSOR_DEBUG      true
+#define SENSOR_DEBUG      false
 
 #define NEW_ADDRESS       0x01
 #define DO_SCAN           false

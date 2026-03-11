@@ -8,16 +8,16 @@
 */
 
 #define SENSOR_ID                   "soil_test_00"
-#define SENSOR_ADDRESS              0x10
-#define SENSOR_DEBUG                true
+#define SENSOR_ADDRESS              0x01
+#define SENSOR_DEBUG                false
 
-#define NEW_ADDRESS                 0x11
+#define NEW_ADDRESS                 0x10
 #define DO_SCAN                     false
 #define SET_SOIL_TYPE_ON_BOOT       false
 #define BOOT_SOIL_TYPE              3
 #define READ_SOIL_TYPE_IN_LOOP      true
 #define READ_EPSILON_IN_LOOP        true
-#define READ_COMP_COEFFS_IN_LOOP    false
+#define READ_COMP_COEFFS_IN_LOOP    true
 #define POLL_INTERVAL_MS            2000
 
 #define REG_EC_TEMP_COEFF           0x0022
