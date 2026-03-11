@@ -1,0 +1,15 @@
+{
+  "name": "RikaSoilSensor3in1",
+  "version": "1.0.0",
+  "description": "RK520-02 style RS485 soil sensor driver (temperature, VWC, EC, soil type, epsilon)",
+  "keywords": ["sensor", "soil", "rs485", "modbus", "rika", "rk520"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

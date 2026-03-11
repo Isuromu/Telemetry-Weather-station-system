@@ -5,8 +5,8 @@
 #include "RikaLeafSensor.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
+HardwareSerial& DebugPort = Serial0;
 HardwareSerial RS485Port(1);
-HardwareSerial& DebugPort = Serial0; //Same UART port as USB-UART upload bridge
 #else
 #define DebugPort Serial
 #endif
@@ -14,17 +14,25 @@ HardwareSerial& DebugPort = Serial0; //Same UART port as USB-UART upload bridge
 static PrintController printer(DebugPort, false);
 static RS485Bus rs485;
 
-static RikaLeafSensor leaf(rs485, SENSOR_ID, SENSOR_ADDRESS, SENSOR_DEBUG);
+static RikaLeafSensor leaf(
+    rs485,
+    SENSOR_ID,
+    SENSOR_ADDRESS,
+    SENSOR_DEBUG,
+    POWERLINE_INDEX_0,
+    RS485_PORT_INDEX_0,
+    SAMPLE_RATE_5_MIN,
+    1000UL,
+    SENSOR_DEFAULT_MAX_ERRORS,
+    MIN_USEFUL_POWER_OFF_MS);
 
 static void printBanner() {
   printer.println(F(""), true);
-  printer.println(F("=============================================="), true);
+  printer.println(F("============================================================"), true);
   printer.println(F(" Rika Leaf Sensor Simple Diagnostic Example"), true);
-  printer.println(F("=============================================="), true);
-  printer.println(F("This example is intentionally simple."), true);
+  printer.println(F("============================================================"), true);
   printer.println(F("- Optional scan in setup()"), true);
-  printer.println(F("- Optional address change with button at boot"), true);
-  printer.println(F("- Then plain polling every 2000 ms"), true);
+  printer.println(F("- Then plain polling"), true);
   printer.println(F(""), true);
 }
 
@@ -50,19 +58,24 @@ static void printReadResult(bool ok) {
 }
 
 void setup() {
-  DebugPort.begin(SERIAL_BAUD);
+  DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
   delay(300);
   printBanner();
 
-  pinMode(CHANGE_BUTTON_PIN, INPUT_PULLUP);
-
   rs485.setDebug(&printer);
+
 #if defined(ARDUINO_ARCH_ESP32)
-  rs485.begin(RS485Port, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN, RS485_CONFIG);
+  rs485.begin(RS485Port,
+              RS485_DEFAULT_BAUD,
+              PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
+              PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
+              RS485_DEFAULT_SERIAL_CONFIG);
 #else
-  rs485.begin(Serial2, RS485_BAUD, -1, -1, RS485_CONFIG);
+  rs485.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
-  rs485.setDirectionControl(RS485_DE_PIN, true);
+
+  rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
+                            PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
   if (DO_SCAN) {
     printer.println(F("[APP] Scan mode is enabled. Searching address..."), true);
@@ -74,31 +87,17 @@ void setup() {
       printer.println(F("[APP] No sensor responded during scan."), true);
     }
   }
-
-  if (digitalRead(CHANGE_BUTTON_PIN) == LOW) {
-    delay(50);
-    if (digitalRead(CHANGE_BUTTON_PIN) == LOW) {
-      printer.println(F("[APP] Address change button detected at boot."), true);
-      printer.println(F("[APP] Make sure white wire is on V+ and only one sensor is on the bus."), true);
-      if (leaf.changeAddress(NEW_ADDRESS, 3, 500, 20)) {
-        printer.print(F("[APP] Address changed successfully. New address = 0x"), true);
-        printer.println((unsigned int)leaf.getAddress(), true, "", HEX);
-      } else {
-        printer.println(F("[APP] Address change failed."), true);
-      }
-    }
-  }
 }
 
 void loop() {
-  printer.println("", true);
-  printer.println(F("---------------------------------------------"), true);
+  printer.println(F(""), true);
+  printer.println(F("------------------------------------------------------------"), true);
   printer.println(F("[APP] New polling cycle"), true);
-  printer.println(F("---------------------------------------------"), true);
+  printer.println(F("------------------------------------------------------------"), true);
 
   const bool ok = leaf.readData();
   printReadResult(ok);
 
-  printer.println("", true);
+  printer.println(F(""), true);
   delay(POLL_INTERVAL_MS);
 }

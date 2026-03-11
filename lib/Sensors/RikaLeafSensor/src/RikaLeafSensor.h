@@ -3,18 +3,6 @@
 #include "RS485Modbus.h"
 #include "SensorDriver.h"
 
-/*
-  RikaLeafSensor - RK300-04 / RK300-02 style RS485 leaf sensor driver.
-
-  Driver responsibilities:
-    - Build sensor-specific request arrays
-    - Call RS485Bus transport functions
-    - Parse returned bytes into engineering values
-    - Apply fallback values on failure
-
-  This driver keeps the code intentionally simple for field diagnostics.
-*/
-
 class RikaLeafSensor : public SensorDriver {
 public:
   double leaf_temp;
@@ -24,11 +12,12 @@ public:
                  const char* sensorId,
                  uint8_t address,
                  bool debugEnable = false,
-                 uint8_t powerPin = SensorDriver::PIN_UNUSED,
-                 uint8_t enablePin = SensorDriver::PIN_UNUSED,
+                 uint8_t powerLineIndex = 0,
+                 uint8_t interfaceIndex = 0,
                  uint16_t sampleRateMin = 1,
                  uint32_t warmUpTimeMs = 500,
-                 uint8_t maxConsecutiveErrors = 10);
+                 uint8_t maxConsecutiveErrors = 10,
+                 uint32_t minUsefulPowerOffMs = 60000UL);
 
   bool readData() override;
   void setFallbackValues() override;

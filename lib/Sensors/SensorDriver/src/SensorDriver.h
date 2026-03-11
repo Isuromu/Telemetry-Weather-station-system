@@ -2,13 +2,21 @@
 #include <Arduino.h>
 
 /*
-  SensorDriver - transport-neutral abstract base class.
+  SensorDriver.h
 
-  This base class represents one logical sensor object.
-  It keeps only sensor-level information that main code needs
-  for scheduling, power grouping and health tracking.
+  Transport-neutral base class for logical sensor objects.
 
-  Those belong to the main station logic.
+  This class stores:
+  - station-visible sensor ID
+  - bus address
+  - debug enable state
+  - power line index
+  - interface index
+  - sample rate
+  - warm-up time
+  - last read timestamp
+  - keepPowerOn policy result
+  - sensor health state
 */
 
 enum SensorStatus {
@@ -19,30 +27,30 @@ enum SensorStatus {
 
 class SensorDriver {
 public:
-  static const uint8_t PIN_UNUSED = 0xFF;
-
-  SensorDriver(const char* sensorId = "sensor",
-               uint8_t address = 0,
-               bool debugEnable = false,
-               uint8_t powerPin = PIN_UNUSED,
-               uint8_t enablePin = PIN_UNUSED,
-               uint16_t sampleRateMin = 1,
-               uint32_t warmUpTimeMs = 500,
-               uint8_t maxConsecutiveErrors = 10)
+  SensorDriver(const char* sensorId,
+               uint8_t address,
+               bool debugEnable,
+               uint8_t powerLineIndex,
+               uint8_t interfaceIndex,
+               uint16_t sampleRateMin,
+               uint32_t warmUpTimeMs,
+               uint8_t maxConsecutiveErrors = 10,
+               uint32_t minUsefulPowerOffMs = 60000UL)
       : _sensorId(sensorId),
         _address(address),
         _debugEnable(debugEnable),
         _dataStatus(false),
-        _powerPin(powerPin),
-        _enablePin(enablePin),
+        _powerLineIndex(powerLineIndex),
+        _interfaceIndex(interfaceIndex),
         _keepPowerOn(false),
         _sampleRateMin(sampleRateMin),
         _warmUpTimeMs(warmUpTimeMs),
         _lastReadTime(0),
         _status(SENSOR_ONLINE),
         _consecutiveErrors(0),
-        _maxConsecutiveErrors(maxConsecutiveErrors) {
-    updateKeepPowerOnRule();
+        _maxConsecutiveErrors(maxConsecutiveErrors),
+        _minUsefulPowerOffMs(minUsefulPowerOffMs) {
+    recalculateKeepPowerOn();
   }
 
   virtual ~SensorDriver() {}
@@ -58,28 +66,36 @@ public:
 
   bool getDataStatus() const { return _dataStatus; }
 
-  uint8_t getPowerPin() const { return _powerPin; }
-  uint8_t getEnablePin() const { return _enablePin; }
+  uint8_t getPowerLineIndex() const { return _powerLineIndex; }
+  uint8_t getInterfaceIndex() const { return _interfaceIndex; }
 
   bool shouldKeepPowerOn() const { return _keepPowerOn; }
-  void setKeepPowerOn(bool keepPowerOn) { _keepPowerOn = keepPowerOn; }
 
   uint16_t getSampleRateMin() const { return _sampleRateMin; }
   void setSampleRate(uint16_t minutes) {
     _sampleRateMin = minutes;
-    updateKeepPowerOnRule();
+    recalculateKeepPowerOn();
   }
 
   uint32_t getWarmUpTimeMs() const { return _warmUpTimeMs; }
   void setWarmUpTimeMs(uint32_t warmUpTimeMs) {
     _warmUpTimeMs = warmUpTimeMs;
-    updateKeepPowerOnRule();
+    recalculateKeepPowerOn();
   }
 
   uint32_t getRequestRateMs() const { return (uint32_t)_sampleRateMin * 60000UL; }
   uint32_t getLastReadTime() const { return _lastReadTime; }
 
+  uint32_t getMinUsefulPowerOffMs() const { return _minUsefulPowerOffMs; }
+  void setMinUsefulPowerOffMs(uint32_t value) {
+    _minUsefulPowerOffMs = value;
+    recalculateKeepPowerOn();
+  }
+
   bool isDueForRead(uint32_t nowMs) const {
+    if (_lastReadTime == 0) {
+      return true;
+    }
     return (nowMs - _lastReadTime) >= getRequestRateMs();
   }
 
@@ -100,6 +116,7 @@ public:
 
   void markFailure() {
     _dataStatus = false;
+
     if (_consecutiveErrors < 255) {
       ++_consecutiveErrors;
     }
@@ -121,9 +138,16 @@ public:
   virtual void setFallbackValues() = 0;
 
 protected:
-  void updateKeepPowerOnRule() {
+  void recalculateKeepPowerOn() {
     const uint32_t sampleRateMs = getRequestRateMs();
-    _keepPowerOn = (_warmUpTimeMs >= sampleRateMs);
+
+    if (_warmUpTimeMs >= sampleRateMs) {
+      _keepPowerOn = true;
+      return;
+    }
+
+    const uint32_t offWindowMs = sampleRateMs - _warmUpTimeMs;
+    _keepPowerOn = (offWindowMs < _minUsefulPowerOffMs);
   }
 
   const char* _sensorId;
@@ -131,8 +155,8 @@ protected:
   bool _debugEnable;
   bool _dataStatus;
 
-  uint8_t _powerPin;
-  uint8_t _enablePin;
+  uint8_t _powerLineIndex;
+  uint8_t _interfaceIndex;
   bool _keepPowerOn;
 
   uint16_t _sampleRateMin;
@@ -142,4 +166,5 @@ protected:
   SensorStatus _status;
   uint8_t _consecutiveErrors;
   uint8_t _maxConsecutiveErrors;
+  uint32_t _minUsefulPowerOffMs;
 };

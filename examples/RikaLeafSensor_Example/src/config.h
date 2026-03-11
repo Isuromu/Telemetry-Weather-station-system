@@ -1,33 +1,20 @@
 #pragma once
+#include <Arduino.h>
+#include "../../../config/Configuration_System.h"
+#include "../../../config/Configuration_PCB.h"
 
-// =============================================================
-//  Rika Leaf Sensor Simple Example - Configuration
-// =============================================================
+/*
+  Rika Leaf Sensor Example - local example config
 
-// ----- Debug Serial -----
-#define SERIAL_BAUD       115200
+  This file belongs only to the leaf sensor example.
+  It reuses common system/PCB definitions, but keeps its own
+  per-example sensor settings.
+*/
 
-// ----- RS485 Bus -----
-#define RS485_BAUD        9600
-#define RS485_CONFIG      SERIAL_8N1
-
-// ----- Sensor Settings -----
-#define SENSOR_ID         "leaf_s1"
+#define SENSOR_ID         "leaf_test_00"
 #define SENSOR_ADDRESS    0x80
 #define SENSOR_DEBUG      true
 
-// ----- Address Change -----
-// Press the button at boot to change the current sensor address to NEW_ADDRESS.
-// IMPORTANT:
-//   - Only one sensor must be on the RS485 bus during address change.
-//   - The sensor white wire must be connected to V+ for address change mode.
 #define NEW_ADDRESS       0x01
-#define CHANGE_BUTTON_PIN 14
-
-// ----- Diagnostic Scan -----
-// If true, setup() scans addresses 1..247 and stores the found address.
-// This is only for field diagnostics and first-time setup.
-#define DO_SCAN           true
-
-// ----- Simple Polling Loop -----
-#define POLL_INTERVAL_MS  3000
+#define DO_SCAN           false
+#define POLL_INTERVAL_MS  2000

@@ -58,7 +58,7 @@ void RS485Bus::CRC_Calc(uint8_t array[], size_t arraySize, bool debug) {
   if (!array || arraySize < 2) return;
 
   logPrintln(F("[RS485] CRC_Calc() called"), debug);
-  logBufferMatrix8(array, arraySize, "Request before CRC", debug);
+  logBufferMatrix(array, arraySize, "Request before CRC", debug);
 
   const uint16_t crc = crc16Modbus(array, arraySize - 2);
   array[arraySize - 2] = (uint8_t)(crc & 0xFF);
@@ -68,7 +68,7 @@ void RS485Bus::CRC_Calc(uint8_t array[], size_t arraySize, bool debug) {
   logPrintHex(crc, debug);
   logNewLine(debug);
 
-  logBufferMatrix8(array, arraySize, "Request after CRC", debug);
+  logBufferMatrix(array, arraySize, "Request after CRC", debug);
 }
 
 void RS485Bus::Request_RS485(const uint8_t reqArray[],
@@ -94,7 +94,7 @@ void RS485Bus::Request_RS485(const uint8_t reqArray[],
   logPrintDec((unsigned long)afterReqDelayMs, debug);
   logNewLine(debug);
 
-  logBufferMatrix8(reqArray, reqSize, "TX request buffer", debug);
+  logBufferMatrix(reqArray, reqSize, "TX request buffer", debug);
 
   flushInput();
   _dir.setTX(true);
@@ -163,7 +163,7 @@ size_t RS485Bus::Read_RS485(uint16_t readTimeoutMs, bool debug) {
   if (_rxLen == 0) {
     logPrintln(F("[RS485] RX buffer is empty"), debug);
   } else {
-    logBufferMatrix8(_rxBuf, _rxLen, "Full RX buffer", debug);
+    logBufferMatrix(_rxBuf, _rxLen, "Full RX buffer", debug);
   }
 
   return _rxLen;
@@ -224,7 +224,7 @@ void RS485Bus::ShiftArray(uint8_t array[], size_t arraySize, bool debug) const {
   }
   array[arraySize - 1] = first;
 
-  logBufferMatrix8(array, arraySize, "ShiftArray result", debug);
+  logBufferMatrix(array, arraySize, "ShiftArray result", debug);
 }
 
 bool RS485Bus::SendRequest(uint8_t request[],
@@ -269,8 +269,8 @@ bool RS485Bus::SendRequest(uint8_t request[],
   logPrintDec((unsigned long)afterReqDelayMs, debug);
   logNewLine(debug);
 
-  logBufferMatrix8(request, requestSize, "Initial request buffer", debug);
-  logBufferMatrix8(checkCode, checkCodeSize, "Expected prefix/check code", debug);
+  logBufferMatrix(request, requestSize, "Initial request buffer", debug);
+  logBufferMatrix(checkCode, checkCodeSize, "Expected prefix/check code", debug);
 
   for (uint8_t attempt = 1; attempt <= maxRetries; ++attempt) {
     logSeparator(debug);
@@ -318,7 +318,7 @@ bool RS485Bus::SendRequest(uint8_t request[],
         logPrintDec((unsigned long)offset, debug);
         logNewLine(debug);
 
-        logBufferMatrix8(getData, getDataSize, "Copied getData frame", debug);
+        logBufferMatrix(getData, getDataSize, "Copied getData frame", debug);
 
         logPrintln(F("[RS485] SendRequest() SUCCESS"), debug);
         logSeparator(debug);
@@ -411,7 +411,7 @@ void RS485Bus::logIO(const uint8_t *buf, size_t len, bool debug) const {
   _log->println("", debug);
 }
 
-void RS485Bus::logBufferMatrix8(const uint8_t *buf, size_t len, const char *title, bool debug) const {
+void RS485Bus::logBufferMatrix(const uint8_t *buf, size_t len, const char *title, bool debug) const {
   if (!_log || !buf) return;
 
   _log->print(F("[RS485] "), debug);
@@ -422,8 +422,9 @@ void RS485Bus::logBufferMatrix8(const uint8_t *buf, size_t len, const char *titl
     return;
   }
 
-  for (size_t rowStart = 0; rowStart < len; rowStart += 8) {
-    size_t rowEnd = rowStart + 8;
+  const size_t columns = (LOG_BUFFER_MATRIX_COLUMNS == 0) ? 8 : LOG_BUFFER_MATRIX_COLUMNS;
+  for (size_t rowStart = 0; rowStart < len; rowStart += columns) {
+    size_t rowEnd = rowStart + columns;
     if (rowEnd > len) rowEnd = len;
 
     _log->print(F("  ["), debug);
@@ -442,10 +443,10 @@ void RS485Bus::logBufferMatrix8(const uint8_t *buf, size_t len, const char *titl
 
 void RS485Bus::logWindow(const uint8_t *buf, size_t offset, size_t windowLen, bool debug) const {
   if (!_log || !buf) return;
-  logBufferMatrix8(buf + offset, windowLen, "Current frame window", debug);
+  logBufferMatrix(buf + offset, windowLen, "Current frame window", debug);
 }
 
 void RS485Bus::logTraceRaw(bool debug) const {
   if (!_log) return;
-  logBufferMatrix8(_rxBuf, _rxLen, "Full RX buffer as 8-byte matrix", debug);
+  logBufferMatrix(_rxBuf, _rxLen, "Full RX buffer as matrix", debug);
 }

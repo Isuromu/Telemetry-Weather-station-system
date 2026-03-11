@@ -1,22 +1,25 @@
 #include "RikaLeafSensor.h"
+#include "Configuration_System.h"
 
 RikaLeafSensor::RikaLeafSensor(RS485Bus& bus,
                                const char* sensorId,
                                uint8_t address,
                                bool debugEnable,
-                               uint8_t powerPin,
-                               uint8_t enablePin,
+                               uint8_t powerLineIndex,
+                               uint8_t interfaceIndex,
                                uint16_t sampleRateMin,
                                uint32_t warmUpTimeMs,
-                               uint8_t maxConsecutiveErrors)
+                               uint8_t maxConsecutiveErrors,
+                               uint32_t minUsefulPowerOffMs)
     : SensorDriver(sensorId,
                    address,
                    debugEnable,
-                   powerPin,
-                   enablePin,
+                   powerLineIndex,
+                   interfaceIndex,
                    sampleRateMin,
                    warmUpTimeMs,
-                   maxConsecutiveErrors),
+                   maxConsecutiveErrors,
+                   minUsefulPowerOffMs),
       _bus(bus),
       leaf_temp(0.0),
       leaf_humid(0.0) {}
@@ -29,7 +32,7 @@ void RikaLeafSensor::setFallbackValues() {
 bool RikaLeafSensor::readData() {
   markReadTime(millis());
 
-  const uint8_t DRIVER_RETRIES = 3;
+  const uint8_t DRIVER_RETRIES = SENSOR_DEFAULT_DRIVER_RETRIES;
 
   for (uint8_t driverAttempt = 1; driverAttempt <= DRIVER_RETRIES; ++driverAttempt) {
     uint8_t request[READ_REQUEST_SIZE] = {
@@ -45,10 +48,10 @@ bool RikaLeafSensor::readData() {
                                      READ_RESPONSE_SIZE,
                                      check,
                                      READ_CHECK_SIZE,
-                                     3,       // BUS retries
-                                     2000,    // BUS read timeout
+                                     SENSOR_DEFAULT_BUS_RETRIES,
+                                     SENSOR_DEFAULT_READ_TIMEOUT_MS,
                                      _debugEnable,
-                                     20);
+                                     SENSOR_DEFAULT_AFTER_REQ_MS);
 
     if (!ok) {
       continue;

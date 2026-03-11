@@ -1,222 +1,427 @@
-#include "config.h"
-#include "LeafSensor.h"
+#include <Arduino.h>
+#include "../config/Configuration.h"
+#include "../config/Configuration_System.h"
+#include "../config/Configuration_PCB.h"
+#include "../config/Configuration_Sensors.h"
+
 #include "PrintController.h"
 #include "RS485Modbus.h"
 #include "RikaLeafSensor.h"
-#include "SoilSensor7in1.h"
-#include <Arduino.h>
+#include "RikaSoilSensor3in1.h"
 
-// -------------------- Configuration --------------------
-#define SERIAL_BAUD 115200
-#define RS485_BAUD 9600
-#define DEBUG_LEVEL 2 // 0=SUMMARY  1=IO  2=TRACE
-#define DEBUG_ENABLED 1   // 0=silent
-
-// Pins for ESP32-S3
-#define RS485_RX_PIN 16
-#define RS485_TX_PIN 17
-#define RS485_DE_PIN 21
-
-// Scanner button (held at boot)
-#define SCAN_BUTTON_PIN 14
-#define SCAN_WINDOW_MS 3000
-#define SCAN_TIMEOUT_MS 100
-// -------------------------------------------------------
-
-static PrintController printer(Serial, static_cast<bool>(DEBUG_ENABLED));
-static RS485Bus bus;
-
+// ============================================================
+// Debug port
+// ============================================================
 #if defined(ARDUINO_ARCH_ESP32)
-HardwareSerial RS485Serial(1);
+HardwareSerial& DebugPort = Serial0;   // same UART side as upload bridge
+HardwareSerial RS485Hw0(1);
+#else
+#define DebugPort Serial
 #endif
 
-// Define the sensors present on your bus
-static SoilSensor7in1 soil(bus, 0x01);
-static LeafSensor leaf(bus, 0x02);
-static RikaLeafSensor rikaLeaf(bus, 0x03);
+static PrintController printer(DebugPort, false);
+static RS485Bus rs485Bus0;
 
-void scanAddresses() {
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("\n=================================================="));
-  }
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("  MODBUS ADDRESS SCANNER (Discovery Mode)"));
-  }
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("  Iterating addresses 1 to 247 with FC03..."));
-  }
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("==================================================\n"));
-  }
+// ============================================================
+// Sensor object creation from station configuration
+// ============================================================
+#ifdef RIKA_LEAF_00_ENABLED
+static RikaLeafSensor sensor_leaf_00(
+    rs485Bus0,
+    RIKA_LEAF_00_ID,
+    RIKA_LEAF_00_ADDRESS,
+    RIKA_LEAF_00_DEBUG,
+    RIKA_LEAF_00_POWERLINE,
+    RIKA_LEAF_00_RS485_PORT,
+    RIKA_LEAF_00_SAMPLE_RATE,
+    RIKA_LEAF_00_WARMUP_MS,
+    SENSOR_DEFAULT_MAX_ERRORS,
+    MIN_USEFUL_POWER_OFF_MS);
+#endif
 
-  uint8_t found = 0;
-  for (uint16_t addr = 1; addr <= 247; addr++) {
-    // 1. Prepare Request
-    uint8_t req[8];
-    req[0] = static_cast<uint8_t>(addr);
-    req[1] = 0x03;
-    req[2] = 0x00;
-    req[3] = 0x00;
-    req[4] = 0x00;
-    req[5] = 0x01;
-    uint16_t crc = RS485Bus::crc16Modbus(req, 6);
-    req[6] = crc & 0xFF;
-    req[7] = crc >> 8;
+#ifdef RIKA_SOIL3IN1_00_ENABLED
+static RikaSoilSensor3in1 sensor_soil_00(
+    rs485Bus0,
+    RIKA_SOIL3IN1_00_ID,
+    RIKA_SOIL3IN1_00_ADDRESS,
+    RIKA_SOIL3IN1_00_DEBUG,
+    RIKA_SOIL3IN1_00_POWERLINE,
+    RIKA_SOIL3IN1_00_RS485_PORT,
+    RIKA_SOIL3IN1_00_SAMPLE_RATE,
+    RIKA_SOIL3IN1_00_WARMUP_MS,
+    SENSOR_DEFAULT_MAX_ERRORS,
+    MIN_USEFUL_POWER_OFF_MS);
+#endif
 
-    // 2. Log Progress with Hex Request
-    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.print(F("[Scanner] Trying 0x"));
-  }
-    if (addr < 16)
-      printer.print(F("0"));
-    printer.print(addr, HEX);
-    printer.print(F(" ("));
-    for (int i = 0; i < 8; i++) {
-      if (req[i] < 16)
-        printer.print(F("0"));
-      printer.print(req[i], HEX);
-      if (i < 7)
-        printer.print(F(" "));
+static SensorDriver* g_sensors[] = {
+#ifdef RIKA_LEAF_00_ENABLED
+  &sensor_leaf_00,
+#endif
+#ifdef RIKA_SOIL3IN1_00_ENABLED
+  &sensor_soil_00,
+#endif
+};
+
+static const size_t g_sensorCount = sizeof(g_sensors) / sizeof(g_sensors[0]);
+
+// ============================================================
+// Runtime power/interface state tracking
+// ============================================================
+static bool g_powerLineState[PCB_POWERLINE_COUNT] = {false};
+static bool g_rs485InterfaceState[PCB_RS485_PORT_COUNT] = {false};
+
+// ============================================================
+// Read plan structure
+// ============================================================
+struct ReadPlanEntry {
+  SensorDriver* sensor;
+};
+
+static ReadPlanEntry g_readPlan[16];
+static size_t g_readPlanCount = 0;
+
+// ============================================================
+// Helpers
+// ============================================================
+static void printBanner() {
+  printer.println(F(""), true);
+  printer.println(F("============================================================"), true);
+  printer.println(F(" Primary Station Main - Sensor Architecture Test"), true);
+  printer.println(F("============================================================"), true);
+  printer.print(F("Station ID: "), true);
+  printer.println(STATION_ID, true);
+  printer.print(F("PCB: "), true);
+  printer.println(PCB_NAME, true);
+  printer.println(F(""), true);
+}
+
+static void initPowerLines() {
+  for (uint8_t i = 0; i < PCB_POWERLINE_COUNT; ++i) {
+    const int8_t pin = PCB_POWERLINE_SWITCH_PINS[i];
+    if (pin >= 0) {
+      pinMode(pin, OUTPUT);
+      const bool activeHigh = PCB_POWERLINE_ACTIVE_HIGH[i];
+      digitalWrite(pin, activeHigh ? LOW : HIGH); // OFF state
     }
-    printer.print(F(") -> "));
+    g_powerLineState[i] = false;
+  }
+}
 
-    // 3. Transfer
-    if (bus.transferRaw(req, 8, SCAN_TIMEOUT_MS)) {
-      printer.println(F("FOUND!"));
-      found++;
+static void initInterfaces() {
+  for (uint8_t i = 0; i < PCB_RS485_PORT_COUNT; ++i) {
+    const int8_t enPin = PCB_RS485_ENABLE_PINS[i];
+    if (enPin >= 0) {
+      pinMode(enPin, OUTPUT);
+      const bool activeHigh = PCB_RS485_ENABLE_ACTIVE_HIGH[i];
+      digitalWrite(enPin, activeHigh ? LOW : HIGH); // disabled
+    }
+    g_rs485InterfaceState[i] = false;
+  }
+}
+
+static void powerLineSet(uint8_t index, bool on) {
+  if (index >= PCB_POWERLINE_COUNT) return;
+
+  const int8_t pin = PCB_POWERLINE_SWITCH_PINS[index];
+  if (pin >= 0) {
+    const bool activeHigh = PCB_POWERLINE_ACTIVE_HIGH[index];
+    digitalWrite(pin, on ? (activeHigh ? HIGH : LOW)
+                         : (activeHigh ? LOW  : HIGH));
+  }
+  g_powerLineState[index] = on;
+}
+
+static bool powerLineReadState(uint8_t index) {
+  if (index >= PCB_POWERLINE_COUNT) return false;
+
+  const int8_t statusPin = PCB_POWERLINE_STATUS_PINS[index];
+  if (statusPin >= 0) {
+    const bool activeHigh = PCB_POWERLINE_STATUS_ACTIVE_HIGH[index];
+    const int raw = digitalRead(statusPin);
+    return activeHigh ? (raw == HIGH) : (raw == LOW);
+  }
+
+  if (PCB_POWERLINE_SWITCH_PINS[index] < 0) {
+    return true; // physically always on in current test hardware
+  }
+
+  return g_powerLineState[index];
+}
+
+static void rs485InterfaceSet(uint8_t index, bool on) {
+  if (index >= PCB_RS485_PORT_COUNT) return;
+
+  const int8_t pin = PCB_RS485_ENABLE_PINS[index];
+  if (pin >= 0) {
+    const bool activeHigh = PCB_RS485_ENABLE_ACTIVE_HIGH[index];
+    digitalWrite(pin, on ? (activeHigh ? HIGH : LOW)
+                         : (activeHigh ? LOW  : HIGH));
+  }
+  g_rs485InterfaceState[index] = on;
+}
+
+static bool hasPlannedSensorInGroup(uint8_t powerLine, uint8_t interfaceIndex) {
+  for (size_t i = 0; i < g_readPlanCount; ++i) {
+    if (g_readPlan[i].sensor->getPowerLineIndex() == powerLine &&
+        g_readPlan[i].sensor->getInterfaceIndex() == interfaceIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool hasPlannedSensorOnPowerLine(uint8_t powerLine) {
+  for (size_t i = 0; i < g_readPlanCount; ++i) {
+    if (g_readPlan[i].sensor->getPowerLineIndex() == powerLine) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static uint32_t getMaxWarmupForPowerLine(uint8_t powerLine) {
+  uint32_t maxWarmup = 0;
+
+  for (size_t i = 0; i < g_readPlanCount; ++i) {
+    SensorDriver* sensor = g_readPlan[i].sensor;
+    if (sensor->getPowerLineIndex() == powerLine) {
+      if (sensor->getWarmUpTimeMs() > maxWarmup) {
+        maxWarmup = sensor->getWarmUpTimeMs();
+      }
+    }
+  }
+
+  return maxWarmup;
+}
+
+static bool powerLineShouldStayOn(uint8_t powerLine) {
+  if (powerLine >= PCB_POWERLINE_COUNT) return false;
+  if (!PCB_POWERLINE_CAN_STAY_ON_IN_SLEEP[powerLine]) return false;
+
+  for (size_t i = 0; i < g_sensorCount; ++i) {
+    if (g_sensors[i]->getPowerLineIndex() == powerLine &&
+        g_sensors[i]->shouldKeepPowerOn()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static void printSensorMap() {
+  printer.println(F("Sensor map:"), true);
+
+  for (size_t i = 0; i < g_sensorCount; ++i) {
+    SensorDriver* s = g_sensors[i];
+    printer.print(F("  ID="), true);
+    printer.print(s->getSensorId(), true, " | ");
+    printer.print(F("Addr=0x"), true);
+    printer.print((unsigned int)s->getAddress(), true, " | ", HEX);
+    printer.print(F("PowerLine="), true);
+    printer.print((unsigned int)s->getPowerLineIndex(), true, " | ");
+    printer.print(F("Interface="), true);
+    printer.print((unsigned int)s->getInterfaceIndex(), true, " | ");
+    printer.print(F("SampleMin="), true);
+    printer.print((unsigned int)s->getSampleRateMin(), true, " | ");
+    printer.print(F("WarmUpMs="), true);
+    printer.print((unsigned long)s->getWarmUpTimeMs(), true, " | ");
+    printer.print(F("KeepOn="), true);
+    printer.println(s->shouldKeepPowerOn() ? F("true") : F("false"), true);
+  }
+
+  printer.println(F(""), true);
+}
+
+static void printDuePlan() {
+  printer.println(F("[PLAN] Current due sensor plan:"), true);
+
+  if (g_readPlanCount == 0) {
+    printer.println(F("  <empty>"), true);
+    printer.println(F(""), true);
+    return;
+  }
+
+  for (size_t i = 0; i < g_readPlanCount; ++i) {
+    SensorDriver* s = g_readPlan[i].sensor;
+    printer.print(F("  "), true);
+    printer.print(s->getSensorId(), true, " | ");
+    printer.print(F("Pwr="), true);
+    printer.print((unsigned int)s->getPowerLineIndex(), true, " | ");
+    printer.print(F("If="), true);
+    printer.print((unsigned int)s->getInterfaceIndex(), true, " | ");
+    printer.print(F("SampleMin="), true);
+    printer.println((unsigned int)s->getSampleRateMin(), true);
+  }
+
+  printer.println(F(""), true);
+}
+
+static size_t buildReadPlan(uint32_t nowMs) {
+  g_readPlanCount = 0;
+
+  for (size_t i = 0; i < g_sensorCount; ++i) {
+    SensorDriver* s = g_sensors[i];
+
+    if (!s->isOnline()) {
+      continue;
+    }
+
+    if (!s->isDueForRead(nowMs)) {
+      continue;
+    }
+
+    if (g_readPlanCount < (sizeof(g_readPlan) / sizeof(g_readPlan[0]))) {
+      g_readPlan[g_readPlanCount++].sensor = s;
+    }
+  }
+
+  return g_readPlanCount;
+}
+
+static void printReadResult(SensorDriver* sensor, bool ok) {
+#ifdef RIKA_LEAF_00_ENABLED
+  if (sensor == &sensor_leaf_00) {
+    if (ok) {
+      printer.print(F("[DATA] "), true);
+      printer.print(sensor_leaf_00.getSensorId(), true, " | ");
+      printer.print(F("Temp="), true);
+      printer.print(sensor_leaf_00.leaf_temp, true, " C | ", 1);
+      printer.print(F("Hum="), true);
+      printer.print(sensor_leaf_00.leaf_humid, true, " %", 1);
+      printer.println("", true);
     } else {
-      printer.println(F("no response"));
+      printer.print(F("[DATA] Read fail: "), true);
+      printer.print(sensor_leaf_00.getSensorId(), true, " | errors=");
+      printer.println((unsigned int)sensor_leaf_00.getConsecutiveErrors(), true);
+    }
+    return;
+  }
+#endif
+
+#ifdef RIKA_SOIL3IN1_00_ENABLED
+  if (sensor == &sensor_soil_00) {
+    if (ok) {
+      printer.print(F("[DATA] "), true);
+      printer.print(sensor_soil_00.getSensorId(), true, " | ");
+      printer.print(F("Temp="), true);
+      printer.print(sensor_soil_00.soil_temp, true, " C | ", 1);
+      printer.print(F("VWC="), true);
+      printer.print(sensor_soil_00.soil_vwc, true, " % | ", 1);
+      printer.print(F("EC="), true);
+      printer.print(sensor_soil_00.soil_ec, true, " mS/cm", 4);
+      printer.println("", true);
+    } else {
+      printer.print(F("[DATA] Read fail: "), true);
+      printer.print(sensor_soil_00.getSensorId(), true, " | errors=");
+      printer.println((unsigned int)sensor_soil_00.getConsecutiveErrors(), true);
+    }
+    return;
+  }
+#endif
+}
+
+static void executeReadPlan() {
+  if (g_readPlanCount == 0) return;
+
+  for (uint8_t powerLine = 0; powerLine < PCB_POWERLINE_COUNT; ++powerLine) {
+    if (!hasPlannedSensorOnPowerLine(powerLine)) {
+      continue;
     }
 
-    // 4. Yield for ESP32 background tasks
-    delay(1);
-    yield();
-  }
+    printer.println(F("============================================================"), true);
+    printer.print(F("[EXEC] PowerLine "), true);
+    printer.print((unsigned int)powerLine, true, " | Voltage=");
+    printer.print((unsigned int)PCB_POWERLINE_VOLTAGES[powerLine], true, " V");
+    printer.println("", true);
 
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("\n--------------------------------------------------"));
+    if (!powerLineReadState(powerLine)) {
+      printer.println(F("[EXEC] PowerLine is OFF -> enabling"), true);
+      powerLineSet(powerLine, true);
+    } else {
+      printer.println(F("[EXEC] PowerLine already ON"), true);
+    }
+
+    const uint32_t warmupMs = getMaxWarmupForPowerLine(powerLine);
+    if (warmupMs > 0) {
+      printer.print(F("[EXEC] Warm-up on this power line = "), true);
+      printer.print((unsigned long)warmupMs, true, " ms");
+      printer.println("", true);
+      delay(warmupMs);
+    }
+
+    for (uint8_t iface = 0; iface < PCB_RS485_PORT_COUNT; ++iface) {
+      if (!hasPlannedSensorInGroup(powerLine, iface)) {
+        continue;
+      }
+
+      printer.print(F("[EXEC] Interface "), true);
+      printer.println((unsigned int)iface, true);
+
+      rs485InterfaceSet(iface, true);
+
+      if (PCB_RS485_ENABLE_DELAY_MS[iface] > 0) {
+        delay(PCB_RS485_ENABLE_DELAY_MS[iface]);
+      }
+
+      for (size_t i = 0; i < g_readPlanCount; ++i) {
+        SensorDriver* s = g_readPlan[i].sensor;
+
+        if (s->getPowerLineIndex() != powerLine) continue;
+        if (s->getInterfaceIndex() != iface) continue;
+
+        printer.println(F("------------------------------------------------------------"), true);
+        printer.print(F("[EXEC] Reading sensor: "), true);
+        printer.println(s->getSensorId(), true);
+
+        const bool ok = s->readData();
+        printReadResult(s, ok);
+      }
+
+      rs485InterfaceSet(iface, false);
+    }
+
+    if (!powerLineShouldStayOn(powerLine)) {
+      printer.println(F("[EXEC] PowerLine can be turned OFF"), true);
+      powerLineSet(powerLine, false);
+    } else {
+      printer.println(F("[EXEC] PowerLine stays ON due to keepPowerOn policy"), true);
+    }
+
+    printer.println(F(""), true);
   }
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.print(F("Scan Complete. Found "));
-  }
-  printer.print(found);
-  printer.println(F(" devices."));
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("--------------------------------------------------\n"));
-  }
-  bus.flushInput();
 }
 
 void setup() {
-  Serial.begin(SERIAL_BAUD);
-  delay(500);
+  DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
+  delay(300);
 
-  // Firmware identification banner
-  printer.println(F(""));
-  printer.println(F("==========================================="));
-  printer.println(F("  PROJECT: Telemetry Weather Station"));
-  printer.println(F("  FIRMWARE: Main Sensor Loop"));
-  printer.println(F("  Program starts here (reset point)."));
-  printer.println(F("==========================================="));
-
-  pinMode(SCAN_BUTTON_PIN, INPUT_PULLUP);
-  bus.setDebug(&printer, static_cast<bool>(DEBUG_ENABLED), static_cast<uint8_t>(DEBUG_LEVEL));
+  printBanner();
+  initPowerLines();
+  initInterfaces();
 
 #if defined(ARDUINO_ARCH_ESP32)
-  bus.begin(RS485Serial, RS485_BAUD, RS485_RX_PIN, RS485_TX_PIN);
+  rs485Bus0.setDebug(&printer);
+  rs485Bus0.begin(RS485Hw0,
+                  RS485_DEFAULT_BAUD,
+                  PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
+                  PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
+                  RS485_DEFAULT_SERIAL_CONFIG);
+  rs485Bus0.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
+                                PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 #else
-  bus.begin(Serial2, RS485_BAUD);
+  rs485Bus0.setDebug(&printer);
+  rs485Bus0.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
-  bus.setDirectionControl(RS485_DE_PIN, true);
 
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("--> WAITING FOR SCAN BUTTON (GPIO14 TO GND) <--"));
-  }
-  if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("Hold button NOW for 5 seconds to enter DISCOVERY MODE..."));
-  }
-
-  uint32_t deadline = millis() + 5000; // 5 second window
-  bool doScan = false;
-  while (millis() < deadline) {
-    if (digitalRead(SCAN_BUTTON_PIN) == LOW) {
-      delay(50); // debounce
-      if (digitalRead(SCAN_BUTTON_PIN) == LOW) {
-        doScan = true;
-        break;
-      }
-    }
-    delay(10);
-  }
-
-  if (doScan) {
-    scanAddresses();
-  } else {
-    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("No button press detected. Entering normal POLLING LOOP.\n"));
-  }
-  }
+  printSensorMap();
 }
 
 void loop() {
-  static uint32_t lastPoll = 0;
-  if (millis() - lastPoll >= 3000 || lastPoll == 0) {
-    lastPoll = millis();
+  const uint32_t nowMs = millis();
 
-    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("--- Polling Cycle Start ---"));
-  }
+  buildReadPlan(nowMs);
+  printDuePlan();
+  executeReadPlan();
 
-    // 1. Soil Sensor
-    SoilSensor7in1_Data soilData{};
-    if (soil.readAll(soilData)) {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.print(F("SOIL (addr 1)   : Temp="));
-  }
-      printer.print(soilData.temperatureC, 1);
-      printer.print(F("C, Hum="));
-      printer.print(soilData.humidityPct, 1);
-      printer.println(F("%"));
-    } else {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("SOIL (addr 1)   : FAILED"));
-  }
-    }
-
-    // 2. Leaf Sensor
-    LeafSensor_Data leafData{};
-    if (leaf.readAll(leafData)) {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.print(F("LEAF (addr 2)   : Temp="));
-  }
-      printer.print(leafData.temperatureC, 1);
-      printer.print(F("C, Hum="));
-      printer.print(leafData.humidityPct, 1);
-      printer.println(F("%"));
-    } else {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("LEAF (addr 2)   : FAILED"));
-  }
-    }
-
-    // 3. Rika Leaf Sensor
-    RikaLeafSensor_Data rikaData{};
-    if (rikaLeaf.readAll(rikaData)) {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.print(F("RIKA LEAF (addr 3): Temp="));
-  }
-      printer.print(rikaData.rika_leaf_temp, 1);
-      printer.print(F("C, Hum="));
-      printer.print(rikaData.rika_leaf_humid, 1);
-      printer.println(F("%"));
-    } else {
-      if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("RIKA LEAF (addr 3): FAILED"));
-  }
-    }
-
-    if (DEBUG_ENABLED && DEBUG_LEVEL >= 2) {
-    printer.println(F("--- Polling Cycle End ---\n"));
-  }
-  }
+  delay(1000);
 }

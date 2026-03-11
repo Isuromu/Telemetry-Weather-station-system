@@ -14,6 +14,10 @@ public:
   static const size_t RX_BUFFER_SIZE = RS485BUS_RX_BUFFER_SIZE;
 #endif
 
+  // Number of bytes shown per row by debug matrix logging.
+  // Change this to 16 (or any value > 0) to widen the log matrix.
+  static constexpr size_t LOG_BUFFER_MATRIX_COLUMNS = 16;
+
   struct DirectionControl {
     int8_t pin;
     bool activeHighTX;
@@ -109,7 +113,7 @@ private:
 
   void logSeparator(bool debug) const;
   void logIO(const uint8_t *buf, size_t len, bool debug) const;
-  void logBufferMatrix8(const uint8_t *buf, size_t len, const char *title, bool debug) const;
+  void logBufferMatrix(const uint8_t *buf, size_t len, const char *title, bool debug) const;
   void logWindow(const uint8_t *buf, size_t offset, size_t windowLen, bool debug) const;
   void logTraceRaw(bool debug) const;
 };
