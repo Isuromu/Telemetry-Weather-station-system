@@ -1,0 +1,15 @@
+{
+  "name": "JXBS_LeafSurfaceHumidity",
+  "version": "1.0.0",
+  "description": "JXBS-3001-YMSD Leaf Surface Humidity and Temperature RS485 driver",
+  "keywords": ["jxbs", "leaf", "humidity", "temperature", "rs485", "modbus"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RS485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}
