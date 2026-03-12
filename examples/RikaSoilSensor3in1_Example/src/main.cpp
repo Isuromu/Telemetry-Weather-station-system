@@ -4,16 +4,32 @@
 #include "RS485Modbus.h"
 #include "RikaSoilSensor3in1.h"
 
+/*
+  Rika Soil Sensor 3-in-1 Example
+
+  Runtime flow:
+  1) Initialize debug serial and RS485 bus.
+  2) Optionally scan Modbus addresses.
+  3) Optionally set soil type during boot.
+  4) Poll primary values (temp, VWC, EC).
+  5) Optionally poll soil type, epsilon, and compensation coefficients.
+
+  Keep this example focused on diagnostics and protocol visibility.
+*/
 #if defined(ARDUINO_ARCH_ESP32)
+// ESP32: debug on UART0, RS485 on UART1.
 HardwareSerial& DebugPort = Serial0;
 HardwareSerial RS485Port(1);
 #else
+// Non-ESP32 fallback: debug on default Serial.
 #define DebugPort Serial
 #endif
 
+// Logging facade and RS485 transport used by the soil sensor driver.
 static PrintController printer(DebugPort, false);
 static RS485Bus rs485;
 
+// Soil driver instance with application policy values from config + global configs.
 static RikaSoilSensor3in1 soil(
     rs485,
     SENSOR_ID,
@@ -26,6 +42,7 @@ static RikaSoilSensor3in1 soil(
     SENSOR_DEFAULT_MAX_ERRORS,
     MIN_USEFUL_POWER_OFF_MS);
 
+// Prints a startup summary in serial monitor.
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
@@ -37,6 +54,7 @@ static void printBanner() {
   printer.println(F(""), true);
 }
 
+// Prints result of the main readData() transaction.
 static void printMainReadResult(bool ok) {
   if (ok) {
     printer.print(F("[APP] Sensor ID: "), true);
@@ -65,6 +83,7 @@ static void printMainReadResult(bool ok) {
   }
 }
 
+// Prints normalized soil type name returned by readSoilType().
 static void printSoilTypeResult(bool ok, RikaSoilSensor3in1::SoilType type) {
   if (ok) {
     printer.print(F("[APP] Soil type: "), true);
@@ -74,6 +93,7 @@ static void printSoilTypeResult(bool ok, RikaSoilSensor3in1::SoilType type) {
   }
 }
 
+// Prints dielectric constant (epsilon) read status/value.
 static void printEpsilonResult(bool ok, double eps) {
   if (ok) {
     printer.print(F("[APP] Epsilon: "), true);
@@ -83,6 +103,7 @@ static void printEpsilonResult(bool ok, double eps) {
   }
 }
 
+// Generic helper for optional compensation-coefficient reads.
 static void printCoeffResult(const __FlashStringHelper* label, bool ok, double value) {
   printer.print(label, true);
   if (ok) {
@@ -93,25 +114,31 @@ static void printCoeffResult(const __FlashStringHelper* label, bool ok, double v
 }
 
 void setup() {
+  // 1) Bring up debug serial first so all setup steps are visible.
   DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
   delay(300);
   printBanner();
 
+  // 2) Hook RS485 debug logging to the shared printer.
   rs485.setDebug(&printer);
 
 #if defined(ARDUINO_ARCH_ESP32)
+  // 3) Initialize RS485 UART and board-specific RX/TX pins.
   rs485.begin(RS485Port,
               RS485_DEFAULT_BAUD,
               PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
               PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
               RS485_DEFAULT_SERIAL_CONFIG);
 #else
+  // Non-ESP32 fallback signature.
   rs485.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
 
+  // 4) Configure DE/RE control for half-duplex RS485 transceiver.
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
+  // 5) Optional one-time address discovery sweep.
   if (DO_SCAN) {
     printer.println(F("[APP] Scan mode enabled. Searching sensor address..."), true);
     const uint8_t found = soil.scanForAddress(1, 247, 120, 20);
@@ -124,6 +151,7 @@ void setup() {
     printer.println(F(""), true);
   }
 
+  // 6) Optional boot-time soil type write (persisted by sensor).
   if (SET_SOIL_TYPE_ON_BOOT) {
     printer.print(F("[APP] Setting soil type at boot to value "), true);
     printer.println((unsigned int)BOOT_SOIL_TYPE, true);
@@ -138,6 +166,7 @@ void setup() {
 }
 
 void loop() {
+  // Periodic diagnostic polling cycle.
   printer.println(F(""), true);
   printer.println(F("------------------------------------------------------------"), true);
   printer.println(F("[APP] New polling cycle"), true);
@@ -146,6 +175,7 @@ void loop() {
   const bool ok = soil.readData();
   printMainReadResult(ok);
 
+  // Optional extended diagnostic calls.
   if (READ_SOIL_TYPE_IN_LOOP) {
     RikaSoilSensor3in1::SoilType type = RikaSoilSensor3in1::SOIL_UNKNOWN;
     const bool typeOk = soil.readSoilType(type, 3, 500, 20);
@@ -161,6 +191,7 @@ void loop() {
   if (READ_COMP_COEFFS_IN_LOOP) {
     double coeff = -99.0;
 
+    // These registers are configured in config.h.
     bool okCoeff = soil.readCompensationCoeff(REG_EC_TEMP_COEFF, coeff, 3, 500, 20);
     printCoeffResult(F("[APP] EC temp coeff: "), okCoeff, coeff);
 

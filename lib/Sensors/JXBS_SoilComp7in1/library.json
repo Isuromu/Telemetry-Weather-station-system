@@ -1,0 +1,15 @@
+{
+  "name": "JXBS_SoilComp7in1",
+  "version": "1.0.0",
+  "description": "JXBS-3001-TR Soil Comprehensive Sensor 7-in-1 RS485 driver",
+  "keywords": ["jxbs", "soil", "7in1", "rs485", "modbus", "npk", "ph"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RS485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

@@ -2,130 +2,140 @@
 #include "config.h"
 #include "PrintController.h"
 #include "RS485Modbus.h"
-#include "RikaLeafSensor.h"
+#include "JXBS_SoilComp7in1.h"
 
-/*
-  Rika Leaf Sensor Example
-
-  Runtime flow:
-  1) Bring up debug serial and RS485 bus.
-  2) Optionally scan Modbus addresses to find the sensor.
-  3) Poll the driver periodically and print decoded values.
-
-  This example intentionally keeps logic simple so it can be used as:
-  - a wiring/bring-up diagnostic
-  - a template for integrating RikaLeafSensor into other projects
-*/
 #if defined(ARDUINO_ARCH_ESP32)
-// ESP32: use UART0 for debug output and UART1 for RS485 traffic.
 HardwareSerial& DebugPort = Serial0;
 HardwareSerial RS485Port(1);
 #else
-// AVR/other targets: use default debug serial and Serial2 for RS485 below.
 #define DebugPort Serial
 #endif
 
-// Print wrapper: second ctor argument controls default logging enable.
 static PrintController printer(DebugPort, false);
-// Shared RS485 transport used by the sensor driver.
 static RS485Bus rs485;
 
-// Driver instance with settings sourced from config.h and global Configuration_*.
-static RikaLeafSensor leaf(
+static JXBS_SoilComp7in1 soil(
     rs485,
     SENSOR_ID,
     SENSOR_ADDRESS,
     SENSOR_DEBUG,
     POWERLINE_INDEX_0,
     RS485_PORT_INDEX_0,
-    SAMPLE_RATE_5_MIN,
+    SAMPLE_RATE_15_MIN,
     1000UL,
     SENSOR_DEFAULT_MAX_ERRORS,
     MIN_USEFUL_POWER_OFF_MS);
 
-// Startup banner for human-readable monitor output.
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
-  printer.println(F(" Rika Leaf Sensor Simple Diagnostic Example"), true);
+  printer.println(F(" JXBS Soil Comprehensive 7-in-1 Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
   printer.println(F("- Optional scan in setup()"), true);
-  printer.println(F("- Then plain polling"), true);
+  printer.println(F("- Optional address change at boot"), true);
+  printer.println(F("- Loop reads 7 values"), true);
   printer.println(F(""), true);
 }
 
-// Prints one polling result in a compact line-oriented format.
 static void printReadResult(bool ok) {
   if (ok) {
     printer.print(F("[APP] Sensor ID: "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
+    printer.print(soil.getSensorId(), true, " | ");
+
     printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
-
+    printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
     printer.println("", true);
-    printer.print(F("[APP] Successfully Read Values: "), true, "| ");
 
-    printer.print(F("Temperature: "), true);
-    printer.print(leaf.leaf_temp, true, " C | ", 1);
-    printer.print(F("Humidity: "), true);
-    printer.print(leaf.leaf_humid, true, " %", 1);
+    printer.println(F("[APP] Successfully Read Values:"), true);
+
+    printer.print(F("Moisture: "), true);
+    printer.print(soil.soil_moisture, true, " % | ", 1);
+
+    printer.print(F("Temp: "), true);
+    printer.print(soil.soil_temp, true, " C", 1);
+    printer.println("", true);
+
+    printer.print(F("EC: "), true);
+    printer.print(soil.soil_ec, true, " us/cm | ", 0);
+
+    printer.print(F("pH: "), true);
+    printer.print(soil.soil_ph, true, "", 2);
+    printer.println("", true);
+
+    printer.print(F("N: "), true);
+    printer.print((unsigned int)soil.soil_nitrogen, true, " mg/kg | ");
+
+    printer.print(F("P: "), true);
+    printer.print((unsigned int)soil.soil_phosphorus, true, " mg/kg | ");
+
+    printer.print(F("K: "), true);
+    printer.print((unsigned int)soil.soil_potassium, true, " mg/kg");
     printer.println("", true);
   } else {
     printer.print(F("[APP] Read failed for sensor "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
+    printer.print(soil.getSensorId(), true, " | ");
     printer.print(F("Error count: "), true);
-    printer.println((unsigned int)leaf.getConsecutiveErrors(), true);
+    printer.println((unsigned int)soil.getConsecutiveErrors(), true);
   }
 }
 
 void setup() {
-  // 1) Debug serial first, so all subsequent initialization is visible.
   DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
   delay(300);
   printBanner();
 
-  // 2) Route RS485 internal debug tracing through printer when enabled.
+  pinMode(PCB_SERVICE_BUTTON_PIN, INPUT_PULLUP);
+
   rs485.setDebug(&printer);
 
 #if defined(ARDUINO_ARCH_ESP32)
-  // 3) Bring up RS485 UART with board-specific RX/TX pins.
   rs485.begin(RS485Port,
               RS485_DEFAULT_BAUD,
               PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
               PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
               RS485_DEFAULT_SERIAL_CONFIG);
 #else
-  // Non-ESP32 fallback signature.
   rs485.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
 
-  // 4) Configure DE/RE direction control pin for half-duplex RS485 transceiver.
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
-  // 5) Optional address discovery pass before steady-state polling.
   if (DO_SCAN) {
-    printer.println(F("[APP] Scan mode is enabled. Searching address..."), true);
-    const uint8_t found = leaf.scanForAddress(1, 247, 120, 20);
+    printer.println(F("[APP] Scan mode enabled. Searching sensor address..."), true);
+    const uint8_t found = soil.scanForAddress(1, 247, 150, SENSOR_DEFAULT_AFTER_REQ_MS);
     if (found != 0) {
       printer.print(F("[APP] Sensor found at address 0x"), true);
       printer.println((unsigned int)found, true, "", HEX);
     } else {
       printer.println(F("[APP] No sensor responded during scan."), true);
     }
+    printer.println(F(""), true);
+  }
+
+  if (TRY_ADDRESS_CHANGE_AT_BOOT && digitalRead(PCB_SERVICE_BUTTON_PIN) == LOW) {
+    delay(50);
+    if (digitalRead(PCB_SERVICE_BUTTON_PIN) == LOW) {
+      printer.println(F("[APP] Address change requested at boot"), true);
+
+      if (soil.changeAddress(NEW_ADDRESS, SENSOR_DEFAULT_BUS_RETRIES, 500, SENSOR_DEFAULT_AFTER_REQ_MS)) {
+        printer.print(F("[APP] Address changed successfully to 0x"), true);
+        printer.println((unsigned int)soil.getAddress(), true, "", HEX);
+      } else {
+        printer.println(F("[APP] Address change failed."), true);
+      }
+      printer.println(F(""), true);
+    }
   }
 }
 
 void loop() {
-  // Periodic poll loop; all timing is controlled by POLL_INTERVAL_MS.
   printer.println(F(""), true);
   printer.println(F("------------------------------------------------------------"), true);
   printer.println(F("[APP] New polling cycle"), true);
   printer.println(F("------------------------------------------------------------"), true);
 
-  const bool ok = leaf.readData();
+  const bool ok = soil.readData();
   printReadResult(ok);
 
   printer.println(F(""), true);
