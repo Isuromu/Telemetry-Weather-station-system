@@ -38,26 +38,26 @@ static void printBanner() {
 }
 
 static void printReadResult(bool ok) {
+  printer.print(F("[APP] Sensor ID: "), true);
+  printer.print(leaf.getSensorId(), true, " | ");
+  printer.print(F("Address: 0x"), true);
+  printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
+  printer.println("", true);
+
   if (ok) {
-    printer.print(F("[APP] Sensor ID: "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
-
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
-    printer.println("", true);
-
     printer.println(F("[APP] Successfully Read Values:"), true);
-
-    printer.print(F("Leaf Humidity: "), true);
-    printer.print(leaf.leaf_humidity, true, " %RH | ", 1);
-
-    printer.print(F("Leaf Temperature: "), true);
-    printer.print(leaf.leaf_temperature, true, " C", 1);
-    printer.println("", true);
   } else {
-    printer.print(F("[APP] Read failed for sensor "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
-    printer.print(F("Error count: "), true);
+    printer.println(F("[APP] Read failed. Current driver attributes:"), true);
+  }
+
+  printer.print(F("Leaf Humidity: "), true);
+  printer.print(leaf.leaf_humidity, true, " %RH | ", 1);
+  printer.print(F("Leaf Temperature: "), true);
+  printer.print(leaf.leaf_temperature, true, " C", 1);
+  printer.println("", true);
+
+  if (!ok) {
+    printer.print(F("[APP] Error count: "), true);
     printer.println((unsigned int)leaf.getConsecutiveErrors(), true);
   }
 }

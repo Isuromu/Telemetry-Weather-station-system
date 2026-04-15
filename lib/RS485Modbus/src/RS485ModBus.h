@@ -54,6 +54,7 @@ public:
   void setDebug(PrintController *logger);
   void setTimings(uint16_t preTxDelayUs, uint16_t postTxDelayUs);
   void flushInput();
+  PrintController* getLogger() const { return _log; }
 
   void CRC_Calc(uint8_t array[], size_t arraySize, bool debug = false);
 

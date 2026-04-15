@@ -38,43 +38,40 @@ static void printBanner() {
 }
 
 static void printReadResult(bool ok) {
+  printer.print(F("[APP] Sensor ID: "), true);
+  printer.print(soil.getSensorId(), true, " | ");
+  printer.print(F("Address: 0x"), true);
+  printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
+  printer.println("", true);
+
   if (ok) {
-    printer.print(F("[APP] Sensor ID: "), true);
-    printer.print(soil.getSensorId(), true, " | ");
-
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
-    printer.println("", true);
-
     printer.println(F("[APP] Successfully Read Values:"), true);
-
-    printer.print(F("Moisture: "), true);
-    printer.print(soil.soil_moisture, true, " % | ", 1);
-
-    printer.print(F("Temp: "), true);
-    printer.print(soil.soil_temp, true, " C", 1);
-    printer.println("", true);
-
-    printer.print(F("EC: "), true);
-    printer.print(soil.soil_ec, true, " us/cm | ", 0);
-
-    printer.print(F("pH: "), true);
-    printer.print(soil.soil_ph, true, "", 2);
-    printer.println("", true);
-
-    printer.print(F("N: "), true);
-    printer.print((unsigned int)soil.soil_nitrogen, true, " mg/kg | ");
-
-    printer.print(F("P: "), true);
-    printer.print((unsigned int)soil.soil_phosphorus, true, " mg/kg | ");
-
-    printer.print(F("K: "), true);
-    printer.print((unsigned int)soil.soil_potassium, true, " mg/kg");
-    printer.println("", true);
   } else {
-    printer.print(F("[APP] Read failed for sensor "), true);
-    printer.print(soil.getSensorId(), true, " | ");
-    printer.print(F("Error count: "), true);
+    printer.println(F("[APP] Read failed. Current driver attributes:"), true);
+  }
+
+  printer.print(F("Moisture: "), true);
+  printer.print(soil.soil_moisture, true, " % | ", 1);
+  printer.print(F("Temp: "), true);
+  printer.print(soil.soil_temp, true, " C", 1);
+  printer.println("", true);
+
+  printer.print(F("EC: "), true);
+  printer.print(soil.soil_ec, true, " us/cm | ", 0);
+  printer.print(F("pH: "), true);
+  printer.print(soil.soil_ph, true, "", 2);
+  printer.println("", true);
+
+  printer.print(F("N: "), true);
+  printer.print((unsigned int)soil.soil_nitrogen, true, " mg/kg | ");
+  printer.print(F("P: "), true);
+  printer.print((unsigned int)soil.soil_phosphorus, true, " mg/kg | ");
+  printer.print(F("K: "), true);
+  printer.print((unsigned int)soil.soil_potassium, true, " mg/kg");
+  printer.println("", true);
+
+  if (!ok) {
+    printer.print(F("[APP] Error count: "), true);
     printer.println((unsigned int)soil.getConsecutiveErrors(), true);
   }
 }

@@ -4,32 +4,28 @@
 #include "RS485Modbus.h"
 #include "RikaSoilSensor3in1.h"
 
-/*
-  Rika Soil Sensor 3-in-1 Example
-
-  Runtime flow:
-  1) Initialize debug serial and RS485 bus.
-  2) Optionally scan Modbus addresses.
-  3) Optionally set soil type during boot.
-  4) Poll primary values (temp, VWC, EC).
-  5) Optionally poll soil type, epsilon, and compensation coefficients.
-
-  Keep this example focused on diagnostics and protocol visibility.
-*/
+// ESP32 boards can choose hardware UARTs explicitly. Other supported boards
+// use Arduino's default Serial object for debug output.
 #if defined(ARDUINO_ARCH_ESP32)
-// ESP32: debug on UART0, RS485 on UART1.
 HardwareSerial& DebugPort = Serial0;
 HardwareSerial RS485Port(1);
 #else
-// Non-ESP32 fallback: debug on default Serial.
 #define DebugPort Serial
 #endif
 
-// Logging facade and RS485 transport used by the soil sensor driver.
+// PrintController wraps Serial-style output and keeps all example logging in
+// one place. The second argument disables timestamps/prefixes here.
 static PrintController printer(DebugPort, false);
+
+// Shared Modbus RTU transport. The sensor driver below sends all requests
+// through this bus object.
 static RS485Bus rs485;
 
-// Soil driver instance with application policy values from config + global configs.
+// Driver instance for one physical Rika 3-in-1 soil sensor.
+// Most settings come from config.h or the global project configuration:
+// - SENSOR_* identifies the Modbus node and enables optional debug traces.
+// - POWERLINE/PORT indexes tell the larger system which hardware channel is used.
+// - SAMPLE_RATE, warm-up, error, and power-off values feed SensorDriver behavior.
 static RikaSoilSensor3in1 soil(
     rs485,
     SENSOR_ID,
@@ -42,7 +38,8 @@ static RikaSoilSensor3in1 soil(
     SENSOR_DEFAULT_MAX_ERRORS,
     MIN_USEFUL_POWER_OFF_MS);
 
-// Prints a startup summary in serial monitor.
+// Prints a short startup header so the serial monitor clearly shows which
+// example is running and what optional diagnostics may be enabled.
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
@@ -54,36 +51,40 @@ static void printBanner() {
   printer.println(F(""), true);
 }
 
-// Prints result of the main readData() transaction.
+// Shows the result of the main measurement read. readData() updates the
+// driver's public cached values, so this function prints those fields whether
+// the latest read succeeded or failed.
 static void printMainReadResult(bool ok) {
+  printer.print(F("[APP] Sensor ID: "), true);
+  printer.print(soil.getSensorId(), true, " | ");
+  printer.print(F("Address: 0x"), true);
+  printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
+  printer.println("", true);
+
   if (ok) {
-    printer.print(F("[APP] Sensor ID: "), true);
-    printer.print(soil.getSensorId(), true, " | ");
-
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)soil.getAddress(), true, " | ", HEX);
-
-    printer.println("", true);
-    printer.print(F("[APP] Successfully Read Values: "), true, "| ");
-
-    printer.print(F("Temp: "), true);
-    printer.print(soil.soil_temp, true, " C | ", 1);
-
-    printer.print(F("VWC: "), true);
-    printer.print(soil.soil_vwc, true, " % | ", 1);
-
-    printer.print(F("EC: "), true);
-    printer.print(soil.soil_ec, true, " mS/cm", 4);
-    printer.println("", true);
+    printer.println(F("[APP] Successfully Read Values:"), true);
   } else {
-    printer.print(F("[APP] Read failed for sensor "), true);
-    printer.print(soil.getSensorId(), true, " | ");
-    printer.print(F("Error count: "), true);
+    printer.println(F("[APP] Read failed. Current driver attributes:"), true);
+  }
+
+  // These values are decoded by RikaSoilSensor3in1::readData().
+  // On failure the driver normally exposes fallback sentinel values.
+  printer.print(F("Temp: "), true);
+  printer.print(soil.soil_temp, true, " C | ", 1);
+  printer.print(F("VWC: "), true);
+  printer.print(soil.soil_vwc, true, " % | ", 1);
+  printer.print(F("EC: "), true);
+  printer.print(soil.soil_ec, true, " mS/cm", 4);
+  printer.println("", true);
+
+  if (!ok) {
+    printer.print(F("[APP] Error count: "), true);
     printer.println((unsigned int)soil.getConsecutiveErrors(), true);
   }
 }
 
-// Prints normalized soil type name returned by readSoilType().
+// Optional diagnostic: reads the configured soil class register and prints
+// the enum as a human-readable label.
 static void printSoilTypeResult(bool ok, RikaSoilSensor3in1::SoilType type) {
   if (ok) {
     printer.print(F("[APP] Soil type: "), true);
@@ -93,7 +94,8 @@ static void printSoilTypeResult(bool ok, RikaSoilSensor3in1::SoilType type) {
   }
 }
 
-// Prints dielectric constant (epsilon) read status/value.
+// Optional diagnostic: epsilon is the dielectric constant reported by the
+// sensor. It can help validate VWC behavior or calibration.
 static void printEpsilonResult(bool ok, double eps) {
   if (ok) {
     printer.print(F("[APP] Epsilon: "), true);
@@ -103,7 +105,8 @@ static void printEpsilonResult(bool ok, double eps) {
   }
 }
 
-// Generic helper for optional compensation-coefficient reads.
+// Small helper for optional coefficient reads. The label is stored as a flash
+// string with F("...") so RAM usage stays low on microcontrollers.
 static void printCoeffResult(const __FlashStringHelper* label, bool ok, double value) {
   printer.print(label, true);
   if (ok) {
@@ -114,31 +117,34 @@ static void printCoeffResult(const __FlashStringHelper* label, bool ok, double v
 }
 
 void setup() {
-  // 1) Bring up debug serial first so all setup steps are visible.
+  // Start the USB/debug serial port first so setup messages are visible.
   DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
   delay(300);
   printBanner();
 
-  // 2) Hook RS485 debug logging to the shared printer.
+  // Let the RS485 layer emit debug messages through the same printer used by
+  // this example. SENSOR_DEBUG controls driver-level verbosity separately.
   rs485.setDebug(&printer);
 
+  // Open the hardware UART used for RS485. ESP32 needs explicit RX/TX pins;
+  // boards with fixed Serial2 pins can pass -1 for the pin arguments.
 #if defined(ARDUINO_ARCH_ESP32)
-  // 3) Initialize RS485 UART and board-specific RX/TX pins.
   rs485.begin(RS485Port,
               RS485_DEFAULT_BAUD,
               PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
               PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
               RS485_DEFAULT_SERIAL_CONFIG);
 #else
-  // Non-ESP32 fallback signature.
   rs485.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
 
-  // 4) Configure DE/RE control for half-duplex RS485 transceiver.
+  // RS485 is half-duplex: the DE pin switches the transceiver between
+  // transmit and receive. The active level depends on the PCB/transceiver.
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
-  // 5) Optional one-time address discovery sweep.
+  // Optional address discovery. Enable DO_SCAN in config.h when you do not
+  // know the sensor's Modbus address. A return value of 0 means no reply.
   if (DO_SCAN) {
     printer.println(F("[APP] Scan mode enabled. Searching sensor address..."), true);
     const uint8_t found = soil.scanForAddress(1, 247, 120, 20);
@@ -151,11 +157,14 @@ void setup() {
     printer.println(F(""), true);
   }
 
-  // 6) Optional boot-time soil type write (persisted by sensor).
+  // Optional one-time configuration write. This changes the soil type register
+  // in the sensor, so keep SET_SOIL_TYPE_ON_BOOT false unless you intend that.
   if (SET_SOIL_TYPE_ON_BOOT) {
     printer.print(F("[APP] Setting soil type at boot to value "), true);
     printer.println((unsigned int)BOOT_SOIL_TYPE, true);
 
+    // The final arguments are retry count, read timeout, and delay after each
+    // request. They are kept explicit here so test tuning is easy.
     if (soil.setSoilType((RikaSoilSensor3in1::SoilType)BOOT_SOIL_TYPE, 3, 500, 20)) {
       printer.println(F("[APP] Soil type set successfully."), true);
     } else {
@@ -166,16 +175,20 @@ void setup() {
 }
 
 void loop() {
-  // Periodic diagnostic polling cycle.
+  // Each loop is one polling cycle. The separator makes repeated readings easy
+  // to spot in a serial monitor log.
   printer.println(F(""), true);
   printer.println(F("------------------------------------------------------------"), true);
   printer.println(F("[APP] New polling cycle"), true);
   printer.println(F("------------------------------------------------------------"), true);
 
+  // Main measurement read: temperature, volumetric water content, and EC are
+  // requested in one Modbus transaction and cached on the soil object.
   const bool ok = soil.readData();
   printMainReadResult(ok);
 
-  // Optional extended diagnostic calls.
+  // Optional maintenance reads are disabled by default because each one adds
+  // extra Modbus traffic and time to the polling cycle.
   if (READ_SOIL_TYPE_IN_LOOP) {
     RikaSoilSensor3in1::SoilType type = RikaSoilSensor3in1::SOIL_UNKNOWN;
     const bool typeOk = soil.readSoilType(type, 3, 500, 20);
@@ -191,17 +204,22 @@ void loop() {
   if (READ_COMP_COEFFS_IN_LOOP) {
     double coeff = -99.0;
 
-    // These registers are configured in config.h.
+    // Compensation coefficients live in separate registers, so they are read
+    // one at a time and printed with labels.
     bool okCoeff = soil.readCompensationCoeff(REG_EC_TEMP_COEFF, coeff, 3, 500, 20);
     printCoeffResult(F("[APP] EC temp coeff: "), okCoeff, coeff);
 
     okCoeff = soil.readCompensationCoeff(REG_SALINITY_COEFF, coeff, 3, 500, 20);
     printCoeffResult(F("[APP] Salinity coeff: "), okCoeff, coeff);
 
-    okCoeff = soil.readCompensationCoeff(REG_TDS_COEFF, coeff, 3, 500, 20);
+    okCoeff = soil.readCompensationCoeff(REG_TDS_COEFF, coeff, 3, 500, 20); 
     printCoeffResult(F("[APP] TDS coeff: "), okCoeff, coeff);
   }
 
   printer.println(F(""), true);
+
+  // Wait before the next cycle. Change POLL_INTERVAL_MS in config.h to adjust
+  // how often the example talks to the sensor.
   delay(POLL_INTERVAL_MS);
 }
+ 

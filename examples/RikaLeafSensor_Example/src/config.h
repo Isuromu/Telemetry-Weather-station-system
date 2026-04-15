@@ -23,7 +23,7 @@
 // Current Modbus node address of the connected leaf sensor.
 #define SENSOR_ADDRESS    0x80
 // Enables driver/bus debug traces when PrintController allows output.
-#define SENSOR_DEBUG      false
+#define SENSOR_DEBUG      true
 
 // Reserved for manual address programming flows (not used in this example loop).
 #define NEW_ADDRESS       0x01

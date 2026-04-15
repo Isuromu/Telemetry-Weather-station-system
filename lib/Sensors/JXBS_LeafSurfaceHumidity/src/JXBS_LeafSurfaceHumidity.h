@@ -9,6 +9,19 @@
 
   Driver for JXBS-3001-YMSD / JXBS-style leaf surface humidity transmitter.
 
+  IMPORTANT NOTE FOR THIS BATCH:
+  The tested hardware does NOT match the old "signed int16 /10" temperature decoding.
+
+  Verified practical decoding from the full experiment log:
+    - Humidity bytes [3],[4] -> unsigned BE -> humidity = raw / 10.0
+    - Temperature bytes [5],[6] -> unsigned BE -> temperature = raw * 0.05 - 80.0
+
+  Equivalent temperature formula:
+    temperature = (raw - 1600) / 20.0
+
+  This decoding matches the observed sequence:
+    room -> hand warming -> warm water -> room -> cold water
+
   Supplier family:
     - JXBS / JXCT style
 
@@ -28,6 +41,8 @@
     1) Leaf surface humidity
        - Register: 0x0020
        - Units: %RH
+       - Raw bytes: [3],[4]
+       - Endianness: big-endian
        - Raw scale: /10
        - Measurement range: 0..100 %RH
        - Resolution: 0.1 %RH
@@ -36,10 +51,12 @@
     2) Leaf surface temperature
        - Register: 0x0021
        - Units: °C
-       - Raw scale: signed int16 /10
-       - Measurement range: -20..80 °C
-       - Resolution: 0.01 °C in brochure text, but Modbus example and scale usage are 0.1 °C
-       - Accuracy: ±1 °C (@25°C)
+       - Raw bytes: [5],[6]
+       - Endianness: big-endian
+       - Empirical batch decoding: raw * 0.05 - 80.0
+       - Equivalent step: 0.05 °C / count
+       - Measurement range target: -20..80 °C
+       - Accuracy target: ±1 °C (@25°C)
 
   Register usage:
     - Read 2 registers starting from 0x0020:
@@ -87,6 +104,7 @@ public:
 
 private:
   RS485Bus& _bus;
+  bool _lastParsedFrame;
 
   bool validateHumidityTemperature() const;
 };

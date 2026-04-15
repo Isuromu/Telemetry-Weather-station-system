@@ -4,33 +4,16 @@
 #include "RS485Modbus.h"
 #include "RikaLeafSensor.h"
 
-/*
-  Rika Leaf Sensor Example
-
-  Runtime flow:
-  1) Bring up debug serial and RS485 bus.
-  2) Optionally scan Modbus addresses to find the sensor.
-  3) Poll the driver periodically and print decoded values.
-
-  This example intentionally keeps logic simple so it can be used as:
-  - a wiring/bring-up diagnostic
-  - a template for integrating RikaLeafSensor into other projects
-*/
 #if defined(ARDUINO_ARCH_ESP32)
-// ESP32: use UART0 for debug output and UART1 for RS485 traffic.
 HardwareSerial& DebugPort = Serial0;
 HardwareSerial RS485Port(1);
 #else
-// AVR/other targets: use default debug serial and Serial2 for RS485 below.
 #define DebugPort Serial
 #endif
 
-// Print wrapper: second ctor argument controls default logging enable.
 static PrintController printer(DebugPort, false);
-// Shared RS485 transport used by the sensor driver.
 static RS485Bus rs485;
 
-// Driver instance with settings sourced from config.h and global Configuration_*.
 static RikaLeafSensor leaf(
     rs485,
     SENSOR_ID,
@@ -43,7 +26,6 @@ static RikaLeafSensor leaf(
     SENSOR_DEFAULT_MAX_ERRORS,
     MIN_USEFUL_POWER_OFF_MS);
 
-// Startup banner for human-readable monitor output.
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
@@ -54,58 +36,51 @@ static void printBanner() {
   printer.println(F(""), true);
 }
 
-// Prints one polling result in a compact line-oriented format.
 static void printReadResult(bool ok) {
+  printer.print(F("[APP] Sensor ID: "), true);
+  printer.print(leaf.getSensorId(), true, " | ");
+  printer.print(F("Address: 0x"), true);
+  printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
+  printer.println("", true);
+
   if (ok) {
-    printer.print(F("[APP] Sensor ID: "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
-
-    printer.println("", true);
-    printer.print(F("[APP] Successfully Read Values: "), true, "| ");
-
-    printer.print(F("Temperature: "), true);
-    printer.print(leaf.leaf_temp, true, " C | ", 1);
-    printer.print(F("Humidity: "), true);
-    printer.print(leaf.leaf_humid, true, " %", 1);
-    printer.println("", true);
+    printer.println(F("[APP] Successfully Read Values:"), true);
   } else {
-    printer.print(F("[APP] Read failed for sensor "), true);
-    printer.print(leaf.getSensorId(), true, " | ");
-    printer.print(F("Address: 0x"), true);
-    printer.print((unsigned int)leaf.getAddress(), true, " | ", HEX);
-    printer.print(F("Error count: "), true);
+    printer.println(F("[APP] Read failed. Current driver attributes:"), true);
+  }
+
+  printer.print(F("Temperature: "), true);
+  printer.print(leaf.leaf_temp, true, " C | ", 1);
+  printer.print(F("Humidity: "), true);
+  printer.print(leaf.leaf_humid, true, " %", 1);
+  printer.println("", true);
+
+  if (!ok) {
+    printer.print(F("[APP] Error count: "), true);
     printer.println((unsigned int)leaf.getConsecutiveErrors(), true);
   }
 }
 
 void setup() {
-  // 1) Debug serial first, so all subsequent initialization is visible.
   DebugPort.begin(PCB_DEBUG_SERIAL_BAUD);
   delay(300);
   printBanner();
 
-  // 2) Route RS485 internal debug tracing through printer when enabled.
   rs485.setDebug(&printer);
 
 #if defined(ARDUINO_ARCH_ESP32)
-  // 3) Bring up RS485 UART with board-specific RX/TX pins.
   rs485.begin(RS485Port,
               RS485_DEFAULT_BAUD,
               PCB_RS485_RX_PINS[RS485_PORT_INDEX_0],
               PCB_RS485_TX_PINS[RS485_PORT_INDEX_0],
               RS485_DEFAULT_SERIAL_CONFIG);
 #else
-  // Non-ESP32 fallback signature.
   rs485.begin(Serial2, RS485_DEFAULT_BAUD, -1, -1, RS485_DEFAULT_SERIAL_CONFIG);
 #endif
 
-  // 4) Configure DE/RE direction control pin for half-duplex RS485 transceiver.
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
-  // 5) Optional address discovery pass before steady-state polling.
   if (DO_SCAN) {
     printer.println(F("[APP] Scan mode is enabled. Searching address..."), true);
     const uint8_t found = leaf.scanForAddress(1, 247, 120, 20);
@@ -119,7 +94,6 @@ void setup() {
 }
 
 void loop() {
-  // Periodic poll loop; all timing is controlled by POLL_INTERVAL_MS.
   printer.println(F(""), true);
   printer.println(F("------------------------------------------------------------"), true);
   printer.println(F("[APP] New polling cycle"), true);

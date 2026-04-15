@@ -20,9 +20,9 @@
 // Logical ID used in logs and telemetry tagging.
 #define SENSOR_ID                   "soil_test_00"
 // Modbus node address currently configured in the sensor.
-#define SENSOR_ADDRESS              0x01
+#define SENSOR_ADDRESS              0x010
 // Enables additional driver/bus debug traces.
-#define SENSOR_DEBUG                false
+#define SENSOR_DEBUG                true
 
 // Reserved for address-change flows (not used directly in this example loop).
 #define NEW_ADDRESS                 0x10
@@ -34,9 +34,9 @@
 #define BOOT_SOIL_TYPE              3
 
 // Optional extra reads in loop().
-#define READ_SOIL_TYPE_IN_LOOP      true
-#define READ_EPSILON_IN_LOOP        true
-#define READ_COMP_COEFFS_IN_LOOP    true
+#define READ_SOIL_TYPE_IN_LOOP      false
+#define READ_EPSILON_IN_LOOP        false
+#define READ_COMP_COEFFS_IN_LOOP    false
 
 // Delay between loop() polling cycles.
 #define POLL_INTERVAL_MS            2000

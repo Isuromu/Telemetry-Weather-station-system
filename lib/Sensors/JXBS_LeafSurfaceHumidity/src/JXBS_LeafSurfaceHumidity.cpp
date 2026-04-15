@@ -1,5 +1,47 @@
 #include "JXBS_LeafSurfaceHumidity.h"
 
+static double decodeJXBSTemperatureC(uint16_t rawTemperature) {
+  // Empirically verified for this tested sensor batch:
+  //   room raw 1961 -> 18.05 C
+  //   warm stage raw 2237 -> 31.85 C
+  //   warm water raw 2282 -> 34.10 C
+  //   cold water raw 1703 -> 5.15 C
+  return ((double)rawTemperature * 0.05) - 80.0;
+}
+
+static void logParsedJXBSLeaf(PrintController* log,
+                              bool debug,
+                              uint8_t humHi,
+                              uint8_t humLo,
+                              uint8_t tempHi,
+                              uint8_t tempLo,
+                              uint16_t rawHumidity,
+                              uint16_t rawTemperature,
+                              double humidity,
+                              double temperature) {
+  if (!log || !debug) return;
+
+  log->println(F("[DRV][JXBS_LeafSurfaceHumidity] Parsed response:"), true);
+
+  log->print(F("  bytes [3],[4] -> humidity raw = 0x"), true);
+  log->print((unsigned int)humHi, true, "", HEX);
+  log->print((unsigned int)humLo, true, " ", HEX);
+  log->print(F("| combined = "), true);
+  log->print((unsigned int)rawHumidity, true, "", DEC);
+  log->print(F(" | humidity = "), true);
+  log->print(humidity, true, " %RH", 1);
+  log->println("", true);
+
+  log->print(F("  bytes [5],[6] -> temperature raw = 0x"), true);
+  log->print((unsigned int)tempHi, true, "", HEX);
+  log->print((unsigned int)tempLo, true, " ", HEX);
+  log->print(F("| combined = "), true);
+  log->print((unsigned int)rawTemperature, true, "", DEC);
+  log->print(F(" | formula = raw*0.05 - 80.0 | temperature = "), true);
+  log->print(temperature, true, " C", 2);
+  log->println("", true);
+}
+
 JXBS_LeafSurfaceHumidity::JXBS_LeafSurfaceHumidity(RS485Bus& bus,
                                                    const char* sensorId,
                                                    uint8_t address,
@@ -20,6 +62,7 @@ JXBS_LeafSurfaceHumidity::JXBS_LeafSurfaceHumidity(RS485Bus& bus,
                    maxConsecutiveErrors,
                    minUsefulPowerOffMs),
       _bus(bus),
+      _lastParsedFrame(false),
       leaf_humidity(0.0),
       leaf_temperature(0.0) {}
 
@@ -38,11 +81,9 @@ bool JXBS_LeafSurfaceHumidity::readHumidityTemperature(uint8_t driverRetries,
                                                        uint16_t readTimeoutMs,
                                                        uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
+  _lastParsedFrame = false;
 
   for (uint8_t attempt = 1; attempt <= driverRetries; ++attempt) {
-    // Read 2 registers starting at 0x0020:
-    // 0x0020 = humidity
-    // 0x0021 = temperature
     uint8_t request[8] = {_address, 0x03, 0x00, 0x20, 0x00, 0x02, 0x00, 0x00};
     uint8_t response[9] = {0};
     const uint8_t check[3] = {_address, 0x03, 0x04};
@@ -61,14 +102,38 @@ bool JXBS_LeafSurfaceHumidity::readHumidityTemperature(uint8_t driverRetries,
       continue;
     }
 
-    const uint16_t rawHumidity = ((uint16_t)response[3] << 8) | response[4];
-    const int16_t rawTemperature = (int16_t)(((uint16_t)response[5] << 8) | response[6]);
+    _lastParsedFrame = true;
+
+    const uint8_t humHi = response[3];
+    const uint8_t humLo = response[4];
+    const uint8_t tempHi = response[5];
+    const uint8_t tempLo = response[6];
+
+    const uint16_t rawHumidity = ((uint16_t)humHi << 8) | humLo;
+    const uint16_t rawTemperature = ((uint16_t)tempHi << 8) | tempLo;
 
     leaf_humidity = (double)rawHumidity / 10.0;
-    leaf_temperature = (double)rawTemperature / 10.0;
+    leaf_temperature = decodeJXBSTemperatureC(rawTemperature);
+
+    logParsedJXBSLeaf(_bus.getLogger(),
+                      _debugEnable,
+                      humHi,
+                      humLo,
+                      tempHi,
+                      tempLo,
+                      rawHumidity,
+                      rawTemperature,
+                      leaf_humidity,
+                      leaf_temperature);
 
     if (validateHumidityTemperature()) {
       return true;
+    }
+
+    if (_bus.getLogger() && _debugEnable) {
+      _bus.getLogger()->println(
+          F("[DRV][JXBS_LeafSurfaceHumidity] Range check fail: parsed values are outside allowed range"),
+          true);
     }
   }
 
@@ -79,17 +144,23 @@ bool JXBS_LeafSurfaceHumidity::readData() {
   markReadTime(millis());
 
   const uint8_t driverRetries = SENSOR_DEFAULT_DRIVER_RETRIES;
+  bool gotAnyValidFrame = false;
 
   for (uint8_t attempt = 1; attempt <= driverRetries; ++attempt) {
-    if (!readHumidityTemperature(1, SENSOR_DEFAULT_READ_TIMEOUT_MS, SENSOR_DEFAULT_AFTER_REQ_MS)) {
-      continue;
+    if (readHumidityTemperature(1, SENSOR_DEFAULT_READ_TIMEOUT_MS, SENSOR_DEFAULT_AFTER_REQ_MS)) {
+      markSuccess();
+      return true;
     }
 
-    markSuccess();
-    return true;
+    if (_lastParsedFrame) {
+      gotAnyValidFrame = true;
+    }
   }
 
-  setFallbackValues();
+  if (!gotAnyValidFrame) {
+    setFallbackValues();
+  }
+
   markFailure();
   return false;
 }
