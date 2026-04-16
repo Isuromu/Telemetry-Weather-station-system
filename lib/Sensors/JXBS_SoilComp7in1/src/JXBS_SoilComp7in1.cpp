@@ -432,6 +432,12 @@ bool JXBS_SoilComp7in1::changeAddress(uint8_t newAddress,
                                       uint8_t maxRetries,
                                       uint16_t readTimeoutMs,
                                       uint16_t afterReqDelayMs) {
+  if (newAddress == 0 || newAddress > 247) {
+    return false;
+  }
+
+  // JXBS-style address setup writes the new node address to register 0x0100.
+  // Keep only the target sensor connected while this command is enabled.
   uint8_t request[8] = {_address, 0x06, 0x01, 0x00, 0x00, newAddress, 0x00, 0x00};
   uint8_t response[8] = {0};
   const uint8_t check[2] = {_address, 0x06};

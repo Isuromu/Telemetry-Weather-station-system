@@ -2,6 +2,7 @@
 #include "config.h"
 #include "PrintController.h"
 #include "RS485Modbus.h"
+#include "RS485AddressChangeExample.h"
 #include "RikaSoilSensor3in1.h"
 
 // ESP32 boards can choose hardware UARTs explicitly. Other supported boards
@@ -46,6 +47,7 @@ static void printBanner() {
   printer.println(F(" Rika Soil Sensor 3-in-1 Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
   printer.println(F("- Optional scan in setup()"), true);
+  printer.println(F("- Optional address change at boot"), true);
   printer.println(F("- Loop reads temp, VWC, EC"), true);
   printer.println(F("- Optional loop reads soil type and epsilon"), true);
   printer.println(F(""), true);
@@ -70,7 +72,7 @@ static void printMainReadResult(bool ok) {
   // These values are decoded by RikaSoilSensor3in1::readData().
   // On failure the driver normally exposes fallback sentinel values.
   printer.print(F("Temp: "), true);
-  printer.print(soil.soil_temp, true, " C | ", 1);
+  printer.print(soil.soil_temp, true, " C° | ", 1);
   printer.print(F("VWC: "), true);
   printer.print(soil.soil_vwc, true, " % | ", 1);
   printer.print(F("EC: "), true);
@@ -143,6 +145,16 @@ void setup() {
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
+  // Optional persistent address write. Controlled only by config.h macros.
+  // If ADDRESS_CHANGE_BUTTON_PIN is defined, this waits up to 5 seconds for
+  // the button before calling soil.changeAddress().
+  if (ADDRESS_CHANGE_AT_BOOT) {
+    runAddressChangeAtBoot(soil,
+                           printer,
+                           ADDRESS_CHANGE_NEW_ADDRESS,
+                           F("Only the target sensor should be connected; Rika uses address 0xFE and register 0x0200."));
+  }
+
   // Optional address discovery. Enable DO_SCAN in config.h when you do not
   // know the sensor's Modbus address. A return value of 0 means no reply.
   if (DO_SCAN) {
@@ -212,7 +224,7 @@ void loop() {
     okCoeff = soil.readCompensationCoeff(REG_SALINITY_COEFF, coeff, 3, 500, 20);
     printCoeffResult(F("[APP] Salinity coeff: "), okCoeff, coeff);
 
-    okCoeff = soil.readCompensationCoeff(REG_TDS_COEFF, coeff, 3, 500, 20); 
+    okCoeff = soil.readCompensationCoeff(REG_TDS_COEFF, coeff, 3, 500, 20);
     printCoeffResult(F("[APP] TDS coeff: "), okCoeff, coeff);
   }
 
@@ -222,4 +234,3 @@ void loop() {
   // how often the example talks to the sensor.
   delay(POLL_INTERVAL_MS);
 }
- 

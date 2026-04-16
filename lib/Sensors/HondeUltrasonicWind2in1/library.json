@@ -1,0 +1,15 @@
+{
+  "name": "HondeUltrasonicWind2in1",
+  "version": "1.0.0",
+  "description": "Honde ultrasonic compact weather station RS485 driver for wind speed and wind direction",
+  "keywords": ["sensor", "wind", "rs485", "modbus", "honde", "ultrasonic"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

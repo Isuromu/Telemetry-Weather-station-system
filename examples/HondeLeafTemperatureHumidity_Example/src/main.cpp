@@ -3,7 +3,7 @@
 #include "PrintController.h"
 #include "RS485Modbus.h"
 #include "RS485AddressChangeExample.h"
-#include "RikaLeafSensor.h"
+#include "HondeLeafTemperatureHumidity.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 HardwareSerial& DebugPort = Serial0;
@@ -15,14 +15,14 @@ HardwareSerial RS485Port(1);
 static PrintController printer(DebugPort, false);
 static RS485Bus rs485;
 
-static RikaLeafSensor leaf(
+static HondeLeafTemperatureHumidity leaf(
     rs485,
     SENSOR_ID,
     SENSOR_ADDRESS,
     SENSOR_DEBUG,
     POWERLINE_INDEX_0,
     RS485_PORT_INDEX_0,
-    SAMPLE_RATE_5_MIN,
+    SAMPLE_RATE_15_MIN,
     1000UL,
     SENSOR_DEFAULT_MAX_ERRORS,
     MIN_USEFUL_POWER_OFF_MS);
@@ -30,13 +30,11 @@ static RikaLeafSensor leaf(
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
-  printer.println(F(" Rika Leaf Sensor Simple Diagnostic Example"), true);
+  printer.println(F(" Honde Leaf Temperature/Humidity Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
   printer.println(F("- Optional scan in setup()"), true);
   printer.println(F("- Optional address change at boot"), true);
-  printer.println(F("- Then plain polling"), true);
-  printer.println(F("[WIRE] Normal read mode: connect white wire to V- / GND"), true);
-  printer.println(F("[WIRE] Address-change mode: connect white wire to V+"), true);
+  printer.println(F("- Loop reads leaf temperature and humidity"), true);
   printer.println(F(""), true);
 }
 
@@ -53,10 +51,10 @@ static void printReadResult(bool ok) {
     printer.println(F("[APP] Read failed. Current driver attributes:"), true);
   }
 
-  printer.print(F("Temperature: "), true);
-  printer.print(leaf.leaf_temp, true, " C | ", 1);
-  printer.print(F("Humidity: "), true);
-  printer.print(leaf.leaf_humid, true, " %", 1);
+  printer.print(F("Leaf Temperature: "), true);
+  printer.print(leaf.leaf_temperature, true, " C | ", 1);
+  printer.print(F("Leaf Humidity: "), true);
+  printer.print(leaf.leaf_humidity, true, " %RH", 1);
   printer.println("", true);
 
   if (!ok) {
@@ -92,19 +90,21 @@ void setup() {
     runAddressChangeAtBoot(leaf,
                            printer,
                            ADDRESS_CHANGE_NEW_ADDRESS,
-                           F("Connect white wire to V+; keep only the target sensor connected; Rika uses address 0xFF and register 0x0200. Restore white wire to V- / GND for reading."));
+                           F("Only the target sensor should be connected; Honde leaf writes address register 0x0030."));
   }
 
   if (DO_SCAN) {
-    printer.println(F("[APP] Scan mode is enabled. Searching address..."), true);
-    const uint8_t found = leaf.scanForAddress(1, 247, 120, 20);
+    printer.println(F("[APP] Scan mode enabled. Searching sensor address..."), true);
+    const uint8_t found = leaf.scanForAddress(1, 247, 150, SENSOR_DEFAULT_AFTER_REQ_MS);
     if (found != 0) {
       printer.print(F("[APP] Sensor found at address 0x"), true);
       printer.println((unsigned int)found, true, "", HEX);
     } else {
       printer.println(F("[APP] No sensor responded during scan."), true);
     }
+    printer.println(F(""), true);
   }
+
 }
 
 void loop() {

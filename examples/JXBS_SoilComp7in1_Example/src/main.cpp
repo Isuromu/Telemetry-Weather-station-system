@@ -2,6 +2,7 @@
 #include "config.h"
 #include "PrintController.h"
 #include "RS485Modbus.h"
+#include "RS485AddressChangeExample.h"
 #include "JXBS_SoilComp7in1.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -81,8 +82,6 @@ void setup() {
   delay(300);
   printBanner();
 
-  pinMode(PCB_SERVICE_BUTTON_PIN, INPUT_PULLUP);
-
   rs485.setDebug(&printer);
 
 #if defined(ARDUINO_ARCH_ESP32)
@@ -98,6 +97,16 @@ void setup() {
   rs485.setDirectionControl(PCB_RS485_DE_PINS[RS485_PORT_INDEX_0],
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
+  // Optional persistent address write. Controlled only by config.h macros.
+  // If ADDRESS_CHANGE_BUTTON_PIN is defined, this waits up to 5 seconds for
+  // the button before calling soil.changeAddress().
+  if (ADDRESS_CHANGE_AT_BOOT) {
+    runAddressChangeAtBoot(soil,
+                           printer,
+                           ADDRESS_CHANGE_NEW_ADDRESS,
+                           F("Only the target sensor should be connected; JXBS writes address register 0x0100."));
+  }
+
   if (DO_SCAN) {
     printer.println(F("[APP] Scan mode enabled. Searching sensor address..."), true);
     const uint8_t found = soil.scanForAddress(1, 247, 150, SENSOR_DEFAULT_AFTER_REQ_MS);
@@ -110,20 +119,6 @@ void setup() {
     printer.println(F(""), true);
   }
 
-  if (TRY_ADDRESS_CHANGE_AT_BOOT && digitalRead(PCB_SERVICE_BUTTON_PIN) == LOW) {
-    delay(50);
-    if (digitalRead(PCB_SERVICE_BUTTON_PIN) == LOW) {
-      printer.println(F("[APP] Address change requested at boot"), true);
-
-      if (soil.changeAddress(NEW_ADDRESS, SENSOR_DEFAULT_BUS_RETRIES, 500, SENSOR_DEFAULT_AFTER_REQ_MS)) {
-        printer.print(F("[APP] Address changed successfully to 0x"), true);
-        printer.println((unsigned int)soil.getAddress(), true, "", HEX);
-      } else {
-        printer.println(F("[APP] Address change failed."), true);
-      }
-      printer.println(F(""), true);
-    }
-  }
 }
 
 void loop() {

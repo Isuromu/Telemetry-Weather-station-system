@@ -24,6 +24,8 @@
 
   Addressing helpers:
   - changeAddress(): broadcast-like write to register 0x0200.
+    Hardware condition: white wire must be connected to V+.
+    Normal reads require the white wire connected to V- / GND.
   - scanForAddress(): probes address range with the same read command as readData().
 
   Reliability model:
@@ -57,6 +59,8 @@ public:
   void setFallbackValues() override;
 
   // Writes a new Modbus node address to sensor register 0x0200.
+  // Hardware condition: connect white wire to V+ before calling.
+  // For normal readData()/scanForAddress(), connect white wire to V- / GND.
   // On success, the local driver address is updated to newAddress.
   bool changeAddress(uint8_t newAddress,
                      uint8_t maxRetries = 3,

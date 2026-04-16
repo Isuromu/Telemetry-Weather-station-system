@@ -4,6 +4,10 @@
 /*
   Frame layout used by this driver (readData and scanForAddress):
 
+  Hardware mode:
+    - Normal reading: connect white wire to V- / GND.
+    - Address change: connect white wire to V+ before calling changeAddress().
+
   Request:
     [addr][0x03][0x00][0x00][0x00][0x02][crc_lo][crc_hi]
      addr = current sensor Modbus address
@@ -106,9 +110,18 @@ bool RikaLeafSensor::changeAddress(uint8_t newAddress,
                                    uint8_t maxRetries,
                                    uint16_t readTimeoutMs,
                                    uint16_t afterReqDelayMs) {
+  if (newAddress == 0 || newAddress > 247) {
+    return false;
+  }
+
   // Common Rika/JXCT convention:
   // - use address 0xFF for address-write command
   // - write new node address into register 0x0200
+  // Hardware condition for this Rika leaf sensor:
+  // - connect white wire to V+ before calling this function
+  // - restore white wire to V- / GND before normal readData()/scanForAddress()
+  // Use this only when the target sensor is the only device that can respond
+  // to this address-write command on the RS485 bus.
   uint8_t request[8] = {0xFF, 0x06, 0x02, 0x00, 0x00, newAddress, 0x00, 0x00};
   uint8_t response[8] = {0};
   const uint8_t check[5] = {0xFF, 0x06, 0x02, 0x00, 0x00};

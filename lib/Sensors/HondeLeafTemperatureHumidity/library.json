@@ -1,0 +1,15 @@
+{
+  "name": "HondeLeafTemperatureHumidity",
+  "version": "1.0.0",
+  "description": "Honde RD-LTH-O-01 leaf temperature and humidity RS485 Modbus driver",
+  "keywords": ["sensor", "leaf", "temperature", "humidity", "rs485", "modbus", "honde"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

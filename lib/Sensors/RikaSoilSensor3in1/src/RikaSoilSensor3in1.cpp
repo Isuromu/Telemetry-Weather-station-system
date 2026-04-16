@@ -178,6 +178,13 @@ bool RikaSoilSensor3in1::changeAddress(uint8_t newAddress,
                                        uint8_t maxRetries,
                                        uint16_t readTimeoutMs,
                                        uint16_t afterReqDelayMs) {
+  if (newAddress == 0 || newAddress > 247) {
+    return false;
+  }
+
+  // Rika soil address setup writes the new Modbus node address to register
+  // 0x0200 using the manufacturer's broadcast-like address 0xFE. Keep only
+  // the target sensor connected while this command is enabled.
   uint8_t request[8] = {0xFE, 0x06, 0x02, 0x00, 0x00, newAddress, 0x00, 0x00};
   uint8_t response[8] = {0};
   const uint8_t check[4] = {0xFE, 0x06, 0x02, 0x00};

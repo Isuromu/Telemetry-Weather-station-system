@@ -24,10 +24,19 @@
 // Enables additional driver/bus debug traces.
 #define SENSOR_DEBUG                true
 
-// Reserved for address-change flows (not used directly in this example loop).
-#define NEW_ADDRESS                 0x10
 // Scan address range on boot and print first responsive sensor.
 #define DO_SCAN                     false
+
+// If true, setup() calls changeAddress() once near boot.
+// Rika soil address change uses broadcast-like address 0xFE and register 0x0200.
+// Keep only the target sensor connected while changing addresses.
+#define ADDRESS_CHANGE_AT_BOOT      false
+// Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
+#define ADDRESS_CHANGE_NEW_ADDRESS  0x10
+// Optional safety gate. Uncomment to wait up to 5 seconds for this button.
+// If this macro is undefined, no button GPIO is configured or read.
+// #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
+
 // If true, write BOOT_SOIL_TYPE once during setup().
 #define SET_SOIL_TYPE_ON_BOOT       false
 // Soil type raw value expected by register 0x0020 (0..3 in current driver enum).
