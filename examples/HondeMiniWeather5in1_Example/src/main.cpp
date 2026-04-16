@@ -32,6 +32,8 @@ static void printBanner() {
   printer.println(F("============================================================"), true);
   printer.println(F(" Honde MINI Weather 5-in-1 Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
+  printer.print(F("PCB: "), true);
+  printer.println(PCB_NAME, true);
   printer.println(F("- Optional scan in setup()"), true);
   printer.println(F("- Optional address change at boot"), true);
   printer.println(F("- Loop reads air temp, RH, pressure, wind speed, direction"), true);

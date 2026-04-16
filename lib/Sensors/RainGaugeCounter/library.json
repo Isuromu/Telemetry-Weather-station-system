@@ -1,0 +1,16 @@
+{
+  "name": "RainGaugeCounter",
+  "version": "1.0.0",
+  "description": "Shared pulse, PCF8574/4040, and RS485 rain gauge counting support",
+  "keywords": ["sensor", "rain", "gauge", "pcf8574", "4040", "interrupt", "rs485"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "SensorDriver": "*",
+    "PrintController": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

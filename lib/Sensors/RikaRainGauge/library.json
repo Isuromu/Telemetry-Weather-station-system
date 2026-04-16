@@ -1,0 +1,15 @@
+{
+  "name": "RikaRainGauge",
+  "version": "1.0.0",
+  "description": "Rika RK400-style rain gauge driver with pulse, external counter, and RS485 modes",
+  "keywords": ["sensor", "rain", "gauge", "rika", "rs485", "pcf8574", "interrupt"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RainGaugeCounter": "*",
+    "Rs485ModBus": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

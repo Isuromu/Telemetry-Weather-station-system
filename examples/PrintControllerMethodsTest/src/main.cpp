@@ -1,5 +1,6 @@
 #include "PrintController.h"
 #include <Arduino.h>
+#include "../../../config/Configuration_PCB.h"
 
 // Global instance of PrintController
 PrintController printer(Serial, true); // Initially enabled
@@ -95,10 +96,14 @@ void testClassIntegration() {
 }
 
 void setup() {
-    Serial.begin(9600);
+    Serial.begin(PCB_DEBUG_SERIAL_BAUD);
     while (!Serial) {
         ; // Wait for serial port to connect. Needed for native USB port only
     }
+
+    printer.print(F("PCB: "), true);
+    printer.println(PCB_NAME, true);
+    printSeparator();
 
     // Run all test functions
     testDataTypes();

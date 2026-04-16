@@ -83,3 +83,15 @@ constexpr uint16_t PCB_RS485_ENABLE_DELAY_MS[PCB_RS485_PORT_COUNT] = {0};
 // Service pins
 // ============================================================
 #define PCB_SERVICE_BUTTON_PIN 14
+
+// ============================================================
+// I2C bus
+// ============================================================
+#define PCB_I2C_SDA_PIN 4
+#define PCB_I2C_SCL_PIN 5
+
+// ============================================================
+// Rain gauge pulse/counter interface
+// ============================================================
+#define PCB_RAIN_COUNTER_RESET_PIN 6
+#define PCB_RAIN_BYPASS_INTERRUPT_PIN 7

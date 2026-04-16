@@ -32,6 +32,8 @@ static void printBanner() {
   printer.println(F("============================================================"), true);
   printer.println(F(" Honde Leaf Temperature/Humidity Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
+  printer.print(F("PCB: "), true);
+  printer.println(PCB_NAME, true);
   printer.println(F("- Optional scan in setup()"), true);
   printer.println(F("- Optional address change at boot"), true);
   printer.println(F("- Loop reads leaf temperature and humidity"), true);
@@ -52,9 +54,9 @@ static void printReadResult(bool ok) {
   }
 
   printer.print(F("Leaf Temperature: "), true);
-  printer.print(leaf.leaf_temperature, true, " C | ", 1);
+  printer.print(leaf.leaf_temperature, true, " C° | ", 1);
   printer.print(F("Leaf Humidity: "), true);
-  printer.print(leaf.leaf_humidity, true, " %RH", 1);
+  printer.print(leaf.leaf_humidity, true, " %", 1);
   printer.println("", true);
 
   if (!ok) {

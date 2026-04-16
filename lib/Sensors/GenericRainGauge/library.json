@@ -1,0 +1,14 @@
+{
+  "name": "GenericRainGauge",
+  "version": "1.0.0",
+  "description": "Generic tipping bucket rain gauge driver using 0.2794 mm per pulse",
+  "keywords": ["sensor", "rain", "gauge", "tipping-bucket", "pcf8574", "interrupt"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RainGaugeCounter": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

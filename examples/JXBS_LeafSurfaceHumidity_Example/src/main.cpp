@@ -32,6 +32,8 @@ static void printBanner() {
   printer.println(F("============================================================"), true);
   printer.println(F(" JXBS Leaf Surface Humidity Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
+  printer.print(F("PCB: "), true);
+  printer.println(PCB_NAME, true);
   printer.println(F("- Optional scan in setup()"), true);
   printer.println(F("- Optional address change at boot"), true);
   printer.println(F("- Loop reads humidity + temperature"), true);
