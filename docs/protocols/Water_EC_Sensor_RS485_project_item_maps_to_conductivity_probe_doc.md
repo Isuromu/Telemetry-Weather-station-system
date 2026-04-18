@@ -1,70 +1,22 @@
-# Water EC Sensor (RS485) (project item; maps to conductivity probe doc)
+# Water EC Sensor (RS485)
 
-Source: `Conductive probe instruction of water sensor.pdf`
+This project item maps to the JXEC-T water conductivity controller + probe protocol.
 
-## 1) Overview
-- **Purpose / measurements:** Water electrical conductivity (EC) or TDS and temperature.
+See:
 
-## 2) Electrical & RS485 settings
-- **Interface / protocol:** RS485 / Modbus RTU (project requirement; register map missing in extractable text).
-- **Serial:** 8N1 (data/parity/stop)
-- **Baud:** UNCERTAIN
-- **Default Modbus address:** UNCERTAIN
-- **Supported address range:** UNCERTAIN
-- **Wiring notes:** RS485 A/B (twisted pair) + GND reference recommended; power V+ and GND per sensor label. If A/B is swapped the sensor will not respond.
+```text
+JXEC_T_Series_Conductivity_Probe_Water_EC_TDS_Temp_RS485.md
+```
 
-**Notes:** Treat this as the RS485 EC/TDS sensor item. Provided doc lacks Modbus register table in extractable text; obtain vendor protocol.
+Key implementation notes:
+- Use the RS485 transmitter/controller assembly, not a bare metal probe alone.
+- Default address: `0x01`
+- Default serial: `9600 8N1`
+- Combined read request: `01 03 00 01 00 03 54 0B`
+- Registers:
+  - `0x0001`: water temperature, raw / 10.0 = C
+  - `0x0002`: conductivity high word
+  - `0x0003`: conductivity low word
+- K=1 example scaling: `conductivity_uS_cm = conductivity_raw / 100.0`
 
-## 3) Register map
-_Register map is **UNCERTAIN** from the provided documents (no Modbus register table extracted). Use the hardware test procedure below to discover registers safely._
-
-
-## 4) Read commands (byte-level)
-_No read command examples were extractable from the provided file. Use the hardware test procedure to discover a working read command._
-
-## 5) Write commands (address change / baud change / calibration, if supported)
-**This method is sensor-specific.**
-
-_Write operations are **UNCERTAIN** or not documented in the provided files. Many JXCT/JXBS RS485 sensors support address/baud changes via registers like 0x0100/0x0101, but you must confirm per-sensor on real hardware before implementing._
-
-## 6) Range protection & fault detection (response sanity)
-
-These checks are applied **after** Modbus RTU validation (prefix match + expected length + CRC16). They help catch:
-- wrong signed/unsigned conversion
-- wrong scaling (/10 vs /100)
-- misalignment (garbage bytes shifting offsets)
-- sensor fault outputs that remain within valid Modbus framing but produce nonsense values
-
-### Hard bounds (reject sample if any value is outside)
-
-| Variable | Min | Max | Units | Raw / notes |
-|---|---:|---:|---|---|
-| Water EC/TDS/Temp | UNCERTAIN | UNCERTAIN |  | measurement ranges depend on probe model; require vendor spec table |
-
-### Fault patterns to treat as invalid (even if within range)
-- Any CRC failure, wrong prefix, or wrong length → **discard** (do not update last-good value).
-- Repeated raw patterns such as `0xFFFF`, `0x7FFF`, `0x8000` (common “disconnected / error” placeholders) → treat as **fault** if seen consistently for this sensor.
-- “Stuck value” detection: if value never changes across many samples while other sensors are changing (and environment should vary), mark as **suspect**.
-
-### Recommended driver behavior
-- Keep `last_good` value per field.
-- On invalid sample: increment `invalid_count` and do not overwrite `last_good`.
-- After N consecutive invalid samples (e.g. N=3..10 depending on poll rate), raise a **sensor_fault** flag for telemetry.
-
-
-## 7) Examples & pitfalls
-- Signed vs unsigned conversion (especially temperature)
-- Wrong scaling (/10 vs /100 vs /1000)
-- Wrong byte order when sensors use multi-register values
-- Reading wrong offsets due to garbage bytes (always prefix-scan + length + CRC)
-- Confusing Modbus function 0x03 (holding) vs 0x04 (input)
-
-
-## 8) Hardware test procedure (real RS485 line)
-1. Enable FULL raw logging on your RS485 transport (raw RX buffer + extracted frame + CRC status).
-2. Send the baseline read command(s) shown in this file.
-3. Capture one raw RX buffer.
-4. Scan the buffer for the required prefix bytes (addr + func + byteCount).
-5. From that offset, slice the expected frame length and verify Modbus RTU CRC16 (CRC Lo then CRC Hi).
-6. Manually compute raw register words from the data bytes and verify scaling and signedness.
-7. Only after CRC-valid parsing is stable, integrate into the C++ driver.
+The conductivity scale depends on the installed probe/controller range and cell constant. Keep the scale configurable during hardware bring-up.

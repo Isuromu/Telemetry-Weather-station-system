@@ -1,0 +1,15 @@
+{
+  "name": "JXEC_T_WaterEC",
+  "version": "1.0.0",
+  "description": "JXEC-T water conductivity and temperature RS485 Modbus driver",
+  "keywords": ["jxec-t", "jxct", "water", "conductivity", "ec", "temperature", "rs485", "modbus"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RS485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

@@ -1,66 +1,131 @@
-# JXEC-T Series Conductivity Probe (Water EC/TDS/Temp) (RS485)
+# JXEC-T Series Water Conductivity Controller + Probe (RS485)
 
-Source: `Conductive probe instruction of water sensor.pdf`
+Source: `Conductive probe instruction of water sensor.pdf`, plus vendor protocol notes for the JXCT water conductivity controller used with a JXEC-T probe.
 
 ## 1) Overview
-- **Purpose / measurements:** Water EC or TDS and water temperature.
+- Measures water temperature and electrical conductivity.
+- The metal JXEC-T probe alone is not necessarily a Modbus device. It must be connected to the matching transmitter/controller assembly that exposes RS485/Modbus.
+- If only the bare probe is connected to A/B, there will be no Modbus response.
 
 ## 2) Electrical & RS485 settings
-- **Interface / protocol:** RS485 / Modbus RTU (stated, but register map not present in extractable text).
-- **Serial:** 8N1 (data/parity/stop)
-- **Baud:** UNCERTAIN
-- **Default Modbus address:** UNCERTAIN
-- **Supported address range:** UNCERTAIN
-- **Wiring notes:** RS485 A/B (twisted pair) + GND reference recommended; power V+ and GND per sensor label. If A/B is swapped the sensor will not respond.
+- Protocol: Modbus RTU
+- Read function: `0x03`
+- Default Modbus address: `0x01`
+- Default baud: `9600`
+- Serial format: 8 data bits, no parity, 1 stop bit
+- CRC: Modbus CRC16, low byte first on the wire
+- Data byte order: high byte first inside register payload
 
-**Notes:** The provided PDF states RS485 Modbus RTU connectivity but does not include an extractable Modbus register table. You must obtain the correct Modbus map from vendor or discover by safe read-only probing.
+Typical RS485 controller wiring:
+- Brown: V+
+- Black: GND
+- Yellow/Grey: 485-A
+- Blue: 485-B
 
 ## 3) Register map
-_Register map is **UNCERTAIN** from the provided documents (no Modbus register table extracted). Use the hardware test procedure below to discover registers safely._
+| Register | Access | Meaning | Scaling / notes |
+|---:|---|---|---|
+| `0x0001` | Read | Water temperature | raw / 10.0 = deg C |
+| `0x0002` | Read | Conductivity high word | upper 16 bits of raw u32 |
+| `0x0003` | Read | Conductivity low word | lower 16 bits of raw u32 |
+| `0x0100` | Read/write | Device address | Modbus slave address |
+| `0x0101` | Read/write | Baud rate | vendor-specific encoding |
 
+Conductivity is reported as a 32-bit raw value:
 
-## 4) Read commands (byte-level)
-_No read command examples were extractable from the provided file. Use the hardware test procedure to discover a working read command._
+```text
+conductivity_raw = (reg0002 << 16) | reg0003
+```
 
-## 5) Write commands (address change / baud change / calibration, if supported)
-**This method is sensor-specific.**
+For the documented K=1 example:
 
-_Write operations are **UNCERTAIN** or not documented in the provided files. Many JXCT/JXBS RS485 sensors support address/baud changes via registers like 0x0100/0x0101, but you must confirm per-sensor on real hardware before implementing._
+```text
+conductivity_uS_cm = conductivity_raw / 100.0
+```
 
-## 6) Range protection & fault detection (response sanity)
+The raw format is shared, but final engineering interpretation depends on the probe/controller range and cell constant.
 
-These checks are applied **after** Modbus RTU validation (prefix match + expected length + CRC16). They help catch:
-- wrong signed/unsigned conversion
-- wrong scaling (/10 vs /100)
-- misalignment (garbage bytes shifting offsets)
-- sensor fault outputs that remain within valid Modbus framing but produce nonsense values
+## 4) Read commands
+### Temperature only
+Request for address `0x01`:
 
-### Hard bounds (reject sample if any value is outside)
+```text
+01 03 00 01 00 01 D5 CA
+```
 
-| Variable | Min | Max | Units | Raw / notes |
-|---|---:|---:|---|---|
-| EC/TDS/Temp | UNCERTAIN | UNCERTAIN |  | numeric measurement ranges not extractable from provided doc text; require manual table or vendor tool readouts |
+Response layout:
 
-### Fault patterns to treat as invalid (even if within range)
-- Any CRC failure, wrong prefix, or wrong length → **discard** (do not update last-good value).
-- Repeated raw patterns such as `0xFFFF`, `0x7FFF`, `0x8000` (common “disconnected / error” placeholders) → treat as **fault** if seen consistently for this sensor.
-- “Stuck value” detection: if value never changes across many samples while other sensors are changing (and environment should vary), mark as **suspect**.
+```text
+01 03 02 TT_H TT_L CRC_L CRC_H
+```
 
-### Recommended driver behavior
-- Keep `last_good` value per field.
-- On invalid sample: increment `invalid_count` and do not overwrite `last_good`.
-- After N consecutive invalid samples (e.g. N=3..10 depending on poll rate), raise a **sensor_fault** flag for telemetry.
+Decode:
 
+```text
+temp_raw = (TT_H << 8) | TT_L
+temperature_C = temp_raw / 10.0
+```
 
-## 7) Examples & pitfalls
-- Do not invent registers. Treat this sensor as unknown until you capture a CRC-valid response to a known read request.
-- If vendor tool exists, use it to read EC and temperature and note the exact register addresses.
+Example: `0x00AF = 175 -> 17.5 C`.
 
-## 8) Hardware test procedure (real RS485 line)
-1. Enable FULL raw logging on your RS485 transport (raw RX buffer + extracted frame + CRC status).
-2. Send the baseline read command(s) shown in this file.
-3. Capture one raw RX buffer.
-4. Scan the buffer for the required prefix bytes (addr + func + byteCount).
-5. From that offset, slice the expected frame length and verify Modbus RTU CRC16 (CRC Lo then CRC Hi).
-6. Manually compute raw register words from the data bytes and verify scaling and signedness.
-7. Only after CRC-valid parsing is stable, integrate into the C++ driver.
+### Conductivity only
+Request for address `0x01`:
+
+```text
+01 03 00 02 00 02 65 CB
+```
+
+Response layout:
+
+```text
+01 03 04 EC3 EC2 EC1 EC0 CRC_L CRC_H
+```
+
+Decode:
+
+```text
+conductivity_raw = (EC3 << 24) | (EC2 << 16) | (EC1 << 8) | EC0
+```
+
+Example: `00 00 00 BD = 189`, K=1 example -> `1.89 uS/cm`.
+
+### Temperature + conductivity
+Request for address `0x01`:
+
+```text
+01 03 00 01 00 03 54 0B
+```
+
+Response layout:
+
+```text
+01 03 06 TT_H TT_L EC3 EC2 EC1 EC0 CRC_L CRC_H
+```
+
+Decode:
+
+```text
+temperature_C = ((TT_H << 8) | TT_L) / 10.0
+conductivity_raw = (EC3 << 24) | (EC2 << 16) | (EC1 << 8) | EC0
+```
+
+Example: `0x011B = 283 -> 28.3 C`, `0x00000028 = 40`, K=1 example -> `0.4 uS/cm`.
+
+## 5) Write commands
+- Address register: `0x0100`
+- Baud register: `0x0101`
+
+Use write commands only with one target controller on the RS485 bus. The driver implements address change with function `0x06` to register `0x0100`; baud changing is intentionally not implemented until the exact baud encoding is confirmed on the hardware variant.
+
+## 6) Range protection & fault detection
+Driver defaults:
+- Temperature accepted range: `-10..80 C`
+- Conductivity accepted range: `0..200000 uS/cm` by default, configurable per probe/controller range
+- Fault raw patterns rejected: `0xFFFFFFFF`, `0x7FFFFFFF`, `0x80000000`
+
+## 7) Practical pitfalls
+- Bare probe only: no Modbus response.
+- Analog-output variant: no RS485 response.
+- Wrong A/B polarity: no response.
+- Wrong conductivity scale: CRC-valid frame but incorrect engineering value.
+- After power cycling, stainless probes may report wrong values if water remains on the electrode surface; verify against the manual and real installation behavior.
