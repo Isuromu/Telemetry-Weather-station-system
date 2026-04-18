@@ -1,4 +1,20 @@
 #include "JXBS_LeafSurfaceHumidity.h"
+#include <math.h>
+
+static bool responseIsJXBSAddressChange(const uint8_t* frame,
+                                        uint8_t oldAddress,
+                                        uint8_t newAddress) {
+  if (!frame) return false;
+
+  const bool responseAddressOk = (frame[0] == oldAddress || frame[0] == newAddress);
+  return responseAddressOk &&
+         frame[1] == 0x06 &&
+         frame[2] == 0x01 &&
+         frame[3] == 0x00 &&
+         frame[4] == 0x00 &&
+         frame[5] == newAddress &&
+         RS485Bus::verifyCrc16ModbusFrame(frame, 8);
+}
 
 static double decodeJXBSTemperatureC(uint16_t rawTemperature) {
   // Empirically verified for this tested sensor batch:
@@ -6,15 +22,12 @@ static double decodeJXBSTemperatureC(uint16_t rawTemperature) {
   //   warm stage raw 2237 -> 31.85 C
   //   warm water raw 2282 -> 34.10 C
   //   cold water raw 1703 -> 5.15 C
-  return ((double)rawTemperature * 0.05) - 80.0;
+  double temp_corrected = rawTemperature  / 100.0;
+  return temp_corrected;
 }
 
 static void logParsedJXBSLeaf(PrintController* log,
                               bool debug,
-                              uint8_t humHi,
-                              uint8_t humLo,
-                              uint8_t tempHi,
-                              uint8_t tempLo,
                               uint16_t rawHumidity,
                               uint16_t rawTemperature,
                               double humidity,
@@ -23,21 +36,15 @@ static void logParsedJXBSLeaf(PrintController* log,
 
   log->println(F("[DRV][JXBS_LeafSurfaceHumidity] Parsed response:"), true);
 
-  log->print(F("  bytes [3],[4] -> humidity raw = 0x"), true);
-  log->print((unsigned int)humHi, true, "", HEX);
-  log->print((unsigned int)humLo, true, " ", HEX);
-  log->print(F("| combined = "), true);
+  log->print(F("  humidity raw = "), true);
   log->print((unsigned int)rawHumidity, true, "", DEC);
   log->print(F(" | humidity = "), true);
   log->print(humidity, true, " %RH", 1);
   log->println("", true);
 
-  log->print(F("  bytes [5],[6] -> temperature raw = 0x"), true);
-  log->print((unsigned int)tempHi, true, "", HEX);
-  log->print((unsigned int)tempLo, true, " ", HEX);
-  log->print(F("| combined = "), true);
+  log->print(F("  temperature raw = "), true);
   log->print((unsigned int)rawTemperature, true, "", DEC);
-  log->print(F(" | formula = raw*0.05 - 80.0 | temperature = "), true);
+  log->print(F(" | formula = rawTemperature /100; | temperature = "), true);
   log->print(temperature, true, " C", 2);
   log->println("", true);
 }
@@ -61,10 +68,10 @@ JXBS_LeafSurfaceHumidity::JXBS_LeafSurfaceHumidity(RS485Bus& bus,
                    warmUpTimeMs,
                    maxConsecutiveErrors,
                    minUsefulPowerOffMs),
-      _bus(bus),
-      _lastParsedFrame(false),
       leaf_humidity(0.0),
-      leaf_temperature(0.0) {}
+      leaf_temperature(0.0),
+      _bus(bus),
+      _lastParsedFrame(false) {}
 
 void JXBS_LeafSurfaceHumidity::setFallbackValues() {
   leaf_humidity = -99.0;
@@ -72,6 +79,10 @@ void JXBS_LeafSurfaceHumidity::setFallbackValues() {
 }
 
 bool JXBS_LeafSurfaceHumidity::validateHumidityTemperature() const {
+  if (isnan(leaf_humidity) || isnan(leaf_temperature)) {
+    return false;
+  }
+
   if (leaf_humidity < 0.0 || leaf_humidity > 100.0) return false;
   if (leaf_temperature < -20.0 || leaf_temperature > 80.0) return false;
   return true;
@@ -84,16 +95,19 @@ bool JXBS_LeafSurfaceHumidity::readHumidityTemperature(uint8_t driverRetries,
   _lastParsedFrame = false;
 
   for (uint8_t attempt = 1; attempt <= driverRetries; ++attempt) {
-    uint8_t request[8] = {_address, 0x03, 0x00, 0x20, 0x00, 0x02, 0x00, 0x00};
-    uint8_t response[9] = {0};
-    const uint8_t check[3] = {_address, 0x03, 0x04};
+    uint8_t request[READ_REQUEST_SIZE] = {
+      _address, 0x03, 0x00, 0x20, 0x00, 0x02, 0x00, 0x00
+    };
+
+    uint8_t response[READ_RESPONSE_SIZE] = {0};
+    const uint8_t check[READ_CHECK_SIZE] = {_address, 0x03, 0x04};
 
     const bool ok = _bus.SendRequest(request,
-                                     8,
+                                     READ_REQUEST_SIZE,
                                      response,
-                                     9,
+                                     READ_RESPONSE_SIZE,
                                      check,
-                                     3,
+                                     READ_CHECK_SIZE,
                                      SENSOR_DEFAULT_BUS_RETRIES,
                                      readTimeoutMs,
                                      _debugEnable,
@@ -104,23 +118,14 @@ bool JXBS_LeafSurfaceHumidity::readHumidityTemperature(uint8_t driverRetries,
 
     _lastParsedFrame = true;
 
-    const uint8_t humHi = response[3];
-    const uint8_t humLo = response[4];
-    const uint8_t tempHi = response[5];
-    const uint8_t tempLo = response[6];
-
-    const uint16_t rawHumidity = ((uint16_t)humHi << 8) | humLo;
-    const uint16_t rawTemperature = ((uint16_t)tempHi << 8) | tempLo;
+    const uint16_t rawHumidity = ((uint16_t)response[3] << 8) | response[4];
+    const uint16_t rawTemperature = ((uint16_t)response[5] << 8) | response[6];
 
     leaf_humidity = (double)rawHumidity / 10.0;
     leaf_temperature = decodeJXBSTemperatureC(rawTemperature);
 
     logParsedJXBSLeaf(_bus.getLogger(),
                       _debugEnable,
-                      humHi,
-                      humLo,
-                      tempHi,
-                      tempLo,
                       rawHumidity,
                       rawTemperature,
                       leaf_humidity,
@@ -174,32 +179,39 @@ bool JXBS_LeafSurfaceHumidity::changeAddress(uint8_t newAddress,
   }
 
   // JXBS-style address setup writes the new node address to register 0x0100.
+  // Some batches echo the old address, while others answer from the new
+  // address immediately after the write. Accept either valid response.
   // Keep only the target sensor connected while this command is enabled.
   uint8_t request[8] = {_address, 0x06, 0x01, 0x00, 0x00, newAddress, 0x00, 0x00};
-  uint8_t response[8] = {0};
-  const uint8_t check[2] = {_address, 0x06};
+  if (maxRetries == 0) maxRetries = 1;
 
-  const bool ok = _bus.SendRequest(request,
-                                   8,
-                                   response,
-                                   8,
-                                   check,
-                                   2,
-                                   maxRetries,
-                                   readTimeoutMs,
-                                   _debugEnable,
-                                   afterReqDelayMs);
+  const uint8_t oldAddress = _address;
+  for (uint8_t attempt = 1; attempt <= maxRetries; ++attempt) {
+    _bus.CRC_Calc(request, sizeof(request), _debugEnable);
+    _bus.Request_RS485(request, sizeof(request), afterReqDelayMs, _debugEnable);
 
-  if (!ok) {
-    return false;
+    const size_t bytesRead = _bus.Read_RS485(readTimeoutMs, _debugEnable);
+    const uint8_t* raw = _bus.rawData();
+
+    if (bytesRead >= 8 && raw) {
+      for (size_t offset = 0; offset <= (bytesRead - 8); ++offset) {
+        if (responseIsJXBSAddressChange(&raw[offset], oldAddress, newAddress)) {
+          if (_bus.getLogger() && _debugEnable) {
+            _bus.getLogger()->print(F("[DRV][JXBS_LeafSurfaceHumidity] Address-change response came from 0x"), true);
+            _bus.getLogger()->print((unsigned int)raw[offset], true, "", HEX);
+            _bus.getLogger()->println(raw[offset] == newAddress ? F(" (new address)") : F(" (old address)"), true);
+          }
+
+          _address = newAddress;
+          return true;
+        }
+      }
+    }
+
+    delay(100UL * attempt);
   }
 
-  if (response[2] != 0x01 || response[3] != 0x00 || response[4] != 0x00 || response[5] != newAddress) {
-    return false;
-  }
-
-  _address = newAddress;
-  return true;
+  return false;
 }
 
 uint8_t JXBS_LeafSurfaceHumidity::scanForAddress(uint8_t startAddr,
@@ -211,16 +223,19 @@ uint8_t JXBS_LeafSurfaceHumidity::scanForAddress(uint8_t startAddr,
   if (startAddr > endAddr) return 0;
 
   for (uint16_t addr = startAddr; addr <= endAddr; ++addr) {
-    uint8_t request[8] = {(uint8_t)addr, 0x03, 0x00, 0x20, 0x00, 0x02, 0x00, 0x00};
-    uint8_t response[9] = {0};
-    const uint8_t check[3] = {(uint8_t)addr, 0x03, 0x04};
+    uint8_t request[READ_REQUEST_SIZE] = {
+      (uint8_t)addr, 0x03, 0x00, 0x20, 0x00, 0x02, 0x00, 0x00
+    };
+
+    uint8_t response[READ_RESPONSE_SIZE] = {0};
+    const uint8_t check[READ_CHECK_SIZE] = {(uint8_t)addr, 0x03, 0x04};
 
     const bool found = _bus.SendRequest(request,
-                                        8,
+                                        READ_REQUEST_SIZE,
                                         response,
-                                        9,
+                                        READ_RESPONSE_SIZE,
                                         check,
-                                        3,
+                                        READ_CHECK_SIZE,
                                         1,
                                         readTimeoutMs,
                                         _debugEnable,

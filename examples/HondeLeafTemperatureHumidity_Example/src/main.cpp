@@ -92,7 +92,7 @@ void setup() {
     runAddressChangeAtBoot(leaf,
                            printer,
                            ADDRESS_CHANGE_NEW_ADDRESS,
-                           F("Only the target sensor should be connected; Honde leaf writes address register 0x0030."));
+                           F("Only the target sensor should be connected; Honde leaf writes address register 0x0030 and replies from the new address. If the old address is unknown, set SENSOR_ADDRESS to 0xFE for this address-change run."));
   }
 
   if (DO_SCAN) {

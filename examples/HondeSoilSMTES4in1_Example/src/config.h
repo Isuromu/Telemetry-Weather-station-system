@@ -20,7 +20,7 @@
 
 #define SENSOR_ID                   "honde_soil4_00"
 #define SENSOR_ADDRESS              0x01
-#define SENSOR_DEBUG                true
+#define SENSOR_DEBUG                false
 
 // Scan address range on boot and print first responsive sensor.
 #define DO_SCAN                     false
@@ -34,6 +34,9 @@
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.
 // If this macro is undefined, no button GPIO is configured or read.
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
+// Delay before the actual persistent address write. Gives time to open Serial
+// Monitor after reset/upload and see the changeAddress() call.
+// #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 
 // Delay between loop() polling cycles.
 #define POLL_INTERVAL_MS            2000

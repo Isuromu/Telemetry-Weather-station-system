@@ -36,6 +36,9 @@
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.
 // If this macro is undefined, no button GPIO is configured or read.
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
+// Delay before the actual persistent address write. Gives time to open Serial
+// Monitor after reset/upload and see the changeAddress() call.
+// #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 
 // If true, write BOOT_SOIL_TYPE once during setup().
 #define SET_SOIL_TYPE_ON_BOOT       false

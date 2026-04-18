@@ -172,7 +172,7 @@ bool HondeLeafTemperatureHumidity::changeAddress(uint8_t newAddress,
   // Keep only the target sensor connected while this command is enabled.
   uint8_t request[8] = {_address, 0x06, 0x00, 0x30, 0x00, newAddress, 0x00, 0x00};
   uint8_t response[8] = {0};
-  const uint8_t check[4] = {_address, 0x06, 0x00, 0x30};
+  const uint8_t check[4] = {newAddress, 0x06, 0x00, 0x30};
 
   const bool ok = _bus.SendRequest(request,
                                    8,

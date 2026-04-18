@@ -22,6 +22,12 @@
 
     ADDRESS_CHANGE_BUTTON_WAIT_MS
       optional. Defaults to 5000 ms.
+
+    ADDRESS_CHANGE_CALL_DELAY_MS
+      optional. Defaults to 5000 ms. After the address-change gate is armed
+      or the optional button is accepted, the example waits this long before
+      calling driver.changeAddress(). This gives time to open Serial Monitor
+      and confirm that the persistent address write is about to happen.
 */
 
 #ifndef ADDRESS_CHANGE_BUTTON_ACTIVE_STATE
@@ -30,6 +36,10 @@
 
 #ifndef ADDRESS_CHANGE_BUTTON_WAIT_MS
 #define ADDRESS_CHANGE_BUTTON_WAIT_MS 5000UL
+#endif
+
+#ifndef ADDRESS_CHANGE_CALL_DELAY_MS
+#define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 #endif
 
 static bool rs485AddressChangeButtonPressed() {
@@ -98,6 +108,13 @@ static void runAddressChangeAtBoot(SensorT& sensor,
   // This is the only place examples call driver.changeAddress().
   // Keep ADDRESS_CHANGE_AT_BOOT false unless you are intentionally writing
   // the sensor's persistent Modbus address.
+  if (ADDRESS_CHANGE_CALL_DELAY_MS > 0) {
+    printer.print(F("[APP] changeAddress() will be called in "), true);
+    printer.print((unsigned long)(ADDRESS_CHANGE_CALL_DELAY_MS / 1000UL), true, " seconds.");
+    printer.println(F(" Open Serial Monitor now if you want to watch the request."), true);
+    delay(ADDRESS_CHANGE_CALL_DELAY_MS);
+  }
+
   printer.println(F("[APP] Calling changeAddress() now."), true);
   if (sensor.changeAddress(newAddress, SENSOR_DEFAULT_BUS_RETRIES, 500, SENSOR_DEFAULT_AFTER_REQ_MS)) {
     printer.print(F("[APP] Address changed successfully to 0x"), true);

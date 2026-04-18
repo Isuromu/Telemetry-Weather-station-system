@@ -32,3 +32,6 @@
 #define ADDRESS_CHANGE_AT_BOOT            false
 #define ADDRESS_CHANGE_NEW_ADDRESS        0x50
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
+// Delay before the actual persistent address write. Gives time to open Serial
+// Monitor after reset/upload and see the changeAddress() call.
+// #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL

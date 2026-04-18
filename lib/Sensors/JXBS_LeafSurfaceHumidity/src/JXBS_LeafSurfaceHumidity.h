@@ -7,68 +7,31 @@
 /*
   JXBS_LeafSurfaceHumidity
 
-  Driver for JXBS-3001-YMSD / JXBS-style leaf surface humidity transmitter.
+  Driver intent:
+  - RS485 Modbus RTU driver for JXBS-3001-YMSD / JXBS-style leaf surface
+    humidity transmitters.
+  - Primary measurements:
+      leaf_humidity    -> %RH
+      leaf_temperature -> degrees Celsius
 
-  IMPORTANT NOTE FOR THIS BATCH:
-  The tested hardware does NOT match the old "signed int16 /10" temperature decoding.
+  Main read command (readData):
+  - Function: 0x03 (Read Holding Registers)
+  - Start register: 0x0020
+  - Count: 2 registers
+  - Payload map:
+      reg 0x0020 = leaf surface humidity, unsigned, /10
+      reg 0x0021 = leaf temperature for this tested batch, unsigned,
+                   raw * 0.05 - 80.0
 
-  Verified practical decoding from the full experiment log:
-    - Humidity bytes [3],[4] -> unsigned BE -> humidity = raw / 10.0
-    - Temperature bytes [5],[6] -> unsigned BE -> temperature = raw * 0.05 - 80.0
+  Temperature note:
+  - This sensor batch does not match the older signed int16 /10 decoding.
+  - Keep bytes [5],[6] big-endian; only the formula is different.
+  - Equivalent formula: (raw - 1600) / 20.0
 
-  Equivalent temperature formula:
-    temperature = (raw - 1600) / 20.0
-
-  This decoding matches the observed sequence:
-    room -> hand warming -> warm water -> room -> cold water
-
-  Supplier family:
-    - JXBS / JXCT style
-
-  Interface:
-    - RS485 / Modbus RTU
-
-  Serial format:
-    - 8N1
-
-  Default baud:
-    - 9600
-
-  Default Modbus address:
-    - 0x01
-
-  Measured values:
-    1) Leaf surface humidity
-       - Register: 0x0020
-       - Units: %RH
-       - Raw bytes: [3],[4]
-       - Endianness: big-endian
-       - Raw scale: /10
-       - Measurement range: 0..100 %RH
-       - Resolution: 0.1 %RH
-       - Accuracy: ±5 %RH (@25°C)
-
-    2) Leaf surface temperature
-       - Register: 0x0021
-       - Units: °C
-       - Raw bytes: [5],[6]
-       - Endianness: big-endian
-       - Empirical batch decoding: raw * 0.05 - 80.0
-       - Equivalent step: 0.05 °C / count
-       - Measurement range target: -20..80 °C
-       - Accuracy target: ±1 °C (@25°C)
-
-  Register usage:
-    - Read 2 registers starting from 0x0020:
-      humidity + temperature in one request
-
-  Supported write operation:
-    - changeAddress() via register 0x0100
-
-  Not implemented on purpose:
-    - baud rate change
+  Configuration command:
+  - Function: 0x06
+  - Register 0x0100 = Modbus device address
 */
-
 class JXBS_LeafSurfaceHumidity : public SensorDriver {
 public:
   double leaf_humidity;
@@ -99,7 +62,7 @@ public:
 
   uint8_t scanForAddress(uint8_t startAddr = 1,
                          uint8_t endAddr = 247,
-                         uint16_t readTimeoutMs = 120,
+                         uint16_t readTimeoutMs = 150,
                          uint16_t afterReqDelayMs = SENSOR_DEFAULT_AFTER_REQ_MS);
 
 private:
@@ -107,4 +70,8 @@ private:
   bool _lastParsedFrame;
 
   bool validateHumidityTemperature() const;
+
+  static const uint8_t READ_REQUEST_SIZE = 8;
+  static const uint8_t READ_RESPONSE_SIZE = 9;
+  static const uint8_t READ_CHECK_SIZE = 3;
 };

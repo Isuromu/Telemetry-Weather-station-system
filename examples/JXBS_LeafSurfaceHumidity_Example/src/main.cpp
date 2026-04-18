@@ -92,7 +92,7 @@ void setup() {
     runAddressChangeAtBoot(leaf,
                            printer,
                            ADDRESS_CHANGE_NEW_ADDRESS,
-                           F("Only the target sensor should be connected; JXBS writes address register 0x0100."));
+                           F("Only the target sensor should be connected; JXBS writes address register 0x0100. Observed JXBS leaf response uses the old address."));
   }
 
   if (DO_SCAN) {
