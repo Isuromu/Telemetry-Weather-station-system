@@ -1,0 +1,15 @@
+{
+  "name": "JXBS_LiquidPH",
+  "version": "1.0.0",
+  "description": "JXBS-3001-PH-RS liquid pH and temperature RS485 Modbus driver",
+  "keywords": ["jxbs", "liquid", "ph", "temperature", "rs485", "modbus"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RS485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}
