@@ -1,0 +1,15 @@
+{
+  "name": "JXSZ_WaterSuspendedSolids",
+  "version": "1.0.0",
+  "description": "JXSZ-1001-SS water suspended solids and temperature RS485 Modbus driver",
+  "keywords": ["jxsz", "jxsz-1001", "suspended", "solids", "water", "temperature", "rs485", "modbus"],
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "RS485ModBus": "*",
+    "SensorDriver": "*"
+  },
+  "build": {
+    "srcDir": "src"
+  }
+}

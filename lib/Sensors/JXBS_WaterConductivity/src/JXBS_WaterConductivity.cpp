@@ -1,9 +1,9 @@
-#include "JXEC_T_WaterEC.h"
+#include "JXBS_WaterConductivity.h"
 #include <math.h>
 
-static bool responseIsJXECTAddressChange(const uint8_t* frame,
-                                         uint8_t oldAddress,
-                                         uint8_t newAddress) {
+static bool responseIsJXBSWaterConductivityAddressChange(const uint8_t* frame,
+                                                         uint8_t oldAddress,
+                                                         uint8_t newAddress) {
   if (!frame) return false;
 
   const bool responseAddressOk = (frame[0] == oldAddress || frame[0] == newAddress);
@@ -16,15 +16,15 @@ static bool responseIsJXECTAddressChange(const uint8_t* frame,
          RS485Bus::verifyCrc16ModbusFrame(frame, 8);
 }
 
-static void logParsedJXECTWaterEC(PrintController* log,
-                                  bool debug,
-                                  int16_t rawTemperature,
-                                  uint32_t rawConductivity,
-                                  double temperature,
-                                  double conductivity) {
+static void logParsedJXBSWaterConductivity(PrintController* log,
+                                           bool debug,
+                                           int16_t rawTemperature,
+                                           uint32_t rawConductivity,
+                                           double temperature,
+                                           double conductivity) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXEC_T_WaterEC] Parsed temperature + conductivity:"), true);
+  log->println(F("[DRV][JXBS_WaterConductivity] Parsed temperature + conductivity:"), true);
 
   log->print(F("  temperature raw = "), true);
   log->print((int)rawTemperature, true, "", DEC);
@@ -39,13 +39,13 @@ static void logParsedJXECTWaterEC(PrintController* log,
   log->println("", true);
 }
 
-static void logParsedJXECTTemperature(PrintController* log,
+static void logParsedWaterTemperature(PrintController* log,
                                       bool debug,
                                       int16_t rawTemperature,
                                       double temperature) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXEC_T_WaterEC] Parsed temperature:"), true);
+  log->println(F("[DRV][JXBS_WaterConductivity] Parsed temperature:"), true);
   log->print(F("  temperature raw = "), true);
   log->print((int)rawTemperature, true, "", DEC);
   log->print(F(" | temperature = "), true);
@@ -53,13 +53,13 @@ static void logParsedJXECTTemperature(PrintController* log,
   log->println("", true);
 }
 
-static void logParsedJXECTConductivity(PrintController* log,
-                                       bool debug,
-                                       uint32_t rawConductivity,
-                                       double conductivity) {
+static void logParsedConductivity(PrintController* log,
+                                  bool debug,
+                                  uint32_t rawConductivity,
+                                  double conductivity) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXEC_T_WaterEC] Parsed conductivity:"), true);
+  log->println(F("[DRV][JXBS_WaterConductivity] Parsed conductivity:"), true);
   log->print(F("  conductivity raw = "), true);
   log->print((unsigned long)rawConductivity, true, "", DEC);
   log->print(F(" | conductivity = "), true);
@@ -67,18 +67,18 @@ static void logParsedJXECTConductivity(PrintController* log,
   log->println("", true);
 }
 
-JXEC_T_WaterEC::JXEC_T_WaterEC(RS485Bus& bus,
-                               const char* sensorId,
-                               uint8_t address,
-                               bool debugEnable,
-                               double conductivityScaleDivisor,
-                               double maxConductivity_uS_cm,
-                               uint8_t powerLineIndex,
-                               uint8_t interfaceIndex,
-                               uint16_t sampleRateMin,
-                               uint32_t warmUpTimeMs,
-                               uint8_t maxConsecutiveErrors,
-                               uint32_t minUsefulPowerOffMs)
+JXBS_WaterConductivity::JXBS_WaterConductivity(RS485Bus& bus,
+                                               const char* sensorId,
+                                               uint8_t address,
+                                               bool debugEnable,
+                                               double conductivityScaleDivisor,
+                                               double maxConductivity_uS_cm,
+                                               uint8_t powerLineIndex,
+                                               uint8_t interfaceIndex,
+                                               uint16_t sampleRateMin,
+                                               uint32_t warmUpTimeMs,
+                                               uint8_t maxConsecutiveErrors,
+                                               uint32_t minUsefulPowerOffMs)
     : SensorDriver(sensorId,
                    address,
                    debugEnable,
@@ -96,35 +96,35 @@ JXEC_T_WaterEC::JXEC_T_WaterEC(RS485Bus& bus,
       _maxConductivity_uS_cm(maxConductivity_uS_cm > 0.0 ? maxConductivity_uS_cm : 200000.0),
       _lastParsedFrame(false) {}
 
-void JXEC_T_WaterEC::setFallbackValues() {
+void JXBS_WaterConductivity::setFallbackValues() {
   water_temperature_C = -99.0;
   conductivity_raw = 0;
   conductivity_uS_cm = -99.0;
 }
 
-void JXEC_T_WaterEC::setConductivityScaleDivisor(double divisor) {
+void JXBS_WaterConductivity::setConductivityScaleDivisor(double divisor) {
   if (divisor > 0.0) {
     _conductivityScaleDivisor = divisor;
   }
 }
 
-void JXEC_T_WaterEC::setMaxConductivity(double maxConductivity_uS_cm) {
+void JXBS_WaterConductivity::setMaxConductivity(double maxConductivity_uS_cm) {
   if (maxConductivity_uS_cm > 0.0) {
     _maxConductivity_uS_cm = maxConductivity_uS_cm;
   }
 }
 
-double JXEC_T_WaterEC::scaledConductivity(uint32_t raw) const {
+double JXBS_WaterConductivity::scaledConductivity(uint32_t raw) const {
   return (double)raw / _conductivityScaleDivisor;
 }
 
-bool JXEC_T_WaterEC::validateTemperature() const {
+bool JXBS_WaterConductivity::validateTemperature() const {
   if (isnan(water_temperature_C)) return false;
   if (water_temperature_C < -10.0 || water_temperature_C > 80.0) return false;
   return true;
 }
 
-bool JXEC_T_WaterEC::validateConductivity() const {
+bool JXBS_WaterConductivity::validateConductivity() const {
   if (isnan(conductivity_uS_cm)) return false;
   if (conductivity_raw == 0xFFFFFFFFUL || conductivity_raw == 0x7FFFFFFFUL ||
       conductivity_raw == 0x80000000UL) {
@@ -136,13 +136,13 @@ bool JXEC_T_WaterEC::validateConductivity() const {
   return true;
 }
 
-bool JXEC_T_WaterEC::validateTemperatureConductivity() const {
+bool JXBS_WaterConductivity::validateTemperatureConductivity() const {
   return validateTemperature() && validateConductivity();
 }
 
-bool JXEC_T_WaterEC::readTemperatureConductivity(uint8_t driverRetries,
-                                                uint16_t readTimeoutMs,
-                                                uint16_t afterReqDelayMs) {
+bool JXBS_WaterConductivity::readTemperatureConductivity(uint8_t driverRetries,
+                                                         uint16_t readTimeoutMs,
+                                                         uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -181,28 +181,28 @@ bool JXEC_T_WaterEC::readTemperatureConductivity(uint8_t driverRetries,
     conductivity_raw = rawConductivity;
     conductivity_uS_cm = scaledConductivity(rawConductivity);
 
-    logParsedJXECTWaterEC(_bus.getLogger(),
-                          _debugEnable,
-                          rawTemperature,
-                          rawConductivity,
-                          water_temperature_C,
-                          conductivity_uS_cm);
+    logParsedJXBSWaterConductivity(_bus.getLogger(),
+                                   _debugEnable,
+                                   rawTemperature,
+                                   rawConductivity,
+                                   water_temperature_C,
+                                   conductivity_uS_cm);
 
     if (validateTemperatureConductivity()) {
       return true;
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXEC_T_WaterEC] Range check fail: temperature/conductivity"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterConductivity] Range check fail: temperature/conductivity"), true);
     }
   }
 
   return false;
 }
 
-bool JXEC_T_WaterEC::readTemperature(uint8_t driverRetries,
-                                    uint16_t readTimeoutMs,
-                                    uint16_t afterReqDelayMs) {
+bool JXBS_WaterConductivity::readTemperature(uint8_t driverRetries,
+                                             uint16_t readTimeoutMs,
+                                             uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -233,7 +233,7 @@ bool JXEC_T_WaterEC::readTemperature(uint8_t driverRetries,
     const int16_t rawTemperature = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
     water_temperature_C = (double)rawTemperature / 10.0;
 
-    logParsedJXECTTemperature(_bus.getLogger(),
+    logParsedWaterTemperature(_bus.getLogger(),
                               _debugEnable,
                               rawTemperature,
                               water_temperature_C);
@@ -243,16 +243,16 @@ bool JXEC_T_WaterEC::readTemperature(uint8_t driverRetries,
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXEC_T_WaterEC] Range check fail: temperature"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterConductivity] Range check fail: temperature"), true);
     }
   }
 
   return false;
 }
 
-bool JXEC_T_WaterEC::readConductivity(uint8_t driverRetries,
-                                     uint16_t readTimeoutMs,
-                                     uint16_t afterReqDelayMs) {
+bool JXBS_WaterConductivity::readConductivity(uint8_t driverRetries,
+                                              uint16_t readTimeoutMs,
+                                              uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -289,24 +289,24 @@ bool JXEC_T_WaterEC::readConductivity(uint8_t driverRetries,
     conductivity_raw = rawConductivity;
     conductivity_uS_cm = scaledConductivity(rawConductivity);
 
-    logParsedJXECTConductivity(_bus.getLogger(),
-                               _debugEnable,
-                               rawConductivity,
-                               conductivity_uS_cm);
+    logParsedConductivity(_bus.getLogger(),
+                          _debugEnable,
+                          rawConductivity,
+                          conductivity_uS_cm);
 
     if (validateConductivity()) {
       return true;
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXEC_T_WaterEC] Range check fail: conductivity"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterConductivity] Range check fail: conductivity"), true);
     }
   }
 
   return false;
 }
 
-bool JXEC_T_WaterEC::readData() {
+bool JXBS_WaterConductivity::readData() {
   markReadTime(millis());
 
   const uint8_t driverRetries = SENSOR_DEFAULT_DRIVER_RETRIES;
@@ -331,10 +331,10 @@ bool JXEC_T_WaterEC::readData() {
   return false;
 }
 
-bool JXEC_T_WaterEC::changeAddress(uint8_t newAddress,
-                                  uint8_t maxRetries,
-                                  uint16_t readTimeoutMs,
-                                  uint16_t afterReqDelayMs) {
+bool JXBS_WaterConductivity::changeAddress(uint8_t newAddress,
+                                           uint8_t maxRetries,
+                                           uint16_t readTimeoutMs,
+                                           uint16_t afterReqDelayMs) {
   if (newAddress == 0 || newAddress > 247) {
     return false;
   }
@@ -352,9 +352,9 @@ bool JXEC_T_WaterEC::changeAddress(uint8_t newAddress,
 
     if (bytesRead >= 8 && raw) {
       for (size_t offset = 0; offset <= (bytesRead - 8); ++offset) {
-        if (responseIsJXECTAddressChange(&raw[offset], oldAddress, newAddress)) {
+        if (responseIsJXBSWaterConductivityAddressChange(&raw[offset], oldAddress, newAddress)) {
           if (_bus.getLogger() && _debugEnable) {
-            _bus.getLogger()->print(F("[DRV][JXEC_T_WaterEC] Address-change response came from 0x"), true);
+            _bus.getLogger()->print(F("[DRV][JXBS_WaterConductivity] Address-change response came from 0x"), true);
             _bus.getLogger()->print((unsigned int)raw[offset], true, "", HEX);
             _bus.getLogger()->println(raw[offset] == newAddress ? F(" (new address)") : F(" (old address)"), true);
           }
@@ -371,10 +371,10 @@ bool JXEC_T_WaterEC::changeAddress(uint8_t newAddress,
   return false;
 }
 
-uint8_t JXEC_T_WaterEC::scanForAddress(uint8_t startAddr,
-                                      uint8_t endAddr,
-                                      uint16_t readTimeoutMs,
-                                      uint16_t afterReqDelayMs) {
+uint8_t JXBS_WaterConductivity::scanForAddress(uint8_t startAddr,
+                                               uint8_t endAddr,
+                                               uint16_t readTimeoutMs,
+                                               uint16_t afterReqDelayMs) {
   if (startAddr == 0) startAddr = 1;
   if (endAddr > 247) endAddr = 247;
   if (startAddr > endAddr) return 0;

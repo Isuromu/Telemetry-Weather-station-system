@@ -1,4 +1,4 @@
-# JXEC-T Series Water Conductivity Controller + Probe (RS485)
+# Water Conductivity Controller + Probe (RS485)
 
 Source: `Conductive probe instruction of water sensor.pdf`, plus vendor protocol notes for the JXCT water conductivity controller used with a JXEC-T probe.
 

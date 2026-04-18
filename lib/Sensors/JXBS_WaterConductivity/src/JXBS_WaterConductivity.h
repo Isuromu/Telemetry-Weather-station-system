@@ -5,7 +5,7 @@
 #include "Configuration_System.h"
 
 /*
-  JXEC_T_WaterEC
+  JXBS_WaterConductivity
 
   Driver intent:
   - RS485 Modbus RTU driver for a JXCT/JXEC-T water conductivity controller
@@ -37,24 +37,24 @@
     probe/controller range and cell constant.
   - The K=1 example uses raw / 100.0 to produce uS/cm.
 */
-class JXEC_T_WaterEC : public SensorDriver {
+class JXBS_WaterConductivity : public SensorDriver {
 public:
   double water_temperature_C;
   uint32_t conductivity_raw;
   double conductivity_uS_cm;
 
-  JXEC_T_WaterEC(RS485Bus& bus,
-                 const char* sensorId,
-                 uint8_t address,
-                 bool debugEnable = false,
-                 double conductivityScaleDivisor = 100.0,
-                 double maxConductivity_uS_cm = 200000.0,
-                 uint8_t powerLineIndex = 0,
-                 uint8_t interfaceIndex = 0,
-                 uint16_t sampleRateMin = 1,
-                 uint32_t warmUpTimeMs = 500,
-                 uint8_t maxConsecutiveErrors = 10,
-                 uint32_t minUsefulPowerOffMs = 60000UL);
+  JXBS_WaterConductivity(RS485Bus& bus,
+                         const char* sensorId,
+                         uint8_t address,
+                         bool debugEnable = false,
+                         double conductivityScaleDivisor = 100.0,
+                         double maxConductivity_uS_cm = 200000.0,
+                         uint8_t powerLineIndex = 0,
+                         uint8_t interfaceIndex = 0,
+                         uint16_t sampleRateMin = 1,
+                         uint32_t warmUpTimeMs = 500,
+                         uint8_t maxConsecutiveErrors = 10,
+                         uint32_t minUsefulPowerOffMs = 60000UL);
 
   bool readData() override;
   void setFallbackValues() override;

@@ -3,7 +3,7 @@
 #include "PrintController.h"
 #include "RS485Modbus.h"
 #include "RS485AddressChangeExample.h"
-#include "JXEC_T_WaterEC.h"
+#include "JXBS_WaterConductivity.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 HardwareSerial& DebugPort = Serial0;
@@ -15,7 +15,7 @@ HardwareSerial RS485Port(1);
 static PrintController printer(DebugPort, false);
 static RS485Bus rs485;
 
-static JXEC_T_WaterEC waterEC(
+static JXBS_WaterConductivity waterConductivity(
     rs485,
     SENSOR_ID,
     SENSOR_ADDRESS,
@@ -32,7 +32,7 @@ static JXEC_T_WaterEC waterEC(
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
-  printer.println(F(" JXEC-T Water EC Diagnostic Example"), true);
+  printer.println(F(" JXBS Water Conductivity Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
   printer.print(F("PCB: "), true);
   printer.println(PCB_NAME, true);
@@ -44,9 +44,9 @@ static void printBanner() {
 
 static void printMainReadResult(bool ok) {
   printer.print(F("[APP] Sensor ID: "), true);
-  printer.print(waterEC.getSensorId(), true, " | ");
+  printer.print(waterConductivity.getSensorId(), true, " | ");
   printer.print(F("Address: 0x"), true);
-  printer.print((unsigned int)waterEC.getAddress(), true, " | ", HEX);
+  printer.print((unsigned int)waterConductivity.getAddress(), true, " | ", HEX);
   printer.println("", true);
 
   if (ok) {
@@ -56,16 +56,16 @@ static void printMainReadResult(bool ok) {
   }
 
   printer.print(F("Temp: "), true);
-  printer.print(waterEC.water_temperature_C, true, " C | ", 1);
+  printer.print(waterConductivity.water_temperature_C, true, " C | ", 1);
   printer.print(F("EC raw: "), true);
-  printer.print((unsigned long)waterEC.conductivity_raw, true, " | ", DEC);
+  printer.print((unsigned long)waterConductivity.conductivity_raw, true, " | ", DEC);
   printer.print(F("EC: "), true);
-  printer.print(waterEC.conductivity_uS_cm, true, " uS/cm", 2);
+  printer.print(waterConductivity.conductivity_uS_cm, true, " uS/cm", 2);
   printer.println("", true);
 
   if (!ok) {
     printer.print(F("[APP] Error count: "), true);
-    printer.println((unsigned int)waterEC.getConsecutiveErrors(), true);
+    printer.println((unsigned int)waterConductivity.getConsecutiveErrors(), true);
   }
 }
 
@@ -90,15 +90,15 @@ void setup() {
                             PCB_RS485_DE_ACTIVE_HIGH[RS485_PORT_INDEX_0]);
 
   if (ADDRESS_CHANGE_AT_BOOT) {
-    runAddressChangeAtBoot(waterEC,
+    runAddressChangeAtBoot(waterConductivity,
                            printer,
                            ADDRESS_CHANGE_NEW_ADDRESS,
-                           F("Only the target JXEC-T controller should be connected; address register is 0x0100."));
+                           F("Only the target water conductivity controller should be connected; address register is 0x0100."));
   }
 
   if (DO_SCAN) {
-    printer.println(F("[APP] Scan mode enabled. Searching JXEC-T controller address..."), true);
-    const uint8_t found = waterEC.scanForAddress(1, 247, 150, 20);
+    printer.println(F("[APP] Scan mode enabled. Searching water conductivity controller address..."), true);
+    const uint8_t found = waterConductivity.scanForAddress(1, 247, 150, 20);
     if (found != 0) {
       printer.print(F("[APP] Controller found at address 0x"), true);
       printer.println((unsigned int)found, true, "", HEX);
@@ -115,17 +115,17 @@ void loop() {
   printer.println(F("[APP] New polling cycle"), true);
   printer.println(F("------------------------------------------------------------"), true);
 
-  const bool ok = waterEC.readData();
+  const bool ok = waterConductivity.readData();
   printMainReadResult(ok);
 
   if (READ_TEMPERATURE_ONLY_IN_LOOP) {
-    const bool tempOk = waterEC.readTemperature(3, 500, 20);
+    const bool tempOk = waterConductivity.readTemperature(3, 500, 20);
     printer.print(F("[APP] Temperature-only read: "), true);
     printer.println(tempOk ? F("OK") : F("FAILED"), true);
   }
 
   if (READ_CONDUCTIVITY_ONLY_IN_LOOP) {
-    const bool ecOk = waterEC.readConductivity(3, 500, 20);
+    const bool ecOk = waterConductivity.readConductivity(3, 500, 20);
     printer.print(F("[APP] Conductivity-only read: "), true);
     printer.println(ecOk ? F("OK") : F("FAILED"), true);
   }

@@ -1,11 +1,11 @@
-# Water EC Sensor (RS485)
+# Water Conductivity Sensor (RS485)
 
 This project item maps to the JXEC-T water conductivity controller + probe protocol.
 
 See:
 
 ```text
-JXEC_T_Series_Conductivity_Probe_Water_EC_TDS_Temp_RS485.md
+Water_Conductivity_Controller_Probe_RS485.md
 ```
 
 Key implementation notes:

@@ -4,14 +4,14 @@
 #include "../../../config/Configuration_PCB.h"
 
 /*
-  JXEC_T_WaterEC Example - local example config
+  JXBS Water Conductivity Example - local example config
 
   This example targets the RS485 transmitter/controller assembly used with a
   JXEC-T conductivity probe. A bare metal probe without the transmitter box
   will not respond as a Modbus slave.
 */
 
-#define SENSOR_ID                   "water_ec_00"
+#define SENSOR_ID                   "water_conductivity_00"
 #define SENSOR_ADDRESS              0x01
 #define SENSOR_DEBUG                true
 
