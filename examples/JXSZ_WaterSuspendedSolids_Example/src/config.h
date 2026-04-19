@@ -13,12 +13,9 @@
   Manual protocol notes:
   - Source: docs/datasheets/JXSZ-1001-Water Suspended.pdf
   - Default serial format: 9600 baud, 8 data bits, no parity, 1 stop bit.
-  - Baud options in manual: 2400 / 4800 / 9600.
-  - Default Modbus address is usually 0x01.
   - Register 0x0001 = water temperature, signed raw / 10 C.
   - Register 0x0002 = suspended solids raw / scale divisor, mg/L.
   - Register 0x0100 = device address.
-  - Register 0x0101 = baud rate, not used by this example.
 
   Scaling note:
   - The manual table text and worked example disagree.
@@ -27,8 +24,6 @@
     SUSPENDED_SOLIDS_SCALE_DIVISOR to 100.0.
 
   Handling and measurement notes:
-  - Verify power polarity and RS485 A/B before power-on.
-  - Use a shared GND reference for RS485 when wiring allows it.
   - Keep the optical/measuring window clean and avoid scratching it.
   - Fully immerse the sensing section in the water sample.
   - Avoid bubbles, sediment stuck on the window, and direct contact with tank walls.
@@ -37,7 +32,7 @@
 */
 
 #define SENSOR_ID                           "jxsz_water_suspended_solids_00"
-#define SENSOR_ADDRESS                      0x01
+#define SENSOR_ADDRESS                      0x52
 #define SENSOR_DEBUG                        true
 
 // Default from the manual worked example: raw 189 -> 18.9 mg/L.
@@ -53,7 +48,7 @@
 // JXSZ address change writes register 0x0100. Keep only the target sensor
 // connected while changing addresses. No broadcast address is documented in
 // the available protocol note, so assume you must know the current address.
-#define ADDRESS_CHANGE_AT_BOOT              true
+#define ADDRESS_CHANGE_AT_BOOT              false
 // Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
 #define ADDRESS_CHANGE_NEW_ADDRESS          0x52
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.

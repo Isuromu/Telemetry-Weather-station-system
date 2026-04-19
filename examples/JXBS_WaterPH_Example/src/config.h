@@ -4,17 +4,17 @@
 #include "../../../config/Configuration_PCB.h"
 
 /*
-  JXBS_LiquidPH Example - local example config
+  JXBS_WaterPH Example - local example config
 
   Sensor:
-  - JXBS-3001-PH-RS liquid pH sensor
+  - JXBS-3001-PH-RS water pH sensor
   - RS485 Modbus RTU
 
   Manual protocol notes:
   - Default serial format: 9600 baud, 8 data bits, no parity, 1 stop bit.
   - Baud options in manual: 2400 / 4800 / 9600.
   - Default Modbus address is usually 0x01.
-  - Register 0x0001 = liquid temperature, raw / 10 C.
+  - Register 0x0001 = water temperature, raw / 10 C.
   - Register 0x0002 = pH, raw / 100 pH.
   - Register 0x0100 = device address.
   - Register 0x0101 = baud rate, not used by this example.
@@ -28,8 +28,8 @@
   Client Handling, Storage, and Measurement Guide
 
   PURPOSE
-  - This sensor measures liquid pH and liquid temperature.
-  - It is designed for direct immersion of the sensing tip into the liquid sample.
+  - This sensor measures water pH and water temperature.
+  - It is designed for direct immersion of the sensing tip into the water sample.
 
   BEFORE USE
   - Verify wiring, polarity, and RS485 A/B lines before power-on.
@@ -82,8 +82,8 @@
   - Always use the protective cap after operation.
 */
 
-#define SENSOR_ID                   "jxbs_liquid_ph_00"
-#define SENSOR_ADDRESS              0x03
+#define SENSOR_ID                   "jxbs_water_ph_00"
+#define SENSOR_ADDRESS              0x50
 #define SENSOR_DEBUG                true
 
 // Scan address range on boot and print first responsive sensor.

@@ -3,7 +3,7 @@
 #include "PrintController.h"
 #include "RS485Modbus.h"
 #include "RS485AddressChangeExample.h"
-#include "JXBS_LiquidPH.h"
+#include "JXBS_WaterPH.h"
 
 #if defined(ARDUINO_ARCH_ESP32)
 HardwareSerial& DebugPort = Serial0;
@@ -15,7 +15,7 @@ HardwareSerial RS485Port(1);
 static PrintController printer(DebugPort, false);
 static RS485Bus rs485;
 
-static JXBS_LiquidPH phSensor(
+static JXBS_WaterPH phSensor(
     rs485,
     SENSOR_ID,
     SENSOR_ADDRESS,
@@ -30,7 +30,7 @@ static JXBS_LiquidPH phSensor(
 static void printBanner() {
   printer.println(F(""), true);
   printer.println(F("============================================================"), true);
-  printer.println(F(" JXBS-3001-PH-RS Liquid pH Diagnostic Example"), true);
+  printer.println(F(" JXBS-3001-PH-RS Water pH Diagnostic Example"), true);
   printer.println(F("============================================================"), true);
   printer.print(F("PCB: "), true);
   printer.println(PCB_NAME, true);
@@ -60,10 +60,10 @@ static void printReadResult(bool ok) {
     printer.println(F("[APP] Read failed. Current driver attributes:"), true);
   }
 
-  printer.print(F("Liquid temperature: "), true);
-  printer.print(phSensor.liquid_temperature, true, " C | ", 1);
+  printer.print(F("Water temperature: "), true);
+  printer.print(phSensor.water_temperature, true, " C | ", 1);
   printer.print(F("pH: "), true);
-  printer.print(phSensor.liquid_ph, true, "", 2);
+  printer.print(phSensor.water_ph, true, "", 2);
   printer.println("", true);
 
   if (!ok) {
@@ -75,7 +75,7 @@ static void printReadResult(bool ok) {
 static void printTemperatureOnlyResult(bool ok) {
   if (ok) {
     printer.print(F("[APP] Temperature-only read: "), true);
-    printer.print(phSensor.liquid_temperature, true, " C", 1);
+    printer.print(phSensor.water_temperature, true, " C", 1);
     printer.println("", true);
   } else {
     printer.println(F("[APP] Temperature-only read failed."), true);
@@ -85,7 +85,7 @@ static void printTemperatureOnlyResult(bool ok) {
 static void printPHOnlyResult(bool ok) {
   if (ok) {
     printer.print(F("[APP] pH-only read: "), true);
-    printer.println(phSensor.liquid_ph, true, "", 2);
+    printer.println(phSensor.water_ph, true, "", 2);
   } else {
     printer.println(F("[APP] pH-only read failed."), true);
   }

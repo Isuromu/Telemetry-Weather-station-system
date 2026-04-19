@@ -8,15 +8,15 @@
 */
 
 #define SENSOR_ID         "jxbs_soil7_00"
-#define SENSOR_ADDRESS    0x01
-#define SENSOR_DEBUG      true
+#define SENSOR_ADDRESS    0x11
+#define SENSOR_DEBUG      false
 
 #define DO_SCAN           false
 
 // If true, setup() calls changeAddress() once near boot.
 // JXBS address change writes register 0x0100. Keep only the target sensor
 // connected while changing addresses.
-#define ADDRESS_CHANGE_AT_BOOT true
+#define ADDRESS_CHANGE_AT_BOOT false
 // Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
 #define ADDRESS_CHANGE_NEW_ADDRESS 0x12
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.

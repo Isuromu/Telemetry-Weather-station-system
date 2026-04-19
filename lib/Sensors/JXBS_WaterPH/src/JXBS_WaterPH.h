@@ -5,13 +5,13 @@
 #include "Configuration_System.h"
 
 /*
-  JXBS_LiquidPH
+  JXBS_WaterPH
 
   Driver intent:
-  - RS485 Modbus RTU driver for the JXBS-3001-PH-RS liquid pH sensor.
+  - RS485 Modbus RTU driver for the JXBS-3001-PH-RS water pH sensor.
   - Primary measurements:
-      liquid_temperature -> degrees Celsius
-      liquid_ph          -> pH
+      water_temperature -> degrees Celsius
+      water_ph          -> pH
 
   Manual:
   - "JXBS-3001-PH-RS Water PH Sensor User Manual"
@@ -49,21 +49,21 @@
   - Register 0x0100 = Modbus device address
   - Register 0x0101 = baud rate, not implemented here.
 */
-class JXBS_LiquidPH : public SensorDriver {
+class JXBS_WaterPH : public SensorDriver {
 public:
-  double liquid_temperature;
-  double liquid_ph;
+  double water_temperature;
+  double water_ph;
 
-  JXBS_LiquidPH(RS485Bus& bus,
-                const char* sensorId,
-                uint8_t address,
-                bool debugEnable = false,
-                uint8_t powerLineIndex = 0,
-                uint8_t interfaceIndex = 0,
-                uint16_t sampleRateMin = 1,
-                uint32_t warmUpTimeMs = 500,
-                uint8_t maxConsecutiveErrors = 10,
-                uint32_t minUsefulPowerOffMs = 60000UL);
+  JXBS_WaterPH(RS485Bus& bus,
+               const char* sensorId,
+               uint8_t address,
+               bool debugEnable = false,
+               uint8_t powerLineIndex = 0,
+               uint8_t interfaceIndex = 0,
+               uint16_t sampleRateMin = 1,
+               uint32_t warmUpTimeMs = 500,
+               uint8_t maxConsecutiveErrors = 10,
+               uint32_t minUsefulPowerOffMs = 60000UL);
 
   bool readData() override;
   void setFallbackValues() override;

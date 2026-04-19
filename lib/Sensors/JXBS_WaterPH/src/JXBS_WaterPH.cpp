@@ -1,9 +1,9 @@
-#include "JXBS_LiquidPH.h"
+#include "JXBS_WaterPH.h"
 #include <math.h>
 
-static bool responseIsJXBSLiquidPHAddressChange(const uint8_t* frame,
-                                                uint8_t oldAddress,
-                                                uint8_t newAddress) {
+static bool responseIsJXBSWaterPHAddressChange(const uint8_t* frame,
+                                               uint8_t oldAddress,
+                                               uint8_t newAddress) {
   if (!frame) return false;
 
   const bool responseAddressOk = (frame[0] == oldAddress || frame[0] == newAddress);
@@ -16,15 +16,15 @@ static bool responseIsJXBSLiquidPHAddressChange(const uint8_t* frame,
          RS485Bus::verifyCrc16ModbusFrame(frame, 8);
 }
 
-static void logParsedJXBSLiquidPH(PrintController* log,
-                                  bool debug,
-                                  int16_t rawTemperature,
-                                  uint16_t rawPH,
-                                  double temperature,
-                                  double ph) {
+static void logParsedJXBSWaterPH(PrintController* log,
+                                 bool debug,
+                                 int16_t rawTemperature,
+                                 uint16_t rawPH,
+                                 double temperature,
+                                 double ph) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXBS_LiquidPH] Parsed temperature + pH:"), true);
+  log->println(F("[DRV][JXBS_WaterPH] Parsed temperature + pH:"), true);
 
   log->print(F("  temperature raw = "), true);
   log->print((int)rawTemperature, true, "", DEC);
@@ -39,13 +39,13 @@ static void logParsedJXBSLiquidPH(PrintController* log,
   log->println("", true);
 }
 
-static void logParsedJXBSLiquidTemperature(PrintController* log,
-                                           bool debug,
-                                           int16_t rawTemperature,
-                                           double temperature) {
+static void logParsedJXBSWaterTemperature(PrintController* log,
+                                          bool debug,
+                                          int16_t rawTemperature,
+                                          double temperature) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXBS_LiquidPH] Parsed temperature:"), true);
+  log->println(F("[DRV][JXBS_WaterPH] Parsed temperature:"), true);
   log->print(F("  temperature raw = "), true);
   log->print((int)rawTemperature, true, "", DEC);
   log->print(F(" | temperature = "), true);
@@ -53,13 +53,13 @@ static void logParsedJXBSLiquidTemperature(PrintController* log,
   log->println("", true);
 }
 
-static void logParsedJXBSLiquidPHOnly(PrintController* log,
-                                      bool debug,
-                                      uint16_t rawPH,
-                                      double ph) {
+static void logParsedJXBSWaterPHOnly(PrintController* log,
+                                     bool debug,
+                                     uint16_t rawPH,
+                                     double ph) {
   if (!log || !debug) return;
 
-  log->println(F("[DRV][JXBS_LiquidPH] Parsed pH:"), true);
+  log->println(F("[DRV][JXBS_WaterPH] Parsed pH:"), true);
   log->print(F("  pH raw = "), true);
   log->print((unsigned int)rawPH, true, "", DEC);
   log->print(F(" | pH = "), true);
@@ -67,16 +67,16 @@ static void logParsedJXBSLiquidPHOnly(PrintController* log,
   log->println("", true);
 }
 
-JXBS_LiquidPH::JXBS_LiquidPH(RS485Bus& bus,
-                             const char* sensorId,
-                             uint8_t address,
-                             bool debugEnable,
-                             uint8_t powerLineIndex,
-                             uint8_t interfaceIndex,
-                             uint16_t sampleRateMin,
-                             uint32_t warmUpTimeMs,
-                             uint8_t maxConsecutiveErrors,
-                             uint32_t minUsefulPowerOffMs)
+JXBS_WaterPH::JXBS_WaterPH(RS485Bus& bus,
+                           const char* sensorId,
+                           uint8_t address,
+                           bool debugEnable,
+                           uint8_t powerLineIndex,
+                           uint8_t interfaceIndex,
+                           uint16_t sampleRateMin,
+                           uint32_t warmUpTimeMs,
+                           uint8_t maxConsecutiveErrors,
+                           uint32_t minUsefulPowerOffMs)
     : SensorDriver(sensorId,
                    address,
                    debugEnable,
@@ -86,35 +86,35 @@ JXBS_LiquidPH::JXBS_LiquidPH(RS485Bus& bus,
                    warmUpTimeMs,
                    maxConsecutiveErrors,
                    minUsefulPowerOffMs),
-      liquid_temperature(0.0),
-      liquid_ph(0.0),
+      water_temperature(0.0),
+      water_ph(0.0),
       _bus(bus),
       _lastParsedFrame(false) {}
 
-void JXBS_LiquidPH::setFallbackValues() {
-  liquid_temperature = -99.0;
-  liquid_ph = -99.0;
+void JXBS_WaterPH::setFallbackValues() {
+  water_temperature = -99.0;
+  water_ph = -99.0;
 }
 
-bool JXBS_LiquidPH::validateTemperaturePH() const {
+bool JXBS_WaterPH::validateTemperaturePH() const {
   return validateTemperature() && validatePH();
 }
 
-bool JXBS_LiquidPH::validateTemperature() const {
-  if (isnan(liquid_temperature)) return false;
-  if (liquid_temperature < -20.0 || liquid_temperature > 80.0) return false;
+bool JXBS_WaterPH::validateTemperature() const {
+  if (isnan(water_temperature)) return false;
+  if (water_temperature < -20.0 || water_temperature > 80.0) return false;
   return true;
 }
 
-bool JXBS_LiquidPH::validatePH() const {
-  if (isnan(liquid_ph)) return false;
-  if (liquid_ph < 0.0 || liquid_ph > 14.0) return false;
+bool JXBS_WaterPH::validatePH() const {
+  if (isnan(water_ph)) return false;
+  if (water_ph < 0.0 || water_ph > 14.0) return false;
   return true;
 }
 
-bool JXBS_LiquidPH::readTemperaturePH(uint8_t driverRetries,
-                                      uint16_t readTimeoutMs,
-                                      uint16_t afterReqDelayMs) {
+bool JXBS_WaterPH::readTemperaturePH(uint8_t driverRetries,
+                                     uint16_t readTimeoutMs,
+                                     uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -145,31 +145,31 @@ bool JXBS_LiquidPH::readTemperaturePH(uint8_t driverRetries,
     const int16_t rawTemperature = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
     const uint16_t rawPH = ((uint16_t)response[5] << 8) | response[6];
 
-    liquid_temperature = (double)rawTemperature / 10.0;
-    liquid_ph = (double)rawPH / 100.0;
+    water_temperature = (double)rawTemperature / 10.0;
+    water_ph = (double)rawPH / 100.0;
 
-    logParsedJXBSLiquidPH(_bus.getLogger(),
-                          _debugEnable,
-                          rawTemperature,
-                          rawPH,
-                          liquid_temperature,
-                          liquid_ph);
+    logParsedJXBSWaterPH(_bus.getLogger(),
+                         _debugEnable,
+                         rawTemperature,
+                         rawPH,
+                         water_temperature,
+                         water_ph);
 
     if (validateTemperaturePH()) {
       return true;
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXBS_LiquidPH] Range check fail: temperature/pH"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterPH] Range check fail: temperature/pH"), true);
     }
   }
 
   return false;
 }
 
-bool JXBS_LiquidPH::readTemperature(uint8_t driverRetries,
-                                    uint16_t readTimeoutMs,
-                                    uint16_t afterReqDelayMs) {
+bool JXBS_WaterPH::readTemperature(uint8_t driverRetries,
+                                   uint16_t readTimeoutMs,
+                                   uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -198,28 +198,28 @@ bool JXBS_LiquidPH::readTemperature(uint8_t driverRetries,
     _lastParsedFrame = true;
 
     const int16_t rawTemperature = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
-    liquid_temperature = (double)rawTemperature / 10.0;
+    water_temperature = (double)rawTemperature / 10.0;
 
-    logParsedJXBSLiquidTemperature(_bus.getLogger(),
-                                   _debugEnable,
-                                   rawTemperature,
-                                   liquid_temperature);
+    logParsedJXBSWaterTemperature(_bus.getLogger(),
+                                  _debugEnable,
+                                  rawTemperature,
+                                  water_temperature);
 
     if (validateTemperature()) {
       return true;
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXBS_LiquidPH] Range check fail: temperature"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterPH] Range check fail: temperature"), true);
     }
   }
 
   return false;
 }
 
-bool JXBS_LiquidPH::readPH(uint8_t driverRetries,
-                           uint16_t readTimeoutMs,
-                           uint16_t afterReqDelayMs) {
+bool JXBS_WaterPH::readPH(uint8_t driverRetries,
+                          uint16_t readTimeoutMs,
+                          uint16_t afterReqDelayMs) {
   if (driverRetries == 0) driverRetries = 1;
   _lastParsedFrame = false;
 
@@ -248,23 +248,23 @@ bool JXBS_LiquidPH::readPH(uint8_t driverRetries,
     _lastParsedFrame = true;
 
     const uint16_t rawPH = ((uint16_t)response[3] << 8) | response[4];
-    liquid_ph = (double)rawPH / 100.0;
+    water_ph = (double)rawPH / 100.0;
 
-    logParsedJXBSLiquidPHOnly(_bus.getLogger(), _debugEnable, rawPH, liquid_ph);
+    logParsedJXBSWaterPHOnly(_bus.getLogger(), _debugEnable, rawPH, water_ph);
 
     if (validatePH()) {
       return true;
     }
 
     if (_bus.getLogger() && _debugEnable) {
-      _bus.getLogger()->println(F("[DRV][JXBS_LiquidPH] Range check fail: pH"), true);
+      _bus.getLogger()->println(F("[DRV][JXBS_WaterPH] Range check fail: pH"), true);
     }
   }
 
   return false;
 }
 
-bool JXBS_LiquidPH::readData() {
+bool JXBS_WaterPH::readData() {
   markReadTime(millis());
 
   const uint8_t driverRetries = SENSOR_DEFAULT_DRIVER_RETRIES;
@@ -289,10 +289,10 @@ bool JXBS_LiquidPH::readData() {
   return false;
 }
 
-bool JXBS_LiquidPH::changeAddress(uint8_t newAddress,
-                                  uint8_t maxRetries,
-                                  uint16_t readTimeoutMs,
-                                  uint16_t afterReqDelayMs) {
+bool JXBS_WaterPH::changeAddress(uint8_t newAddress,
+                                 uint8_t maxRetries,
+                                 uint16_t readTimeoutMs,
+                                 uint16_t afterReqDelayMs) {
   if (newAddress == 0 || newAddress > 247) {
     return false;
   }
@@ -315,9 +315,9 @@ bool JXBS_LiquidPH::changeAddress(uint8_t newAddress,
 
     if (bytesRead >= 8 && raw) {
       for (size_t offset = 0; offset <= (bytesRead - 8); ++offset) {
-        if (responseIsJXBSLiquidPHAddressChange(&raw[offset], oldAddress, newAddress)) {
+        if (responseIsJXBSWaterPHAddressChange(&raw[offset], oldAddress, newAddress)) {
           if (_bus.getLogger() && _debugEnable) {
-            _bus.getLogger()->print(F("[DRV][JXBS_LiquidPH] Address-change response came from 0x"), true);
+            _bus.getLogger()->print(F("[DRV][JXBS_WaterPH] Address-change response came from 0x"), true);
             _bus.getLogger()->print((unsigned int)raw[offset], true, "", HEX);
             _bus.getLogger()->println(raw[offset] == newAddress ? F(" (new address)") : F(" (old address)"), true);
           }
@@ -334,10 +334,10 @@ bool JXBS_LiquidPH::changeAddress(uint8_t newAddress,
   return false;
 }
 
-uint8_t JXBS_LiquidPH::scanForAddress(uint8_t startAddr,
-                                      uint8_t endAddr,
-                                      uint16_t readTimeoutMs,
-                                      uint16_t afterReqDelayMs) {
+uint8_t JXBS_WaterPH::scanForAddress(uint8_t startAddr,
+                                     uint8_t endAddr,
+                                     uint16_t readTimeoutMs,
+                                     uint16_t afterReqDelayMs) {
   if (startAddr == 0) startAddr = 1;
   if (endAddr > 247) endAddr = 247;
   if (startAddr > endAddr) return 0;
