@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "../../../config/Configuration_System.h"
 #include "../../../config/Configuration_PCB.h"
+#include "../../../config/Configuration_ModbusAddresses.h"
 
 /*
   Rika Soil Sensor 3-in-1 Example - local example config
@@ -20,7 +21,7 @@
 // Logical ID used in logs and telemetry tagging.
 #define SENSOR_ID                   "soil_test_00"
 // Modbus node address currently configured in the sensor.
-#define SENSOR_ADDRESS              0x010
+#define SENSOR_ADDRESS              ADDR_SOIL_00
 // Enables additional driver/bus debug traces.
 #define SENSOR_DEBUG                true
 
@@ -32,7 +33,7 @@
 // Keep only the target sensor connected while changing addresses.
 #define ADDRESS_CHANGE_AT_BOOT      false
 // Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
-#define ADDRESS_CHANGE_NEW_ADDRESS  0x10
+#define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_SOIL_00
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.
 // If this macro is undefined, no button GPIO is configured or read.
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN

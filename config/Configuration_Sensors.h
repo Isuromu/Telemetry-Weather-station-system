@@ -3,69 +3,237 @@
 #include "Configuration.h"
 #include "Configuration_System.h"
 #include "Configuration_PCB.h"
+#include "Configuration_ModbusAddresses.h"
 
 /*
   Configuration_Sensors.h
 
-  This file belongs to the PRIMARY station firmware only.
+  Main station sensor configuration.
 
-  Here you select which sensor instances exist in the station build,
-  what their IDs are, what addresses they use, which power line and
-  interface they are connected to, and what timing/debug parameters
-  they use.
+  This is intentionally count-based, similar to firmware configuration files
+  such as Marlin Configuration.h:
+  - count = 0 means that sensor family is not installed in this station.
+  - count = 1, 2, 3... creates that many runtime sensor objects at boot.
+  - address arrays must contain unique Modbus addresses that match
+    Configuration_ModbusAddresses.h.
 
-  Sensor examples DO NOT use this file directly.
-  Examples have their own local config.h files.
+  The firmware reads only configured sensors, but each cycle keeps a runtime
+  flag per configured sensor. If a configured sensor does not answer during
+  a cycle, its flag remains false and its data is not added to telemetry.
 */
 
 // ============================================================
-// Rika Leaf Sensor
-// Measures:
-//   - Leaf Wetness
-//   - Leaf Temperature
-// Interface:
-//   - RS485
-// Recommended power:
-//   - 12V line
+// Station sensor counts
 // ============================================================
 
-#define RIKA_LEAF_00_ENABLED
+#ifndef RIKA_LEAF_SENSOR_COUNT
+#define RIKA_LEAF_SENSOR_COUNT                  0
+#endif
+#ifndef JXBS_LEAF_SURFACE_HUMIDITY_COUNT
+#define JXBS_LEAF_SURFACE_HUMIDITY_COUNT        0
+#endif
+#ifndef SMALL_LEAF_TEMP_HUMIDITY_COUNT
+#define SMALL_LEAF_TEMP_HUMIDITY_COUNT          0
+#endif
 
-#ifdef RIKA_LEAF_00_ENABLED
-  #define RIKA_LEAF_00_ID              "leaf_00"
-  #define RIKA_LEAF_00_ADDRESS         0x80
-  #define RIKA_LEAF_00_RS485_PORT      RS485_PORT_INDEX_0
-  #define RIKA_LEAF_00_POWERLINE       POWERLINE_INDEX_0
-  #define RIKA_LEAF_00_SAMPLE_RATE     SAMPLE_RATE_5_MIN
-  #define RIKA_LEAF_00_WARMUP_MS       1000UL
-  #define RIKA_LEAF_00_DEBUG           true
+#ifndef RIKA_SOIL3IN1_COUNT
+#define RIKA_SOIL3IN1_COUNT                     0
+#endif
+#ifndef JXBS_SOIL7IN1_COUNT
+#define JXBS_SOIL7IN1_COUNT                     0
+#endif
+
+#ifndef JXCT_WIND_SPEED_COUNT
+#define JXCT_WIND_SPEED_COUNT                   0
+#endif
+#ifndef JXCT_WIND_DIRECTION_COUNT
+#define JXCT_WIND_DIRECTION_COUNT               0
+#endif
+
+#ifndef JXCT_UV_RAYS_COUNT
+#define JXCT_UV_RAYS_COUNT                      0
+#endif
+#ifndef JXCT_PAR_COUNT
+#define JXCT_PAR_COUNT                          0
+#endif
+#ifndef JXCT_TOTAL_SOLAR_RADIATION_COUNT
+#define JXCT_TOTAL_SOLAR_RADIATION_COUNT        0
+#endif
+#ifndef JXCT_EVAPORATION_COUNT
+#define JXCT_EVAPORATION_COUNT                  0
+#endif
+
+#ifndef JXBS_WATER_PH_COUNT
+#define JXBS_WATER_PH_COUNT                     0
+#endif
+#ifndef JXBS_WATER_CONDUCTIVITY_COUNT
+#define JXBS_WATER_CONDUCTIVITY_COUNT           0
+#endif
+#ifndef JXSZ_WATER_SUSPENDED_SOLIDS_COUNT
+#define JXSZ_WATER_SUSPENDED_SOLIDS_COUNT       0
+#endif
+
+#ifndef JXCT_AIR_QUALITY_SHIELD_COUNT
+#define JXCT_AIR_QUALITY_SHIELD_COUNT           0
+#endif
+#ifndef JXBS_GAS_O3_CO_NH3_SHIELD_COUNT
+#define JXBS_GAS_O3_CO_NH3_SHIELD_COUNT         0
+#endif
+#ifndef JXBS_GAS_SO2_NO2_PRESSURE_SHIELD_COUNT
+#define JXBS_GAS_SO2_NO2_PRESSURE_SHIELD_COUNT  0
 #endif
 
 // ============================================================
-// Rika Soil Sensor 3-in-1
-// Measures:
-//   - Soil Temperature
-//   - Soil VWC
-//   - Soil EC
-// Extra methods:
-//   - Read Soil Type
-//   - Set Soil Type
-//   - Read Epsilon
-//   - Read / Set Compensation Coefficients
-// Interface:
-//   - RS485
-// Recommended power:
-//   - 12V line
+// Firmware-side maximums
+// Keep these equal to or smaller than the address plan capacity.
 // ============================================================
 
-#define RIKA_SOIL3IN1_00_ENABLED
+#define STATION_MAX_RIKA_LEAF_SENSORS           2
+#define STATION_MAX_JXBS_LEAF_SENSORS           2
+#define STATION_MAX_SMALL_LEAF_SENSORS          2
+#define STATION_MAX_RIKA_SOIL3IN1_SENSORS       5
+#define STATION_MAX_JXBS_SOIL7IN1_SENSORS       5
+#define STATION_MAX_WIND_SPEED_SENSORS          2
+#define STATION_MAX_WIND_DIRECTION_SENSORS      2
+#define STATION_MAX_RADIATION_SENSORS           2
+#define STATION_MAX_WATER_SENSORS               2
+#define STATION_MAX_AIR_QUALITY_SHIELDS         2
+#define STATION_MAX_GAS_SHIELDS                 2
 
-#ifdef RIKA_SOIL3IN1_00_ENABLED
-  #define RIKA_SOIL3IN1_00_ID              "soil_00"
-  #define RIKA_SOIL3IN1_00_ADDRESS         0x10
-  #define RIKA_SOIL3IN1_00_RS485_PORT      RS485_PORT_INDEX_0
-  #define RIKA_SOIL3IN1_00_POWERLINE       POWERLINE_INDEX_0
-  #define RIKA_SOIL3IN1_00_SAMPLE_RATE     SAMPLE_RATE_15_MIN
-  #define RIKA_SOIL3IN1_00_WARMUP_MS       1000UL
-  #define RIKA_SOIL3IN1_00_DEBUG           true
-#endif
+// ============================================================
+// Address tables
+// The main firmware uses the first N entries according to *_COUNT.
+// ============================================================
+
+constexpr uint8_t RIKA_LEAF_SENSOR_ADDRESSES[STATION_MAX_RIKA_LEAF_SENSORS] = {
+  ADDR_LEAF_00,
+  ADDR_LEAF_01
+};
+
+constexpr uint8_t JXBS_LEAF_SURFACE_HUMIDITY_ADDRESSES[STATION_MAX_JXBS_LEAF_SENSORS] = {
+  ADDR_LEAF_SURFACE_HUMIDITY_00,
+  ADDR_LEAF_02
+};
+
+constexpr uint8_t SMALL_LEAF_TEMP_HUMIDITY_ADDRESSES[STATION_MAX_SMALL_LEAF_SENSORS] = {
+  ADDR_SMALL_LEAF_TEMP_HUMIDITY_00,
+  ADDR_LEAF_03
+};
+
+constexpr uint8_t RIKA_SOIL3IN1_ADDRESSES[STATION_MAX_RIKA_SOIL3IN1_SENSORS] = {
+  ADDR_SOIL_00,
+  ADDR_SOIL_01,
+  ADDR_SOIL_02,
+  ADDR_SOIL_03,
+  ADDR_SOIL_04
+};
+
+constexpr uint8_t JXBS_SOIL7IN1_ADDRESSES[STATION_MAX_JXBS_SOIL7IN1_SENSORS] = {
+  ADDR_SOIL_00,
+  ADDR_SOIL_01,
+  ADDR_SOIL_02,
+  ADDR_SOIL_03,
+  ADDR_SOIL_04
+};
+
+constexpr uint8_t JXCT_WIND_SPEED_ADDRESSES[STATION_MAX_WIND_SPEED_SENSORS] = {
+  ADDR_WIND_SPEED_00,
+  ADDR_WIND_SPEED_01
+};
+
+constexpr uint8_t JXCT_WIND_DIRECTION_ADDRESSES[STATION_MAX_WIND_DIRECTION_SENSORS] = {
+  ADDR_WIND_DIRECTION_00,
+  ADDR_WIND_DIRECTION_01
+};
+
+constexpr uint8_t JXCT_UV_RAYS_ADDRESSES[STATION_MAX_RADIATION_SENSORS] = {
+  ADDR_UV_RAYS_00,
+  ADDR_RADIATION_RESERVED_05
+};
+
+constexpr uint8_t JXCT_PAR_ADDRESSES[STATION_MAX_RADIATION_SENSORS] = {
+  ADDR_PAR_00,
+  ADDR_RADIATION_RESERVED_06
+};
+
+constexpr uint8_t JXCT_TOTAL_SOLAR_RADIATION_ADDRESSES[STATION_MAX_RADIATION_SENSORS] = {
+  ADDR_TOTAL_SOLAR_RADIATION_00,
+  ADDR_RADIATION_RESERVED_07
+};
+
+constexpr uint8_t JXCT_EVAPORATION_ADDRESSES[STATION_MAX_RADIATION_SENSORS] = {
+  ADDR_EVAPORATION_00,
+  ADDR_RADIATION_RESERVED_08
+};
+
+constexpr uint8_t JXBS_WATER_PH_ADDRESSES[STATION_MAX_WATER_SENSORS] = {
+  ADDR_WATER_PH_00,
+  ADDR_WATER_PH_01
+};
+
+constexpr uint8_t JXBS_WATER_CONDUCTIVITY_ADDRESSES[STATION_MAX_WATER_SENSORS] = {
+  ADDR_WATER_EC_00,
+  ADDR_WATER_EC_01
+};
+
+constexpr uint8_t JXSZ_WATER_SUSPENDED_SOLIDS_ADDRESSES[STATION_MAX_WATER_SENSORS] = {
+  ADDR_WATER_SUSPENDED_SOLIDS_00,
+  ADDR_WATER_SUSPENDED_SOLIDS_01
+};
+
+constexpr uint8_t JXCT_AIR_QUALITY_SHIELD_ADDRESSES[STATION_MAX_AIR_QUALITY_SHIELDS] = {
+  ADDR_AIR_QUALITY_SHIELD_00,
+  ADDR_PM25_PM10_01
+};
+
+constexpr uint8_t JXBS_GAS_O3_CO_NH3_SHIELD_ADDRESSES[STATION_MAX_GAS_SHIELDS] = {
+  ADDR_GAS_O3_CO_NH3_SHIELD_00,
+  ADDR_GAS_AIR_QUALITY_RESERVED_08
+};
+
+constexpr uint8_t JXBS_GAS_SO2_NO2_PRESSURE_SHIELD_ADDRESSES[STATION_MAX_GAS_SHIELDS] = {
+  ADDR_GAS_SO2_NO2_PRESSURE_SHIELD_00,
+  ADDR_GAS_AIR_QUALITY_RESERVED_09
+};
+
+// ============================================================
+// Common station sensor runtime parameters
+// ============================================================
+
+#define STATION_SENSOR_POWERLINE                POWERLINE_INDEX_0
+#define STATION_SENSOR_RS485_PORT               RS485_PORT_INDEX_0
+#define STATION_SENSOR_WARMUP_MS                1000UL
+#define STATION_SENSOR_DEBUG                    true
+
+// This simplified station reads every configured sensor once per upload cycle.
+// SensorDriver still receives a rate value for its power policy, but there is
+// no separate station-level sample schedule.
+#define STATION_FAST_SAMPLE_RATE                UPLOAD_RATE_MIN
+#define STATION_NORMAL_SAMPLE_RATE              UPLOAD_RATE_MIN
+
+#define STATION_WATER_EC_SCALE_DIVISOR          100.0
+#define STATION_WATER_EC_MAX_US_CM              200000.0
+#define STATION_SUSPENDED_SOLIDS_SCALE_DIVISOR  10.0
+#define STATION_SUSPENDED_SOLIDS_MAX_MG_L       20000.0
+
+// ============================================================
+// Configuration checks
+// ============================================================
+
+static_assert(RIKA_LEAF_SENSOR_COUNT <= STATION_MAX_RIKA_LEAF_SENSORS, "Too many Rika leaf sensors configured");
+static_assert(JXBS_LEAF_SURFACE_HUMIDITY_COUNT <= STATION_MAX_JXBS_LEAF_SENSORS, "Too many JXBS leaf sensors configured");
+static_assert(SMALL_LEAF_TEMP_HUMIDITY_COUNT <= STATION_MAX_SMALL_LEAF_SENSORS, "Too many small leaf sensors configured");
+static_assert(RIKA_SOIL3IN1_COUNT <= STATION_MAX_RIKA_SOIL3IN1_SENSORS, "Too many Rika soil sensors configured");
+static_assert(JXBS_SOIL7IN1_COUNT <= STATION_MAX_JXBS_SOIL7IN1_SENSORS, "Too many JXBS soil sensors configured");
+static_assert(JXCT_WIND_SPEED_COUNT <= STATION_MAX_WIND_SPEED_SENSORS, "Too many wind speed sensors configured");
+static_assert(JXCT_WIND_DIRECTION_COUNT <= STATION_MAX_WIND_DIRECTION_SENSORS, "Too many wind direction sensors configured");
+static_assert(JXCT_UV_RAYS_COUNT <= STATION_MAX_RADIATION_SENSORS, "Too many UV sensors configured");
+static_assert(JXCT_PAR_COUNT <= STATION_MAX_RADIATION_SENSORS, "Too many PAR sensors configured");
+static_assert(JXCT_TOTAL_SOLAR_RADIATION_COUNT <= STATION_MAX_RADIATION_SENSORS, "Too many solar radiation sensors configured");
+static_assert(JXCT_EVAPORATION_COUNT <= STATION_MAX_RADIATION_SENSORS, "Too many evaporation sensors configured");
+static_assert(JXBS_WATER_PH_COUNT <= STATION_MAX_WATER_SENSORS, "Too many water pH sensors configured");
+static_assert(JXBS_WATER_CONDUCTIVITY_COUNT <= STATION_MAX_WATER_SENSORS, "Too many water EC sensors configured");
+static_assert(JXSZ_WATER_SUSPENDED_SOLIDS_COUNT <= STATION_MAX_WATER_SENSORS, "Too many suspended solids sensors configured");
+static_assert(JXCT_AIR_QUALITY_SHIELD_COUNT <= STATION_MAX_AIR_QUALITY_SHIELDS, "Too many air quality shields configured");
+static_assert(JXBS_GAS_O3_CO_NH3_SHIELD_COUNT <= STATION_MAX_GAS_SHIELDS, "Too many O3/CO/NH3 gas shields configured");
+static_assert(JXBS_GAS_SO2_NO2_PRESSURE_SHIELD_COUNT <= STATION_MAX_GAS_SHIELDS, "Too many SO2/NO2/pressure gas shields configured");

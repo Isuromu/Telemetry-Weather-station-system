@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "../../../config/Configuration_System.h"
 #include "../../../config/Configuration_PCB.h"
+#include "../../../config/Configuration_ModbusAddresses.h"
 
 /*
   JXBS_WaterPH Example - local example config
@@ -12,12 +13,9 @@
 
   Manual protocol notes:
   - Default serial format: 9600 baud, 8 data bits, no parity, 1 stop bit.
-  - Baud options in manual: 2400 / 4800 / 9600.
-  - Default Modbus address is usually 0x01.
   - Register 0x0001 = water temperature, raw / 10 C.
   - Register 0x0002 = pH, raw / 100 pH.
   - Register 0x0100 = device address.
-  - Register 0x0101 = baud rate, not used by this example.
 
     WIRING FOR THIS DELIVERY
   - Red    -> +12 V DC
@@ -69,7 +67,6 @@
   - Do not hit, drop, scratch, or squeeze the sensing tip.
   - Do not pull the sensor by the cable.
   - Do not reverse power polarity.
-  - Do not swap RS485 A/B lines without verification.
   - Do not leave the probe unprotected during storage or transport.
 
   IF READINGS ARE UNSTABLE
@@ -83,7 +80,7 @@
 */
 
 #define SENSOR_ID                   "jxbs_water_ph_00"
-#define SENSOR_ADDRESS              0x50
+#define SENSOR_ADDRESS              ADDR_WATER_PH_00
 #define SENSOR_DEBUG                true
 
 // Scan address range on boot and print first responsive sensor.
@@ -95,7 +92,7 @@
 // the available manual, so assume you must know the current address.
 #define ADDRESS_CHANGE_AT_BOOT      true
 // Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
-#define ADDRESS_CHANGE_NEW_ADDRESS  0x50
+#define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_WATER_PH_00
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.
 // If this macro is undefined, no button GPIO is configured or read.
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN

@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "../../../config/Configuration_System.h"
 #include "../../../config/Configuration_PCB.h"
+#include "../../../config/Configuration_ModbusAddresses.h"
 
 /*
   JXCT_PAR Example - local example config
@@ -22,7 +23,7 @@
 
 #define DO_SCAN                     false
 #define ADDRESS_CHANGE_AT_BOOT      false
-#define ADDRESS_CHANGE_NEW_ADDRESS  0x57
+#define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_PAR_00
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
 #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 

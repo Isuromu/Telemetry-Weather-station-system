@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "../../../config/Configuration_System.h"
 #include "../../../config/Configuration_PCB.h"
+#include "../../../config/Configuration_ModbusAddresses.h"
 
 /*
   JXBS_GasO3CONH3Shield Example - local example config
@@ -24,9 +25,9 @@
 #define O3_MAX_PPM                  100.0
 #define NH3_MAX_PPM                 5000.0
 
-#define DO_SCAN                     false
+#define DO_SCAN                     true
 #define ADDRESS_CHANGE_AT_BOOT      false
-#define ADDRESS_CHANGE_NEW_ADDRESS  0x5A
+#define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_GAS_O3_CO_NH3_SHIELD_00
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
 #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 

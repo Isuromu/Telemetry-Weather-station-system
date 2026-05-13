@@ -2,17 +2,14 @@
 #include <Arduino.h>
 #include "../../../config/Configuration_System.h"
 #include "../../../config/Configuration_PCB.h"
+#include "../../../config/Configuration_ModbusAddresses.h"
 
 /*
   JXBS Water Conductivity Example - local example config
-
-  This example targets the RS485 transmitter/controller assembly used with a
-  JXEC-T conductivity probe. A bare metal probe without the transmitter box
-  will not respond as a Modbus slave.
 */
 
 #define SENSOR_ID                   "water_conductivity_00"
-#define SENSOR_ADDRESS              0x51
+#define SENSOR_ADDRESS              ADDR_WATER_EC_00
 #define SENSOR_DEBUG                true
 
 // K=1 examples from the vendor documentation decode conductivity as raw / 100.
@@ -28,7 +25,7 @@
 // If true, setup() calls changeAddress() once near boot.
 // Keep only the target controller connected while changing addresses.
 #define ADDRESS_CHANGE_AT_BOOT      false
-#define ADDRESS_CHANGE_NEW_ADDRESS  0x51
+#define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_WATER_EC_00
 // #define ADDRESS_CHANGE_BUTTON_PIN PCB_SERVICE_BUTTON_PIN
 // #define ADDRESS_CHANGE_CALL_DELAY_MS 5000UL
 
