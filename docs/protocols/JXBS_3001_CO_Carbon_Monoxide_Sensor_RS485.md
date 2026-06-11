@@ -15,6 +15,11 @@ Source: `RS485-CO.doc (converted to txt)`
 
 **Notes:** Register address table did not extract cleanly, but the communication example shows CO read at start address 0x0006 length 1 with scale 0.1 ppm.
 
+Field note: on the tested combined O3/CO/NH3 shield, CO at `0x0006` was
+confirmed by smoke/burnt-paper testing. Strong smoke produced `raw=1250`, i.e.
+`125.0 ppm` with `/10` scaling. Register `0x000E` also moved with smoke, but is
+treated as internal/diagnostic data rather than the direct CO ppm register.
+
 ## 3) Register map
 | Register (hex) | Name | Function | Data Type | Endianness | Scale | Units | Range | Notes |
 |---:|---|---:|---|---|---:|---|---|---|

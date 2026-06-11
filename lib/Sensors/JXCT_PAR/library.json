@@ -1,0 +1,10 @@
+{
+  "name": "JXCT_PAR",
+  "version": "1.0.0",
+  "description": "RS485 photosynthetically active radiation sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "JXCT_WindSpeed",
+  "version": "1.0.0",
+  "description": "RS485 wind speed sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

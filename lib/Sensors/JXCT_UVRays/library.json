@@ -1,0 +1,10 @@
+{
+  "name": "JXCT_UVRays",
+  "version": "1.0.0",
+  "description": "RS485 UV rays sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

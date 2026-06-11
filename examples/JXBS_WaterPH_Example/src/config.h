@@ -80,17 +80,17 @@
 */
 
 #define SENSOR_ID                   "jxbs_water_ph_00"
-#define SENSOR_ADDRESS              ADDR_WATER_PH_00
+#define SENSOR_ADDRESS              0x50
 #define SENSOR_DEBUG                true
 
 // Scan address range on boot and print first responsive sensor.
-#define DO_SCAN                     false
+#define DO_SCAN                     true
 
 // If true, setup() calls changeAddress() once near boot.
 // JXBS pH address change writes register 0x0100. Keep only the target sensor
 // connected while changing addresses. No broadcast address is documented in
 // the available manual, so assume you must know the current address.
-#define ADDRESS_CHANGE_AT_BOOT      true
+#define ADDRESS_CHANGE_AT_BOOT      false
 // Target Modbus address written when ADDRESS_CHANGE_AT_BOOT is true.
 #define ADDRESS_CHANGE_NEW_ADDRESS  ADDR_WATER_PH_00
 // Optional safety gate. Uncomment to wait up to 5 seconds for this button.

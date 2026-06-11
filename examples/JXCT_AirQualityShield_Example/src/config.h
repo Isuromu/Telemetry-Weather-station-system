@@ -21,7 +21,7 @@
 */
 
 #define SENSOR_ID                   "jxct_air_quality_shield_00"
-#define SENSOR_ADDRESS              0x01
+#define SENSOR_ADDRESS              ADDR_AIR_QUALITY_SHIELD_00
 #define SENSOR_DEBUG                true
 
 #define AIR_PM_MAX_UG_M3            300.0

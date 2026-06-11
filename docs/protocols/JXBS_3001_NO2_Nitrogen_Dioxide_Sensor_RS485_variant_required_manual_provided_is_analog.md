@@ -15,6 +15,15 @@ Source: `JXBS-3001-NO2 20240628.pdf`
 
 **Notes:** The uploaded manual content is for analog outputs (4–20mA, 0–10V, 0–5V) and does not contain Modbus RTU registers/frames. Do not invent Modbus registers. Obtain the RS485 Modbus manual for the NO2 RS485 model or reverse-engineer via safe probing.
 
+Scale/range note from the provided analog PDF:
+- The PDF lists NO2 probe ranges `0-20 ppm` and `0-2000 ppm`.
+- The 20 ppm probe table lists `0.01 ppm` resolution; if an RS485 register uses
+  resolution units, that would imply raw `/100`.
+- The 2000 ppm probe table lists `0.1 ppm` resolution; if an RS485 register uses
+  resolution units, that would imply raw `/10`.
+- The PDF does not prove the RS485 Modbus raw scale. Confirm scale from the
+  physical label, vendor RS485 manual, or real register logs before final use.
+
 ## 3) Register map
 _Register map is **UNCERTAIN** from the provided documents (no Modbus register table extracted). Use the hardware test procedure below to discover registers safely._
 
@@ -39,7 +48,7 @@ These checks are applied **after** Modbus RTU validation (prefix match + expecte
 
 | Variable | Min | Max | Units | Raw / notes |
 |---|---:|---:|---|---|
-| NO2 | 0 | 2000 | ppm | manual lists 0–20 ppm or 0–2000 ppm variants (analog doc); configure expected max for your RS485 model |
+| NO2 | 0 | 20 or 2000 | ppm | analog doc lists both probe variants; configure expected max for the actual shield/sensor |
 
 ### Fault patterns to treat as invalid (even if within range)
 - Any CRC failure, wrong prefix, or wrong length → **discard** (do not update last-good value).

@@ -33,7 +33,7 @@
 */
 
 #define SENSOR_ID                           "jxsz_water_suspended_solids_00"
-#define SENSOR_ADDRESS                      ADDR_WATER_SUSPENDED_SOLIDS_00
+#define SENSOR_ADDRESS                      0x52
 #define SENSOR_DEBUG                        true
 
 // Default from the manual worked example: raw 189 -> 18.9 mg/L.
@@ -43,7 +43,7 @@
 #define SUSPENDED_SOLIDS_MAX_MG_L           20000.0
 
 // Scan address range on boot and print first responsive sensor.
-#define DO_SCAN                             false
+#define DO_SCAN                             true
 
 // If true, setup() calls changeAddress() once near boot.
 // JXSZ address change writes register 0x0100. Keep only the target sensor

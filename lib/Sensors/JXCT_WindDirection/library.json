@@ -1,0 +1,10 @@
+{
+  "name": "JXCT_WindDirection",
+  "version": "1.0.0",
+  "description": "RS485 wind direction sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "JXBS_GasO3CONH3Shield",
+  "version": "1.0.0",
+  "description": "RS485 O3/CO/NH3 gas shield driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

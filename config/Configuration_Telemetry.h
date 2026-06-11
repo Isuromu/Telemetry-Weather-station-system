@@ -3,7 +3,9 @@
 /*
   Configuration_Telemetry.h
 
-  Controls station read/upload scheduling and payload formats.
+  Controls station read/upload scheduling.
+
+  The station sends one MQTT JSON document per upload cycle.
 */
 
 #ifndef UPLOAD_RATE_MIN
@@ -16,10 +18,6 @@
 
 #ifndef TELEMETRY_ENABLE_JSON_PAYLOAD
 #define TELEMETRY_ENABLE_JSON_PAYLOAD       true
-#endif
-
-#ifndef TELEMETRY_ENABLE_STRING_PAYLOAD
-#define TELEMETRY_ENABLE_STRING_PAYLOAD     false
 #endif
 
 #ifndef TELEMETRY_PRINT_PAYLOADS

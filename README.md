@@ -3,7 +3,7 @@
 This repository contains an embedded telemetry firmware and a growing set of reusable libraries and sensor drivers for weather/soil monitoring stations.
 
 The project is built with **PlatformIO** using the **Arduino framework** and targets:
-- **ESP32-S3 R8N16** (4D Systems GEN4-ESP32 or compatible clone) on **PCB_ESP32S3_V2**
+- **ESP32-S3 R8N16** (4D Systems GEN4-ESP32 or compatible clone) on **PCB_TELEMETRY_ESP32S3_V2**
 
 Primary field requirement:
 - Reliable RS485/Modbus communication with multiple sensors on real hardware (noisy lines, occasional garbage bytes, timing issues).
@@ -59,7 +59,8 @@ platformio.ini               # Stable configuration file (append-only policy for
 
 ## Hardware / Wiring Notes
 
-- RS485 UART pins for ESP32-S3 are configured via `platformio.ini` build flags (defaults may be TX=17, RX=18).
+- RS485 UART pins for ESP32-S3 are configured in `pcb/PCB_TELEMETRY_ESP32S3_V2.h`.
+- Telemetry PCB pinout is opposite to Amudario Firmware: Telemetry uses RX=18, TX=17; Amudario uses RX=17, TX=18.
 - RS485 direction control (DE/RE) may be:
   - Disabled (`DE=-1`) for auto-direction modules
   - Enabled with a GPIO pin for manual DE/RE control

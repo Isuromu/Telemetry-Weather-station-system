@@ -22,4 +22,8 @@
 #define JXBS_WATER_CONDUCTIVITY_COUNT       1
 #define JXSZ_WATER_SUSPENDED_SOLIDS_COUNT   1
 
-#define UPLOAD_RATE_MIN                     10
+#define UPLOAD_RATE_MIN                     5
+
+// The water station uses network/NTP time only. This keeps a missing DS3231
+// RTC from producing I2C errors or affecting the read/upload cycle.
+#define RTC_DS3231_ENABLED                  false

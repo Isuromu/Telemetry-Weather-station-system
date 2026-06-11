@@ -1,0 +1,10 @@
+{
+  "name": "JXBS_OpticalRainGauge",
+  "version": "1.0.0",
+  "description": "RS485 optical rain gauge driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

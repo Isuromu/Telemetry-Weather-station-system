@@ -4,6 +4,7 @@ This index lists every sensor/manual/item currently provided. For each RS485 sen
 **Common references:**
 - `modbus_cheatsheet.md` (CRC/prefix/length validation)
 - `range_protection.md` (value sanity checks / fault detection)
+- `RS485_Gas_Register_Scanner_Diagnostic.md` (raw gas-sensor register discovery using `jxbs_gas_register_scanner_example`)
 
 | Sensor / Item | Measures | Interface | Default Addr | Baseline Read (no CRC) | Protocol file |
 |---|---|---|---:|---|---|

@@ -1,0 +1,7 @@
+{
+  "name": "SimpleDS3231",
+  "version": "1.0.0",
+  "description": "Small DS3231 UTC time reader/writer for telemetry station firmware.",
+  "frameworks": "arduino",
+  "platforms": "*"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "JXCT_AtmosphericPressure",
+  "version": "1.0.0",
+  "description": "Simple RS485 atmospheric pressure sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "*"
+}

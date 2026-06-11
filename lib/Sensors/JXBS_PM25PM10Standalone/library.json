@@ -1,0 +1,10 @@
+{
+  "name": "JXBS_PM25PM10Standalone",
+  "version": "1.0.0",
+  "description": "RS485 standalone PM2.5/PM10 sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

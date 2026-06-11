@@ -1,0 +1,7 @@
+{
+  "name": "JXBS_GasSensor",
+  "version": "1.0.0",
+  "description": "Simple single-channel JXBS RS485 gas sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "*"
+}

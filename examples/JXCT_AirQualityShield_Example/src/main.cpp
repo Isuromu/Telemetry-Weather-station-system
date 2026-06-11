@@ -1,8 +1,8 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include "config.h"
 #include "RS485SensorExampleRuntime.h"
 #include "RS485AddressChangeExample.h"
-#include "JXCT_WeatherStationSensors.h"
+#include "JXCT_AirQualityShield.h"
 
 static JXCT_AirQualityShield airQuality(
     rs485,

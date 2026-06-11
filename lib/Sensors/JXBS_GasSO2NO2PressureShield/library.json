@@ -1,0 +1,10 @@
+{
+  "name": "JXBS_GasSO2NO2PressureShield",
+  "version": "1.0.0",
+  "description": "RS485 SO2/NO2/pressure gas shield driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}

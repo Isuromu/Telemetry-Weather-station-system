@@ -9,8 +9,8 @@
 */
 
 #define SENSOR_ID                   "water_conductivity_00"
-#define SENSOR_ADDRESS              ADDR_WATER_EC_00
-#define SENSOR_DEBUG                true
+#define SENSOR_ADDRESS              0x51
+#define SENSOR_DEBUG                false
 
 // K=1 examples from the vendor documentation decode conductivity as raw / 100.
 // Change this if your controller/probe range uses another scaling.

@@ -13,14 +13,15 @@ Source: `RS485-Atmospheric pressure.doc (converted to txt)`
 - **Supported address range:** UNCERTAIN (not extracted; likely 0–252)
 - **Wiring notes:** RS485 A/B (twisted pair) + GND reference recommended; power V+ and GND per sensor label. If A/B is swapped the sensor will not respond.
 
-**Notes:** The provided doc is a WPS Word export. It includes a combined read example: start 0x0000 length 0x000C (12 registers). Pressure appears as a 32-bit value with scale /100 to get mbar (example: 100549 -> 1005.49 mbar), but exact offsets for the pressure word(s) are not cleanly extractable.
+**Notes:** The provided DOCX includes a combined read example: start 0x0000 length 0x000C (12 registers). Pressure is a 32-bit value at 0x000A/0x000B with scale /100 to get mbar (example: 100549 -> 1005.49 mbar).
 
 ## 3) Register map
 | Register (hex) | Name | Function | Data Type | Endianness | Scale | Units | Range | Notes |
 |---:|---|---:|---|---|---:|---|---|---|
 | 0x0000 | Humidity | 0x03 | u16 | BE | /10 | %RH | 0–100 | Present in manual example tables |
 | 0x0001 | Temperature | 0x03 | s16 | BE | /10 | °C | sensor-dependent | Present in manual example tables |
-| 0x000? | Atmospheric pressure (32-bit) | 0x03 | u32 | BE words | /100 | mbar | sensor-dependent | UNCERTAIN exact register address; manual shows 32-bit pressure data and scale. |
+| 0x000A | Atmospheric pressure high word | 0x03 | u16 | BE | part of u32 | mbar | sensor-dependent | Combine with 0x000B |
+| 0x000B | Atmospheric pressure low word | 0x03 | u16 | BE | part of u32 | mbar | sensor-dependent | `pressure_mbar = u32(0x000A,0x000B)/100.0` |
 
 
 ## 4) Read commands (byte-level)
@@ -41,7 +42,7 @@ byte 2 : 0x18 (24 data bytes)
 bytes 3..26 : data (12 registers = 24 bytes), order u16 BE per register
 bytes 27..28 : CRC (Lo, Hi)
 
-UNCERTAIN: exact register-to-field mapping beyond humidity/temp is not cleanly extractable from the provided DOC. Use logging + manual computation to locate the pressure words.
+Pressure words are registers 0x000A and 0x000B inside this 12-register block.
 ```
 
 **Parsing formulas:**
@@ -50,7 +51,7 @@ humidity_percent = u16(data[0])/10.0
 
 temperature_c = int16(data[1])/10.0
 
-pressure_mbar = u32(pressure_words)/100.0  (find correct word indices by matching manual example magnitude ~1000 mbar)
+pressure_mbar = u32(register_0x000A, register_0x000B)/100.0
 
 **Worked example (from manual if available):**
 

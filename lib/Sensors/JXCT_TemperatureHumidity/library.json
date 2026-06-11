@@ -1,0 +1,7 @@
+{
+  "name": "JXCT_TemperatureHumidity",
+  "version": "1.0.0",
+  "description": "Simple RS485 temperature and humidity sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "*"
+}

@@ -51,8 +51,8 @@ constexpr uint8_t PCB_RS485_PORT_COUNT = 1;
 
 // Current V2 board uses one RS485 UART:
 // RX=17 TX=18 DE=21
-constexpr int8_t PCB_RS485_RX_PINS[PCB_RS485_PORT_COUNT] = {17};
-constexpr int8_t PCB_RS485_TX_PINS[PCB_RS485_PORT_COUNT] = {18};
+constexpr int8_t PCB_RS485_RX_PINS[PCB_RS485_PORT_COUNT] = {18};
+constexpr int8_t PCB_RS485_TX_PINS[PCB_RS485_PORT_COUNT] = {17};
 constexpr int8_t PCB_RS485_DE_PINS[PCB_RS485_PORT_COUNT] = {21};
 constexpr bool   PCB_RS485_DE_ACTIVE_HIGH[PCB_RS485_PORT_COUNT] = {true};
 

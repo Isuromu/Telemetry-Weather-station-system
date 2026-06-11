@@ -1,6 +1,6 @@
 # RS485 Optical Rain Sensor
 
-Source: `Optical rain sensor use.doc (converted to txt)`
+Source: `Optical rain sensor use.doc (converted to txt)`, checked against the public JXBS-3001-GXYL optical rain sensor manual.
 
 ## 1) Overview
 - **Purpose / measurements:** Rainfall accumulation (0.1 mm resolution per manual) and optional pulse mode (0.1mm per pulse).
@@ -12,8 +12,10 @@ Source: `Optical rain sensor use.doc (converted to txt)`
 - **Default Modbus address:** 0x01 (factory default)
 - **Supported address range:** UNCERTAIN (not fully listed; typically 0–252 in this family)
 - **Wiring notes:** RS485 A/B (twisted pair) + GND reference recommended; power V+ and GND per sensor label. If A/B is swapped the sensor will not respond.
+- **JXBS-3001-GXYL wire colors from the public manual:** brown = power positive 12-24 VDC, black = power negative, yellow/gray = 485-A, blue = 485-B, white = 5V pulse output.
+- **Separate red/white pigtail on delivered units:** treat this as the optional 0-5V pulse output unless the exact unit label says otherwise. It is not a second RS485 line. For pure Modbus/RS485 use, leave it insulated and unconnected. If you want pulse counting, connect it only to a 3.3V-safe input circuit/level shifter after confirming the output voltage on the real sensor.
 
-**Notes:** Manual shows rainfall register 0x0003 and a clear command by writing 0 to register 0x0105.
+**Notes:** Manual shows rainfall register 0x0003 and a clear command by writing 0 to register 0x0105. The public JXBS-3001-GXYL pages state that the same product family supports RS485 and 5V pulse output; the pulse mode can output one pulse per 0.1 mm accumulated rainfall depending on DIP-switch mode.
 
 ## 3) Register map
 | Register (hex) | Name | Function | Data Type | Endianness | Scale | Units | Range | Notes |
@@ -106,6 +108,7 @@ These checks are applied **after** Modbus RTU validation (prefix match + expecte
 - Wrong byte order when sensors use multi-register values
 - Reading wrong offsets due to garbage bytes (always prefix-scan + length + CRC)
 - Confusing Modbus function 0x03 (holding) vs 0x04 (input)
+- Do not wire the separate pulse lead to 12-24 V power or to RS485 A/B. It is a signal output. If unused, cap/insulate it.
 
 
 ## 8) Hardware test procedure (real RS485 line)

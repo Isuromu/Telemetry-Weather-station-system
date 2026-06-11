@@ -12,7 +12,7 @@
   - debug enable state
   - power line index
   - interface index
-  - sample rate
+  - upload interval
   - warm-up time
   - last read timestamp
   - keepPowerOn policy result
@@ -32,7 +32,7 @@ public:
                bool debugEnable,
                uint8_t powerLineIndex,
                uint8_t interfaceIndex,
-               uint16_t sampleRateMin,
+               uint16_t uploadRateMin,
                uint32_t warmUpTimeMs,
                uint8_t maxConsecutiveErrors = 10,
                uint32_t minUsefulPowerOffMs = 60000UL)
@@ -43,7 +43,7 @@ public:
         _powerLineIndex(powerLineIndex),
         _interfaceIndex(interfaceIndex),
         _keepPowerOn(false),
-        _sampleRateMin(sampleRateMin),
+        _uploadRateMin(uploadRateMin),
         _warmUpTimeMs(warmUpTimeMs),
         _lastReadTime(0),
         _status(SENSOR_ONLINE),
@@ -71,11 +71,14 @@ public:
 
   bool shouldKeepPowerOn() const { return _keepPowerOn; }
 
-  uint16_t getSampleRateMin() const { return _sampleRateMin; }
-  void setSampleRate(uint16_t minutes) {
-    _sampleRateMin = minutes;
+  uint16_t getUploadRateMin() const { return _uploadRateMin; }
+  void setUploadRate(uint16_t minutes) {
+    _uploadRateMin = minutes;
     recalculateKeepPowerOn();
   }
+
+  uint16_t getSampleRateMin() const { return getUploadRateMin(); }
+  void setSampleRate(uint16_t minutes) { setUploadRate(minutes); }
 
   uint32_t getWarmUpTimeMs() const { return _warmUpTimeMs; }
   void setWarmUpTimeMs(uint32_t warmUpTimeMs) {
@@ -83,7 +86,8 @@ public:
     recalculateKeepPowerOn();
   }
 
-  uint32_t getRequestRateMs() const { return (uint32_t)_sampleRateMin * 60000UL; }
+  uint32_t getUploadRateMs() const { return (uint32_t)_uploadRateMin * 60000UL; }
+  uint32_t getRequestRateMs() const { return getUploadRateMs(); }
   uint32_t getLastReadTime() const { return _lastReadTime; }
 
   uint32_t getMinUsefulPowerOffMs() const { return _minUsefulPowerOffMs; }
@@ -139,14 +143,14 @@ public:
 
 protected:
   void recalculateKeepPowerOn() {
-    const uint32_t sampleRateMs = getRequestRateMs();
+    const uint32_t uploadRateMs = getUploadRateMs();
 
-    if (_warmUpTimeMs >= sampleRateMs) {
+    if (_warmUpTimeMs >= uploadRateMs) {
       _keepPowerOn = true;
       return;
     }
 
-    const uint32_t offWindowMs = sampleRateMs - _warmUpTimeMs;
+    const uint32_t offWindowMs = uploadRateMs - _warmUpTimeMs;
     _keepPowerOn = (offWindowMs < _minUsefulPowerOffMs);
   }
 
@@ -159,7 +163,7 @@ protected:
   uint8_t _interfaceIndex;
   bool _keepPowerOn;
 
-  uint16_t _sampleRateMin;
+  uint16_t _uploadRateMin;
   uint32_t _warmUpTimeMs;
   uint32_t _lastReadTime;
 

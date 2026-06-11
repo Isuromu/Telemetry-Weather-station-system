@@ -1,0 +1,10 @@
+{
+  "name": "JXCT_Evaporation",
+  "version": "1.0.0",
+  "description": "RS485 evaporation sensor driver.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [
+    {"name": "JXCTModbusBase"}
+  ]
+}
