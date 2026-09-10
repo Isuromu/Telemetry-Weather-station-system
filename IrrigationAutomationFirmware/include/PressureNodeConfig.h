@@ -2,6 +2,14 @@
 
 #include <stdint.h>
 
+#ifndef PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS
+#define PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS 60
+#endif
+
+#ifndef PCV_LORAWAN_MIN_INTERVAL_SECONDS
+#define PCV_LORAWAN_MIN_INTERVAL_SECONDS 60
+#endif
+
 namespace irrigation::pressure_node::rev_a {
 
 namespace pins {
@@ -88,8 +96,12 @@ namespace lorawan {
 inline constexpr uint8_t COMMAND_FPORT = 30;
 inline constexpr uint8_t STATUS_FPORT = 31;
 inline constexpr uint8_t SUB_BAND = 0;
-inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS = 60;
-inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS = 60;
+// PlatformIO may lower these only for an explicitly marked commissioning
+// build. The production-safe shared default remains 60 seconds.
+inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS =
+    PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS;
+inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS =
+    PCV_LORAWAN_MIN_INTERVAL_SECONDS;
 inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS =
     24UL * 60UL * 60UL;
 inline constexpr uint32_t JOIN_RETRY_INTERVAL_MS = 60UL * 1000UL;

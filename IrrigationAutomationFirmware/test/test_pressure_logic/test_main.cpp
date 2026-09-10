@@ -140,6 +140,20 @@ void test_lorawan_rejects_sub_minimum_report_interval() {
       lora_protocol::commandDecodeStatusName(status));
 }
 
+void test_lorawan_accepts_ten_second_commissioning_interval() {
+  const uint8_t payload[lora_protocol::COMMAND_PAYLOAD_SIZE] = {
+      2, 0x02, 0, 0, 0, 0, 0, 10, 0, 2};
+  lora_protocol::DownlinkCommand command{};
+  const auto status = lora_protocol::decodeDownlink(
+      payload, sizeof(payload), config::lorawan::COMMAND_FPORT,
+      config::lorawan::COMMAND_FPORT, 10,
+      config::lorawan::MAX_REPORT_INTERVAL_SECONDS, command);
+  TEST_ASSERT_EQUAL_STRING("OK",
+                           lora_protocol::commandDecodeStatusName(status));
+  TEST_ASSERT_TRUE(command.hasReportInterval);
+  TEST_ASSERT_EQUAL_UINT32(10, command.reportIntervalSeconds);
+}
+
 void test_lorawan_explicit_no_op_decodes_without_valve_pulse() {
   const uint8_t payload[lora_protocol::COMMAND_PAYLOAD_SIZE] = {
       2, 0x01, 0, 0, 0, 0, 0, 0, 0, 7};
@@ -235,6 +249,7 @@ void runTests() {
   RUN_TEST(test_power_policy_does_not_enable_sleep_implicitly);
   RUN_TEST(test_lorawan_open_and_report_interval_command_decodes);
   RUN_TEST(test_lorawan_rejects_sub_minimum_report_interval);
+  RUN_TEST(test_lorawan_accepts_ten_second_commissioning_interval);
   RUN_TEST(test_lorawan_explicit_no_op_decodes_without_valve_pulse);
   RUN_TEST(test_lorawan_flow_total_reset_command_decodes);
   RUN_TEST(test_lorawan_status_payload_encodes_all_measurements);
