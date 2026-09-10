@@ -87,3 +87,13 @@ opens another pair of Class A receive windows.
   codec before uploading the new firmware.
 
 The `pcv_serial_only` firmware does not use ChirpStack or a codec.
+
+## `pcv2_klapan_codec.js`
+
+Not a PCV codec. This belongs to the separate `examples/PressureControlNode2`
+bench node (`pio run -e pcv_low_power_class_a_without_flowmeter`), which
+shares no code with the PCV
+targets above. It uses FPort 10 for both directions, a 12-byte versioned
+uplink, and JSON text downlinks such as `{"command":"open"}`. None of the
+shared rules above apply: there is no `command_id`, no interval field, and no
+flow totalizer. See `examples/PressureControlNode2/README.md`.

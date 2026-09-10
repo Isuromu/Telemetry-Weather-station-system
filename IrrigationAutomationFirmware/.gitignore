@@ -1,3 +1,4 @@
 config/PressureNodeLoRaSecrets.h
+examples/PressureControlNode2/src/lorawan_keys.h
 /.vscode/
 /.idea/
