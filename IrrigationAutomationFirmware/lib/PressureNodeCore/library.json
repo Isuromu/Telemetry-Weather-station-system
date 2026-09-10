@@ -1,0 +1,11 @@
+{
+  "name": "PressureNodeCore",
+  "version": "1.1.0",
+  "description": "Hardware-independent state, telemetry, and power-policy types for the pressure-control node",
+  "keywords": ["irrigation", "pressure", "telemetry", "power"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "srcDir": "src" }
+}

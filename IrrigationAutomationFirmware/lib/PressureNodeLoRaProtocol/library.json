@@ -1,0 +1,7 @@
+{
+  "name": "PressureNodeLoRaProtocol",
+  "version": "2.0.0",
+  "description": "Compact LoRaWAN v2 payload codec for the latching-valve pressure node",
+  "frameworks": "*",
+  "platforms": "*"
+}

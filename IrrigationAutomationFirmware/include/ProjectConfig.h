@@ -1,0 +1,31 @@
+#pragma once
+
+#define BOARD_ESP32_WROOM32D 1
+#define BOARD_ESP32_H2 2
+
+#define INVERTER_DELIXI_E100G2R2T4B 1
+#define MOTOR_GRANDFAR_2CP50_160B 1
+
+#ifndef ACTIVE_BOARD
+#define ACTIVE_BOARD BOARD_ESP32_WROOM32D
+#endif
+
+#ifndef ACTIVE_INVERTER
+#define ACTIVE_INVERTER INVERTER_DELIXI_E100G2R2T4B
+#endif
+
+#ifndef ACTIVE_MOTOR
+#define ACTIVE_MOTOR MOTOR_GRANDFAR_2CP50_160B
+#endif
+
+#ifndef DEBUG_MODBUS
+#define DEBUG_MODBUS 0
+#endif
+
+#ifndef ENABLE_DANGEROUS_RAW_WRITES
+#define ENABLE_DANGEROUS_RAW_WRITES 0
+#endif
+
+#include <BoardConfig.h>
+#include <DeviceConfig.h>
+

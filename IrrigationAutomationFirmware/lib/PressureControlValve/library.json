@@ -1,0 +1,12 @@
+{
+  "name": "PressureControlValve",
+  "version": "1.0.0",
+  "description": "Safe pulse driver and state model for a latching pressure-control valve",
+  "keywords": ["valve", "latching", "l298n"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": { "PressureNodeCore": "*" },
+  "build": { "srcDir": "src" }
+}

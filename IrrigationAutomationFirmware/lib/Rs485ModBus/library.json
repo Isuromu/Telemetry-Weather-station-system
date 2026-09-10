@@ -1,0 +1,13 @@
+{
+  "name": "Rs485ModBus",
+  "version": "2.0.0",
+  "description": "Generic RS-485 and Modbus RTU transport with automatic or manual direction control",
+  "keywords": ["rs485", "modbus", "rtu", "serial", "crc16"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": { "PrintController": "*" },
+  "build": { "srcDir": "src" }
+}
+

@@ -1,0 +1,34 @@
+[
+  {
+    "file": "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\output\\pdf\\SOIL_NODE_PCB_TECHNICAL_SPEC_DRAFT.pdf",
+    "pages": 25,
+    "contact_sheets": [
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\SOIL_NODE_PCB_TECHNICAL_SPEC_DRAFT\\contact-1.png",
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\SOIL_NODE_PCB_TECHNICAL_SPEC_DRAFT\\contact-2.png",
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\SOIL_NODE_PCB_TECHNICAL_SPEC_DRAFT\\contact-3.png"
+    ]
+  },
+  {
+    "file": "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\output\\pdf\\UNIVERSAL_12V_CONTROLLER_PCB_TECHNICAL_SPEC_DRAFT.pdf",
+    "pages": 24,
+    "contact_sheets": [
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\UNIVERSAL_12V_CONTROLLER_PCB_TECHNICAL_SPEC_DRAFT\\contact-1.png",
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\UNIVERSAL_12V_CONTROLLER_PCB_TECHNICAL_SPEC_DRAFT\\contact-2.png",
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\UNIVERSAL_12V_CONTROLLER_PCB_TECHNICAL_SPEC_DRAFT\\contact-3.png"
+    ]
+  },
+  {
+    "file": "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\output\\pdf\\SOIL_NODE_ESP32C6_PINOUT_RU.pdf",
+    "pages": 6,
+    "contact_sheets": [
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\SOIL_NODE_ESP32C6_PINOUT_RU\\contact-1.png"
+    ]
+  },
+  {
+    "file": "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\output\\pdf\\UNIVERSAL_12V_ESP32S3_PINOUT_RU.pdf",
+    "pages": 9,
+    "contact_sheets": [
+      "C:\\Users\\user\\Documents\\PlatformIO\\Projects\\IrrigationAutomationFirmware\\tmp\\pdfs\\pcb_export_qa\\UNIVERSAL_12V_ESP32S3_PINOUT_RU\\contact-1.png"
+    ]
+  }
+]

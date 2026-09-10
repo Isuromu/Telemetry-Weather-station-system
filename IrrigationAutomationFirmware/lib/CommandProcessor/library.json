@@ -1,0 +1,17 @@
+{
+  "name": "CommandProcessor",
+  "version": "1.0.0",
+  "description": "Transport-independent irrigation command processor with a Serial command source",
+  "keywords": ["commands", "serial", "console"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "PumpController": "*",
+    "DelixiCDIE100": "*",
+    "PrintController": "*"
+  },
+  "build": { "srcDir": "src" }
+}
+

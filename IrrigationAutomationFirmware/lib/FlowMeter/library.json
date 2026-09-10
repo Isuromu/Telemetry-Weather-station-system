@@ -1,0 +1,12 @@
+{
+  "name": "FlowMeter",
+  "version": "1.1.0",
+  "description": "Transport-independent flow-meter interface",
+  "keywords": ["flow", "sensor", "interface"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "dependencies": { "PressureNodeCore": "*" },
+  "build": { "srcDir": "src" }
+}

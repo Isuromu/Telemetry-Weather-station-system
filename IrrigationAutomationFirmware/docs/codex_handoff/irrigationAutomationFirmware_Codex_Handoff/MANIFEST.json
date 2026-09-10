@@ -1,0 +1,152 @@
+[
+  {
+    "path": "CODEX_PROMPT.md",
+    "bytes": 2946,
+    "sha256": "e16ac2bbd15be51a6166fc1e156a372f202ef73ddf80bde80b35c85a87e84de8"
+  },
+  {
+    "path": "CODEX_START_HERE.md",
+    "bytes": 6244,
+    "sha256": "51cb9045e2cc072772bc4001c2c594c802f42ea46eadecea0e254ba1d72d9815"
+  },
+  {
+    "path": "docs/CODE_REVIEW_TRAINEE.md",
+    "bytes": 2131,
+    "sha256": "5de9c855670b77c434469ac1ba42faefd14686ef91fda4cb927680fa5cb5f503"
+  },
+  {
+    "path": "docs/FIRMWARE_ARCHITECTURE.md",
+    "bytes": 2786,
+    "sha256": "0f6a334b6c3bd707d4589fd2f4086e6d29a7a3b607ebd5cea134e5f8792f8f44"
+  },
+  {
+    "path": "docs/HARDWARE_ARCHITECTURE.md",
+    "bytes": 2749,
+    "sha256": "3d283fbdf217c13fb2cdfa9ceb68bb875f4bd3239a3a841d4e01f36ef637a9cc"
+  },
+  {
+    "path": "docs/LORA_AND_GATEWAY.md",
+    "bytes": 1934,
+    "sha256": "72750bd95ffbed5698fd8273c0508b6d9fde885f8155e7aecf327a41247bcf48"
+  },
+  {
+    "path": "docs/OPEN_ITEMS.md",
+    "bytes": 2114,
+    "sha256": "b530695e6b7f034c07d8974ecf0c5017788d3e30cdc7f2b0504b087f1603af01"
+  },
+  {
+    "path": "docs/PRESSURE_CONTROL_VALVE.md",
+    "bytes": 3865,
+    "sha256": "ed40ff10492056241f1479e87078f185e9be86d68953a9d74d026cde66a5408b"
+  },
+  {
+    "path": "docs/PROJECT_CONTEXT.md",
+    "bytes": 10613,
+    "sha256": "45a17229c31d823c378681339ce8b97d428ac5ae915b623d2d0adbf103401d4c"
+  },
+  {
+    "path": "docs/RS485_FUTURE.md",
+    "bytes": 1902,
+    "sha256": "e1055309137379e672e7eedc238883a52d4683ad0cfb1b36fb4ab9666153fbfc"
+  },
+  {
+    "path": "docs/TRAINEE_CODE_SNAPSHOT.md",
+    "bytes": 1637,
+    "sha256": "d4084df490a18fa1d0ca31760e11a06619bab60bec26cb31285c0fbab47a65fd"
+  },
+  {
+    "path": "docs/UZB_QUICK_REFERENCE.md",
+    "bytes": 1293,
+    "sha256": "ec3341340121040c80533be6d2da4a4149ce521665a1bafd640ecafd677af959"
+  },
+  {
+    "path": "docs/XDB401_NOTES.md",
+    "bytes": 1493,
+    "sha256": "d30c09867a7be79d55bab4d74e64d1d5fc473aaf92fa352307a69b0344ca0d1f"
+  },
+  {
+    "path": "docs/references_current_chat/12V_latching_solenoid.jpg",
+    "bytes": 144001,
+    "sha256": "292694614324dc1f75066f98f4028da85993791748d80949ac84407d0ce2389f"
+  },
+  {
+    "path": "docs/references_current_chat/L298N_HW95_back.jpg",
+    "bytes": 412512,
+    "sha256": "69b265ef797b71e84662199d240782c00445090b49013f5cb9e4f6bfbf1dc304"
+  },
+  {
+    "path": "docs/references_current_chat/L298N_HW95_front.jpg",
+    "bytes": 470184,
+    "sha256": "3bd67371dab2d6b0211da31afccd66816076b01dd96a003edf3643566d38d8e1"
+  },
+  {
+    "path": "docs/references_current_chat/README.md",
+    "bytes": 452,
+    "sha256": "fd5c76e7f2c61b54e3849e5b0a345d6534764771d5a4ca1923b8230d11a0d44e"
+  },
+  {
+    "path": "docs/references_current_chat/XL6009_boost_module.jpg",
+    "bytes": 312810,
+    "sha256": "408dd92f15ba273ed3c381e8d2d7f67a6f113412b25a98fd73d088b45ef547b3"
+  },
+  {
+    "path": "docs/source_manifest/FILE_LIBRARY_MANIFEST.md",
+    "bytes": 1543,
+    "sha256": "687d1fb0c68bbd3255caf6664aa81b0ca6f359e03b4b9798d3b8c3a64d289a16"
+  },
+  {
+    "path": "firmware_scaffold/README.md",
+    "bytes": 1115,
+    "sha256": "6a39a71955af6ae6fb0ee28accd05905534e49ce01aaf6a3fb3226331b002c14"
+  },
+  {
+    "path": "firmware_scaffold/examples/RawLoRaControl/main.cpp",
+    "bytes": 5026,
+    "sha256": "395f3f6fdae351fdd4b91e7eb65bac2fb4de7804cebe58aa534a3b53faad9333"
+  },
+  {
+    "path": "firmware_scaffold/examples/SerialControl/main.cpp",
+    "bytes": 6658,
+    "sha256": "b5365d480c8695da5cb3fb58b696e3c624167a511430a778a28bd9a6fad7709e"
+  },
+  {
+    "path": "firmware_scaffold/include/BoardPins.hpp",
+    "bytes": 1004,
+    "sha256": "bcb6075f54b1002b2009cbbf23bd5f8c9a1fdce38e281641b5761bf1ba188595"
+  },
+  {
+    "path": "firmware_scaffold/include/SystemConfig.hpp",
+    "bytes": 1617,
+    "sha256": "81091e16a6ca32546bf42484571673b3324d9bd5d9c5c054051268e9b355a024"
+  },
+  {
+    "path": "firmware_scaffold/lib/BatteryMonitor/src/BatteryMonitor.cpp",
+    "bytes": 1074,
+    "sha256": "aa1a6eae826f5e0f839811a4cd1f420d7acf327e3f2b1ce2f98793a4bda6c8c0"
+  },
+  {
+    "path": "firmware_scaffold/lib/BatteryMonitor/src/BatteryMonitor.hpp",
+    "bytes": 449,
+    "sha256": "d061a28624c9ccf0acf2ad70080ee043f09779686157f8d7d331676ea27ee5f1"
+  },
+  {
+    "path": "firmware_scaffold/lib/PressureControlValve/src/PressureControlValve.cpp",
+    "bytes": 2796,
+    "sha256": "55e7e282d98ca732ede7abbda1b616acc6676b3063aa2a72a4491a70614cb250"
+  },
+  {
+    "path": "firmware_scaffold/lib/PressureControlValve/src/PressureControlValve.hpp",
+    "bytes": 1436,
+    "sha256": "148048d0b579e37a3efbd9d98d29507b76c9306d7682ca4fbbbb2792d9399483"
+  },
+  {
+    "path": "firmware_scaffold/lib/PressureSensorXDB401/src/PressureSensorXDB401.cpp",
+    "bytes": 3984,
+    "sha256": "7e899c085a8babf3f354ca69d0b9d0d93a9e28b0fed0f25f5ec9c588f2b2f94e"
+  },
+  {
+    "path": "firmware_scaffold/lib/PressureSensorXDB401/src/PressureSensorXDB401.hpp",
+    "bytes": 969,
+    "sha256": "9086553a0b792e17d65b72a8508267fceb91c86c5f2719d597a55f9db090d509"
+  }
+]

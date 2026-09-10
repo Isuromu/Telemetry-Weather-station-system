@@ -1,0 +1,16 @@
+{
+  "name": "DelixiCDIE100",
+  "version": "1.0.0",
+  "description": "DELIXI CDI-E100 Modbus RTU driver",
+  "keywords": ["delixi", "cdi-e100", "vfd", "modbus"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "PrintController": "*"
+  },
+  "build": { "srcDir": "src" }
+}
+

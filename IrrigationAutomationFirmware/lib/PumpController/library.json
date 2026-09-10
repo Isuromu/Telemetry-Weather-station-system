@@ -1,0 +1,16 @@
+{
+  "name": "PumpController",
+  "version": "1.0.0",
+  "description": "Motor-profile-aware irrigation pump control and safety layer",
+  "keywords": ["pump", "irrigation", "vfd", "safety"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "DelixiCDIE100": "*",
+    "PrintController": "*"
+  },
+  "build": { "srcDir": "src" }
+}
+
