@@ -36,6 +36,8 @@ commands remain available at the same time.
 
 Use only with `pcv_low_power_class_a`. The interval is real ESP32 deep-sleep
 time. A queued command is delivered in RX1/RX2 after the next status uplink.
+The current valve_1 commissioning build and codec allow 10-second sleep; this
+temporary lower bound must return to at least 60 seconds before deployment.
 
 ```json
 {"pcv":"open","command_id":2001}
@@ -47,6 +49,10 @@ time. A queued command is delivered in RX1/RX2 after the next status uplink.
 
 ```json
 {"sleep_minutes":10,"command_id":2003}
+```
+
+```json
+{"sleep_seconds":10,"command_id":2006}
 ```
 
 ```json
@@ -65,7 +71,8 @@ opens another pair of Class A receive windows.
 ## Shared rules
 
 - Every new command must use a new 16-bit `command_id`.
-- The permitted interval is 60-86400 seconds.
+- Class C permits 60-86400 seconds. The current valve_1 Class A commissioning
+  build permits 10-86400 seconds; 10 seconds is not a deployment setting.
 - An exact duplicate is acknowledged but does not pulse the solenoid again.
 - Reusing the same ID with different bytes is rejected.
 - `{"pcv":"none","command_id":...}` is an explicit no-operation command;

@@ -40,6 +40,11 @@ enters ESP32 timer deep sleep. Serial produces diagnostics only and accepts no
 commands. Use `tools/chirpstack/pcv_low_power_class_a_codec.js`; `sleep_time`
 controls real deep-sleep duration.
 
+The current valve_1 commissioning build defaults to 10-second sleep and
+accepts `sleep_seconds` down to 10 through its matching codec. This short
+interval is for bench testing only; restore the Class A PlatformIO flags and
+codec lower bound to at least 60 seconds before deployment.
+
 Both LoRaWAN targets require a node-specific ignored
 `config/PressureNodeLoRaSecrets.h`. Never copy credentials from another end
 node. See `docs/PRESSURE_NODE_LORAWAN.md`.

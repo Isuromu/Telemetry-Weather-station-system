@@ -108,8 +108,11 @@ function encodeDownlink(input) {
     sleepSeconds = data.sleep_seconds;
     flags |= 0x02;
   }
-  if ((flags & 0x02) && (sleepSeconds < 60 || sleepSeconds > 86400))
-    return { errors: ["sleep interval must be 60..86400 seconds"] };
+  // Ten seconds is enabled only for the valve_1 commissioning firmware.
+  // Restore this lower bound to 60 together with the PlatformIO build flags
+  // before field deployment.
+  if ((flags & 0x02) && (sleepSeconds < 10 || sleepSeconds > 86400))
+    return { errors: ["sleep interval must be 10..86400 seconds"] };
   if (data.flow_total_reset !== undefined) {
     if (data.flow_total_reset !== true)
       return { errors: ["flow_total_reset must be true or omitted"] };

@@ -40,7 +40,9 @@ The explicit runtime policies are:
 - `pcv_hybrid_class_c`: ESP32 awake, Serial command input, continuous Class C
   receive, and periodic status every 60-86400 seconds;
 - `pcv_low_power_class_a`: Serial output only, one Class A status/command/result
-  cycle, then ESP32 timer deep sleep for 60-86400 seconds;
+  cycle, then ESP32 timer deep sleep. valve_1 commissioning temporarily allows
+  10-86400 seconds and defaults to 10 seconds; restore a minimum of at least 60
+  seconds before deployment;
 - no automatic two-second status polling;
 - the solenoid and L298N power rail are off outside an actuation pulse;
 - TUF-2000M reads occur only after `flow`, `flow total`, `status`, a total

@@ -120,8 +120,23 @@ so Gateway commands can arrive without waiting for an uplink; its interval is
 only the periodic telemetry interval. `pcv_low_power_class_a` follows the soil
 node pattern: wake, measure, uplink, receive a queued RX1/RX2 command, execute,
 send an immediate result uplink, and enter timer deep sleep; its interval is
-real sleep time. The default is 60 seconds and valid remote intervals are
-60-86400 seconds. Class C deliberately trades energy for command latency.
+real sleep time. The valve_1 commissioning build temporarily defaults to 10
+seconds and accepts 10-86400 seconds. This is a bench-test exception; restore
+the default and minimum to at least 60 seconds before field deployment. Class C
+deliberately trades energy for command latency and retains its 60-second
+minimum.
+
+The user confirmed that the working `klapan.zip` project is the separate
+valve_2 device without a flow meter. It uses LoRaWAN Class C and its own older
+FPort-10 codec. valve_1 is a distinct Class A device with the commissioned
+TUF-2000M flow meter and the repository's FPort-30/FPort-31 protocol. Do not
+reuse valve_2 credentials, payloads, codec, or continuous-receive behavior for
+valve_1.
+
+valve_1 is registered under ChirpStack 4.18.0 with Mosquitto 2.0.21. Its
+application ID, DevEUI, JoinEUI and unique AppKey are stored only in the
+Git-ignored local secrets header and ChirpStack configuration; do not copy
+them into tracked documentation.
 
 ## Current valve command and feedback behavior
 
@@ -150,8 +165,9 @@ Do not assume or invent:
 - the final RS485 topology and addressing plan;
 - the TUF-2000M power-up timing;
 - how battery percentage/state-of-charge will be derived from voltage;
-- the final deployed reporting interval (the implemented default is one minute);
-- the node-specific ChirpStack OTAA credentials;
+- the final deployed reporting interval (10 seconds is commissioning-only and
+  the deployment value remains undecided);
+- credentials for end nodes other than the provisioned valve_1 device;
 - final energy budget and acceptable command latency.
 
 These values require the actual hardware, manuals, system behavior, or a direct

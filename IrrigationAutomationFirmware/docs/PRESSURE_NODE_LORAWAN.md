@@ -99,9 +99,73 @@ Install `tools/chirpstack/pcv_low_power_class_a_codec.js`. Example JSON:
 {"pcv":"close","sleep_minutes":10,"command_id":2002}
 ```
 
-`sleep_minutes` is real ESP32 timer deep sleep. Accepted values are 1-1440
-minutes. Normal command latency is up to the remaining sleep duration plus
-network timing.
+`sleep_minutes` or `sleep_seconds` is real ESP32 timer deep sleep. The
+`pcv_low_power_class_a` environment currently allows 10-86400 seconds because
+valve_1 is in commissioning. The 10-second minimum and default are test-only;
+restore both PlatformIO build flags and this codec's lower bound to at least
+60 seconds before field deployment. Normal command latency is up to the
+remaining sleep duration plus network timing.
+
+## valve_1 ChirpStack v4 and MQTT commissioning
+
+`valve_1` is the Class A PCV node with the TUF-2000M flow meter. It is distinct
+from the older valve_2 Class C node and must use its own device profile, codec,
+DevEUI, JoinEUI and AppKey.
+
+- ChirpStack version: 4.18.0
+- MQTT broker: Mosquitto 2.0.21
+- application ID: `[CHIRPSTACK_APPLICATION_ID]`
+- device name: `valve_1`
+- DevEUI: `[VALVE1_DEV_EUI]`
+- JoinEUI: `[VALVE1_JOIN_EUI]`
+- activation: OTAA, LoRaWAN 1.0.4, EU868, Class A
+
+The ESP32 does not connect to MQTT directly. It exchanges FPort 30/31 payloads
+over LoRaWAN; ChirpStack publishes events to Mosquitto and accepts MQTT
+downlink commands.
+
+Subscribe to valve_1 uplinks:
+
+```text
+application/[CHIRPSTACK_APPLICATION_ID]/device/[VALVE1_DEV_EUI]/event/up
+```
+
+Publish valve_1 downlinks to:
+
+```text
+application/[CHIRPSTACK_APPLICATION_ID]/device/[VALVE1_DEV_EUI]/command/down
+```
+
+With this codec installed in the valve_1 device profile, the MQTT payload may
+use a decoded `object`; ChirpStack calls `encodeDownlink` to produce FPort 30:
+
+```json
+{
+  "devEui": "[VALVE1_DEV_EUI]",
+  "confirmed": false,
+  "object": {
+    "pcv": "open",
+    "command_id": 2001
+  }
+}
+```
+
+Ten-second commissioning command:
+
+```json
+{
+  "devEui": "[VALVE1_DEV_EUI]",
+  "confirmed": false,
+  "object": {
+    "sleep_seconds": 10,
+    "command_id": 2002
+  }
+}
+```
+
+Use a new `command_id` for every new operation. `confirmed` is false because
+the firmware sends its own result status with the accepted command ID. A Class
+A downlink remains queued until the next status uplink opens RX1/RX2.
 
 ## Credentials and retained state
 
@@ -127,7 +191,7 @@ The command is exactly 10 bytes, big-endian:
 | 1 | flags | bit 0 PCV action; bit 1 interval; bit 2 flow-total reset |
 | 2 | PCV action | `0` none, `1` open, `2` close |
 | 3 | reserved | must be `0` |
-| 4-7 | interval seconds | 60-86400 with bit 1 set; otherwise zero |
+| 4-7 | interval seconds | Class C: 60-86400; current Class A commissioning build: 10-86400; otherwise zero |
 | 8-9 | command ID | unsigned 16-bit identifier |
 
 Every new command must use a new `command_id`. An exact duplicate is reported
