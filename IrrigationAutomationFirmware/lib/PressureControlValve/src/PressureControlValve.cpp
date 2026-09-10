@@ -13,15 +13,19 @@ bool PressureControlValve::configurationValid() const {
 }
 
 bool PressureControlValve::begin() {
-  // Load safe output levels before changing the GPIO direction to minimize
-  // boot-time glitches on the H-bridge and its high-side power switch.
+  // Configure the direction first: the Arduino-ESP32 core rejects
+  // digitalWrite() on a pin that is not yet set as a GPIO, which would make
+  // the safe-level writes below silently do nothing.
+  pinMode(configuration_.in1Pin, OUTPUT);
+  pinMode(configuration_.in2Pin, OUTPUT);
+  pinMode(configuration_.powerEnablePin, OUTPUT);
+
+  // Bring the H-bridge and its high-side power switch up in their idle state
+  // before any command can be applied.
   digitalWrite(configuration_.in1Pin, LOW);
   digitalWrite(configuration_.in2Pin, LOW);
   digitalWrite(configuration_.powerEnablePin,
                configuration_.powerEnableActiveHigh ? LOW : HIGH);
-  pinMode(configuration_.in1Pin, OUTPUT);
-  pinMode(configuration_.in2Pin, OUTPUT);
-  pinMode(configuration_.powerEnablePin, OUTPUT);
 
   setBridgeIdle();
   setPower(false);
