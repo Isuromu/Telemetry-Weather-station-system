@@ -36,20 +36,17 @@ const int RS485_TX_PIN = 17;      // ESP32 TX2
 const float R_TOP = 100000.0f;
 const float R_BOTTOM = 22000.0f;
 
-// Modbus RTU sozlamalari
-// RD pressure transmitterlarning default addressi ko'pincha 1 bo'ladi.
+// Honde RD-RWG-01 Modbus profili
+// Request: address 03 00 04 00 01 CRC
+// Value: signed int16 * 0.001 Bar
 const uint8_t MODBUS_ID = 1;
-const uint16_t MODBUS_REG_ADDR = 0x0000;  // Pressure transmitter register manzili
-const uint16_t MODBUS_REG_COUNT = 0x0001; // 1 register
+const uint8_t MODBUS_FUNCTION = 0x03;
+const uint16_t MODBUS_REG_ADDR = 0x0004;
+const uint16_t MODBUS_REG_COUNT = 0x0001;
+const float PRESSURE_SCALE_BAR = 0.001f;
 
-// Pressure transmitterning o'lchov koeffitsienti
-// Agar transmitterning haqiqiy registri 0..10000 bo'lib, 0..10 bar ni ifodalayotgan bo'lsa:
-// pressure_kPa = raw * 0.1f;
-// Agar sensor manualida boshqa qiymat bo'lsa, shu qiymatni o'zgartiring.
-const float PRESSURE_SCALE = 0.1f; // default: 1 count = 0.1 kPa
-
-// Tank parametrlar
-const float TANK_HEIGHT_M = 2.0f;        // Tank balandligi, metrda
+// Sensor diapazoni: 0..5 m suv sathi
+const float SENSOR_RANGE_M = 5.0f;
 const float WATER_DENSITY = 1000.0f;     // kg/m3
 const float GRAVITY = 9.81f;              // m/s2
 
@@ -77,11 +74,11 @@ void setRS485Direction(bool txMode) {
   digitalWrite(RS485_DE_RE_PIN, txMode ? HIGH : LOW);
 }
 
-bool readPressureFromRS485(float &pressureKPa) {
+bool readPressureFromRS485(float &pressureBar) {
   // Modbus RTU request: slave + function + register address + register count + CRC
   uint8_t request[8] = {
     MODBUS_ID,
-    0x04,
+    MODBUS_FUNCTION,
     (uint8_t)(MODBUS_REG_ADDR >> 8),
     (uint8_t)(MODBUS_REG_ADDR & 0xFF),
     (uint8_t)(MODBUS_REG_COUNT >> 8),
@@ -93,6 +90,10 @@ bool readPressureFromRS485(float &pressureKPa) {
   uint16_t crc = crc16Modbus(request, 6);
   request[6] = (uint8_t)(crc & 0xFF);
   request[7] = (uint8_t)((crc >> 8) & 0xFF);
+
+  while (rs485.available()) {
+    rs485.read();
+  }
 
   setRS485Direction(true);
   delayMicroseconds(500);
@@ -123,10 +124,10 @@ bool readPressureFromRS485(float &pressureKPa) {
   uint8_t slave = response[0];
   uint8_t func = response[1];
   uint8_t byteCount = response[2];
-  uint16_t raw = (uint16_t)response[3] << 8 | response[4];
+  int16_t raw = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
   uint16_t receivedCrc = (uint16_t)response[5] | ((uint16_t)response[6] << 8);
 
-  if (slave != MODBUS_ID || func != 0x04 || byteCount != 2) {
+  if (slave != MODBUS_ID || func != MODBUS_FUNCTION || byteCount != 2) {
     Serial.println("RS485: Modbus javob formati xato");
     return false;
   }
@@ -137,7 +138,7 @@ bool readPressureFromRS485(float &pressureKPa) {
     return false;
   }
 
-  pressureKPa = raw * PRESSURE_SCALE;
+  pressureBar = raw * PRESSURE_SCALE_BAR;
   return true;
 }
 
@@ -187,18 +188,16 @@ void setup() {
 void loop() {
   float batteryVoltage = readBatteryVoltage();
 
-  float pressureKPa = 0.0f;
-  bool pressureOk = readPressureFromRS485(pressureKPa);
+  float pressureBar = 0.0f;
+  bool pressureOk = readPressureFromRS485(pressureBar);
 
   float depthM = 0.0f;
   float levelPercent = 0.0f;
 
   if (pressureOk) {
-    // Suv ustuni uchun bosimdan balandlikni hisoblash.
-    // P = rho * g * h => h = P / (rho * g)
-    // P kPa ni Pa ga o'tkazish uchun *1000
-    depthM = (pressureKPa * 1000.0f) / (WATER_DENSITY * GRAVITY);
-    levelPercent = constrain((depthM / TANK_HEIGHT_M) * 100.0f, 0.0f, 100.0f);
+    // Bar ni Pa ga o'tkazib, suv ustuni balandligini hisoblash.
+    depthM = (pressureBar * 100000.0f) / (WATER_DENSITY * GRAVITY);
+    levelPercent = constrain((depthM / SENSOR_RANGE_M) * 100.0f, 0.0f, 100.0f);
   }
 
   Serial.print("Battery: ");
@@ -206,7 +205,9 @@ void loop() {
   Serial.println(" V");
 
   Serial.print("Pressure transmitter: ");
-  Serial.print(pressureKPa, 2);
+  Serial.print(pressureBar, 3);
+  Serial.print(" bar / ");
+  Serial.print(pressureBar * 100.0f, 2);
   Serial.println(" kPa");
 
   Serial.print("Depth: ");
