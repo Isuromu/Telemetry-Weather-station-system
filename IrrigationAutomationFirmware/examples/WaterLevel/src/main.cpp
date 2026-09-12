@@ -34,7 +34,9 @@ const int RS485_TX_PIN = 17;      // ESP32 TX2
 
 // Divider parametrlari: 100k ust + 22k past
 const float R_TOP = 100000.0f;
-const float R_BOTTOM = 22000.0f;
+const float R_BOTTOM = 20000.0f;
+// Calibrated against a multimeter: measured 12.10 V, firmware showed 12.46 V.
+const float BATTERY_CALIBRATION = 12.10f / 12.46f;
 
 // Honde RD-RWG-01 Modbus profili
 // Request: address 03 00 04 00 01 CRC
@@ -143,10 +145,11 @@ bool readPressureFromRS485(float &pressureBar) {
 }
 
 float readBatteryVoltage() {
-  int raw = analogRead(BATTERY_PIN);
-  float vRef = 3.3f;
-  float vADC = (raw / 4095.0f) * vRef;
-  float vBat = vADC * (R_TOP + R_BOTTOM) / R_BOTTOM;
+  int adcMilliVolts = analogReadMilliVolts(BATTERY_PIN);
+  
+  // Use the ESP32 factory-calibrated ADC voltage instead of assuming Vref = 3.3 V.
+  float vADC = adcMilliVolts / 1000.0f;
+  float vBat = vADC * (R_TOP + R_BOTTOM) / R_BOTTOM * BATTERY_CALIBRATION;
   return vBat;
 }
 
@@ -168,6 +171,7 @@ void setup() {
   rs485.begin(9600, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
 
   pinMode(BATTERY_PIN, INPUT);
+  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   digitalWrite(LOAD_CONTROL_PIN, LOW);
 
