@@ -1,4 +1,5 @@
 config/PressureNodeLoRaSecrets.h
+config/WaterLevelLoRaSecrets.h
 examples/PressureControlNode2/src/lorawan_keys.h
 /.vscode/
 /.idea/

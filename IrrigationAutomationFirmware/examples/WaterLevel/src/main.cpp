@@ -1,229 +1,372 @@
 #include <Arduino.h>
+#include <Preferences.h>
+#include <RadioLib.h>
+#include <SPI.h>
+#include <driver/gpio.h>
+#include <esp_sleep.h>
 
-// =========================
-// Suv sathi + batareya monitoring + load kontrol
-// ESP32 + RS485 pressure transmitter
-// =========================
-// Ulanishlar:
-// 1) Battery divider:
-//    - Battery +  -> 100k -> GPIO35
-//    - GPIO35 -> 22k -> GND
-//    - Bu formula: Vbat = ADC * 3.3 * (100 + 22) / 22
-//
-// 2) RS485 modul:
-//    - VCC -> 3.3V
-//    - GND -> GND
-//    - TX  -> GPIO17
-//    - RX  -> GPIO16
-//    - DE/RE (agar bor bo'lsa) -> GPIO4 yoki boshqa pin
-//
-// 3) Load / transistor boshqaruv:
-//    - GPIO27 -> 1k -> 2N2222 base
-//    - 2N2222 emitter -> GND
-//    - 2N2222 collector -> load/relay yoki MOSFET gate
-//
-// 4) "over discharge" signal bo'lsa:
-//    - Bu kodda alohida pin ishlatilmaydi, lekin kerak bo'lsa GPIO32 yoki boshqa pin qo'shish mumkin.
-// =========================
+#include "WaterLevelConfig.h"
+#include "WaterLevelLoRaProtocol.h"
 
-const int BATTERY_PIN = 35;       // ADC1_CH7
-const int LOAD_CONTROL_PIN = 27;  // Load/relay boshqaruv pin
-const int RS485_DE_RE_PIN = 255;  // Agar RS485 modulda DE/RE pin mavjud bo'lsa, shu pinni yozing; aks holda 255 qoldiring.
-const int RS485_RX_PIN = 16;      // ESP32 RX2
-const int RS485_TX_PIN = 17;      // ESP32 TX2
+#if __has_include("WaterLevelLoRaSecrets.h")
+#include "WaterLevelLoRaSecrets.h"
+#else
+#include "WaterLevelLoRaSecretsDefault.h"
+#endif
 
-// Divider parametrlari: 100k ust + 22k past
-const float R_TOP = 100000.0f;
-const float R_BOTTOM = 20000.0f;
-// Calibrated against a multimeter: measured 12.10 V, firmware showed 12.46 V.
-const float BATTERY_CALIBRATION = 12.10f / 12.46f;
+namespace {
 
-// Honde RD-RWG-01 Modbus profili
-// Request: address 03 00 04 00 01 CRC
-// Value: signed int16 * 0.001 Bar
-const uint8_t MODBUS_ID = 1;
-const uint8_t MODBUS_FUNCTION = 0x03;
-const uint16_t MODBUS_REG_ADDR = 0x0004;
-const uint16_t MODBUS_REG_COUNT = 0x0001;
-const float PRESSURE_SCALE_BAR = 0.001f;
+namespace config = irrigation::water_level::config;
+namespace lora_protocol = irrigation::water_level::lorawan_protocol;
+namespace lora_secrets = irrigation::water_level::lorawan_secrets;
 
-// Sensor diapazoni: 0..5 m suv sathi
-const float SENSOR_RANGE_M = 5.0f;
-const float WATER_DENSITY = 1000.0f;     // kg/m3
-const float GRAVITY = 9.81f;              // m/s2
+HardwareSerial rs485(2);
 
-HardwareSerial rs485(2); // RX=GPIO16, TX=GPIO17
+const LoRaWANBand_t loraWanRegion = EU868;
+SPISettings loraSpiSettings(500000, MSBFIRST, SPI_MODE0);
+SX1262 radio = new Module(
+    config::pins::LORA_NSS, config::pins::LORA_DIO1,
+    config::pins::LORA_RESET, config::pins::LORA_BUSY, SPI, loraSpiSettings);
+LoRaWANNode lorawan(&radio, &loraWanRegion, config::lorawan::SUB_BAND);
+Preferences preferences;
 
-uint16_t crc16Modbus(const uint8_t *data, size_t len) {
+inline constexpr uint32_t RTC_SESSION_MAGIC_VALUE = 0x574C5331UL;
+RTC_DATA_ATTR uint32_t rtcSessionMagic = 0;
+RTC_DATA_ATTR uint8_t
+    rtcLoRaWanSession[RADIOLIB_LORAWAN_SESSION_BUF_SIZE] = {0};
+RTC_DATA_ATTR bool retainedLoadStateValid = false;
+RTC_DATA_ATTR bool retainedLoadOn = false;
+
+bool radioInitialized = false;
+
+uint16_t crc16Modbus(const uint8_t *data, size_t length) {
   uint16_t crc = 0xFFFF;
-  for (size_t i = 0; i < len; i++) {
-    crc ^= (uint16_t)data[i];
-    for (uint8_t j = 0; j < 8; j++) {
-      if (crc & 0x0001) {
-        crc = (crc >> 1) ^ 0xA001;
-      } else {
-        crc >>= 1;
-      }
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= static_cast<uint16_t>(data[i]);
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      crc = (crc & 0x0001) != 0 ? (crc >> 1) ^ 0xA001 : crc >> 1;
     }
   }
   return crc;
 }
 
-void setRS485Direction(bool txMode) {
-  if (RS485_DE_RE_PIN == 255) {
-    return;
-  }
-  digitalWrite(RS485_DE_RE_PIN, txMode ? HIGH : LOW);
+void setRs485Direction(bool transmit) {
+  if (config::pins::RS485_DE_RE < 0) return;
+  digitalWrite(config::pins::RS485_DE_RE, transmit ? HIGH : LOW);
 }
 
-bool readPressureFromRS485(float &pressureBar) {
-  // Modbus RTU request: slave + function + register address + register count + CRC
+bool readPressureFromRs485(float &pressureBar) {
   uint8_t request[8] = {
-    MODBUS_ID,
-    MODBUS_FUNCTION,
-    (uint8_t)(MODBUS_REG_ADDR >> 8),
-    (uint8_t)(MODBUS_REG_ADDR & 0xFF),
-    (uint8_t)(MODBUS_REG_COUNT >> 8),
-    (uint8_t)(MODBUS_REG_COUNT & 0xFF),
-    0x00,
-    0x00
+      config::sensor::MODBUS_ID,
+      config::sensor::MODBUS_FUNCTION,
+      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER >> 8),
+      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER & 0xFF),
+      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER_COUNT >> 8),
+      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER_COUNT & 0xFF),
+      0x00,
+      0x00,
   };
 
-  uint16_t crc = crc16Modbus(request, 6);
-  request[6] = (uint8_t)(crc & 0xFF);
-  request[7] = (uint8_t)((crc >> 8) & 0xFF);
+  const uint16_t crc = crc16Modbus(request, 6);
+  request[6] = static_cast<uint8_t>(crc & 0xFF);
+  request[7] = static_cast<uint8_t>(crc >> 8);
 
-  while (rs485.available()) {
-    rs485.read();
-  }
+  while (rs485.available()) rs485.read();
 
-  setRS485Direction(true);
+  setRs485Direction(true);
   delayMicroseconds(500);
   rs485.write(request, sizeof(request));
   rs485.flush();
   delayMicroseconds(500);
-  setRS485Direction(false);
+  setRs485Direction(false);
 
-  uint8_t response[7];
-  size_t idx = 0;
-  unsigned long start = millis();
-
-  while ((millis() - start) < 300) {
-    while (rs485.available() && idx < sizeof(response)) {
-      response[idx++] = rs485.read();
+  uint8_t response[7] = {};
+  size_t received = 0;
+  const uint32_t startedAt = millis();
+  while (millis() - startedAt < config::sensor::RESPONSE_TIMEOUT_MS) {
+    while (rs485.available() && received < sizeof(response)) {
+      response[received++] = static_cast<uint8_t>(rs485.read());
     }
-    if (idx >= sizeof(response)) {
-      break;
-    }
+    if (received == sizeof(response)) break;
     delay(5);
   }
 
-  if (idx != sizeof(response)) {
-    Serial.println("RS485: javob kelmadi");
+  if (received != sizeof(response)) {
+    Serial.println("RS485: no complete response");
     return false;
   }
 
-  uint8_t slave = response[0];
-  uint8_t func = response[1];
-  uint8_t byteCount = response[2];
-  int16_t raw = (int16_t)(((uint16_t)response[3] << 8) | response[4]);
-  uint16_t receivedCrc = (uint16_t)response[5] | ((uint16_t)response[6] << 8);
+  const int16_t raw = static_cast<int16_t>(
+      (static_cast<uint16_t>(response[3]) << 8) | response[4]);
+  const uint16_t receivedCrc = static_cast<uint16_t>(response[5]) |
+                               (static_cast<uint16_t>(response[6]) << 8);
 
-  if (slave != MODBUS_ID || func != MODBUS_FUNCTION || byteCount != 2) {
-    Serial.println("RS485: Modbus javob formati xato");
+  if (response[0] != config::sensor::MODBUS_ID ||
+      response[1] != config::sensor::MODBUS_FUNCTION || response[2] != 2) {
+    Serial.println("RS485: invalid Modbus response format");
     return false;
   }
 
-  uint16_t calcCrc = crc16Modbus(response, 5);
-  if (calcCrc != receivedCrc) {
-    Serial.println("RS485: CRC xato");
+  if (crc16Modbus(response, 5) != receivedCrc) {
+    Serial.println("RS485: CRC error");
     return false;
   }
 
-  pressureBar = raw * PRESSURE_SCALE_BAR;
+  pressureBar = raw * config::sensor::PRESSURE_SCALE_BAR;
   return true;
 }
 
 float readBatteryVoltage() {
-  int adcMilliVolts = analogReadMilliVolts(BATTERY_PIN);
-  
-  // Use the ESP32 factory-calibrated ADC voltage instead of assuming Vref = 3.3 V.
-  float vADC = adcMilliVolts / 1000.0f;
-  float vBat = vADC * (R_TOP + R_BOTTOM) / R_BOTTOM * BATTERY_CALIBRATION;
-  return vBat;
+  const int adcMilliVolts = analogReadMilliVolts(config::pins::BATTERY_ADC);
+  const float adcVoltage = adcMilliVolts / 1000.0F;
+  return adcVoltage *
+         (config::battery::DIVIDER_HIGH_OHM +
+          config::battery::DIVIDER_LOW_OHM) /
+         config::battery::DIVIDER_LOW_OHM * config::battery::CALIBRATION;
 }
 
-void updateLoadControl(float batteryVoltage, float levelPercent) {
-  // 12V battery uchun over-discharge limit (masalan 11.5V)
-  const float LOW_BATTERY_VOLTAGE = 11.5f;
+bool updateLoadControl(float batteryVoltage, float levelPercent) {
+  const bool loadOn =
+      batteryVoltage >= config::battery::LOW_VOLTAGE && levelPercent >= 15.0F;
+  digitalWrite(config::pins::LOAD_CONTROL, loadOn ? HIGH : LOW);
+  Serial.println(loadOn ? "LOAD ON"
+                        : "LOAD OFF: battery or water level is low");
+  return loadOn;
+}
 
-  if (batteryVoltage < LOW_BATTERY_VOLTAGE || levelPercent < 15.0f) {
-    digitalWrite(LOAD_CONTROL_PIN, LOW);
-    Serial.println("LOAD OFF: batareya past yoki suv sathi past");
-  } else {
-    digitalWrite(LOAD_CONTROL_PIN, HIGH);
-    Serial.println("LOAD ON");
+void initializeLoadOutput(bool wokeFromDeepSleep) {
+  pinMode(config::pins::LOAD_CONTROL, OUTPUT);
+  digitalWrite(config::pins::LOAD_CONTROL,
+               wokeFromDeepSleep && retainedLoadStateValid && retainedLoadOn
+                   ? HIGH
+                   : LOW);
+  gpio_hold_dis(static_cast<gpio_num_t>(config::pins::LOAD_CONTROL));
+  gpio_deep_sleep_hold_dis();
+}
+
+lora_protocol::Telemetry runMeasurementAndControlCycle() {
+  lora_protocol::Telemetry telemetry{};
+  telemetry.batteryVoltage = readBatteryVoltage();
+  telemetry.pressureValid = readPressureFromRs485(telemetry.pressureBar);
+
+  if (telemetry.pressureValid) {
+    telemetry.depthMeters =
+        (telemetry.pressureBar * 100000.0F) /
+        (config::sensor::WATER_DENSITY_KG_M3 *
+         config::sensor::GRAVITY_M_S2);
+    telemetry.levelPercent = constrain(
+        telemetry.depthMeters / config::sensor::RANGE_METERS * 100.0F,
+        0.0F, 100.0F);
+  }
+
+  Serial.printf("Battery: %.2f V\n", telemetry.batteryVoltage);
+  Serial.printf("Pressure transmitter: %.3f bar / %.2f kPa\n",
+                telemetry.pressureBar, telemetry.pressureBar * 100.0F);
+  Serial.printf("Depth: %.2f m\n", telemetry.depthMeters);
+  Serial.printf("Water level: %.1f %%\n", telemetry.levelPercent);
+
+  telemetry.loadOn = updateLoadControl(telemetry.batteryVoltage,
+                                       telemetry.levelPercent);
+  retainedLoadStateValid = true;
+  retainedLoadOn = telemetry.loadOn;
+  Serial.println("------------------------------------");
+  return telemetry;
+}
+
+bool loadNoncesFromNvs() {
+  if (!preferences.begin(config::lorawan::NVS_NAMESPACE, true)) return false;
+  const size_t length =
+      preferences.getBytesLength(config::lorawan::NVS_NONCES_KEY);
+  if (length != RADIOLIB_LORAWAN_NONCES_BUF_SIZE) {
+    preferences.end();
+    return false;
+  }
+
+  uint8_t nonces[RADIOLIB_LORAWAN_NONCES_BUF_SIZE] = {};
+  const size_t read = preferences.getBytes(
+      config::lorawan::NVS_NONCES_KEY, nonces, sizeof(nonces));
+  preferences.end();
+  return read == sizeof(nonces) &&
+         lorawan.setBufferNonces(nonces) == RADIOLIB_ERR_NONE;
+}
+
+bool saveNoncesToNvs() {
+  if (!preferences.begin(config::lorawan::NVS_NAMESPACE, false)) return false;
+  const size_t written = preferences.putBytes(
+      config::lorawan::NVS_NONCES_KEY, lorawan.getBufferNonces(),
+      RADIOLIB_LORAWAN_NONCES_BUF_SIZE);
+  preferences.end();
+  return written == RADIOLIB_LORAWAN_NONCES_BUF_SIZE;
+}
+
+void saveSessionToRtc() {
+  memcpy(rtcLoRaWanSession, lorawan.getBufferSession(),
+         RADIOLIB_LORAWAN_SESSION_BUF_SIZE);
+  rtcSessionMagic = RTC_SESSION_MAGIC_VALUE;
+}
+
+void setRfSwitchOff() {
+  pinMode(config::pins::LORA_RX_ENABLE, OUTPUT);
+  pinMode(config::pins::LORA_TX_ENABLE, OUTPUT);
+  digitalWrite(config::pins::LORA_RX_ENABLE, LOW);
+  digitalWrite(config::pins::LORA_TX_ENABLE, LOW);
+}
+
+bool setupLoRaWan() {
+  SPI.begin(config::pins::LORA_SCK, config::pins::LORA_MISO,
+            config::pins::LORA_MOSI, config::pins::LORA_NSS);
+  delay(100);
+
+  int16_t state = radio.begin(
+      868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 0.0,
+      false);
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORAWAN] SX1262 initialization failed: %d\n", state);
+    return false;
+  }
+  radioInitialized = true;
+  radio.setRfSwitchPins(config::pins::LORA_RX_ENABLE,
+                        config::pins::LORA_TX_ENABLE);
+
+  state = lorawan.beginOTAA(lora_secrets::JOIN_EUI, lora_secrets::DEV_EUI,
+                            nullptr, lora_secrets::APP_KEY);
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORAWAN] beginOTAA failed: %d\n", state);
+    return false;
+  }
+
+  lorawan.setADR(true);
+  lorawan.setDeviceStatus(255);
+
+  const bool noncesRestored = loadNoncesFromNvs();
+  if (noncesRestored && rtcSessionMagic == RTC_SESSION_MAGIC_VALUE) {
+    (void)lorawan.setBufferSession(rtcLoRaWanSession);
+  }
+
+  state = lorawan.activateOTAA();
+  if (state != RADIOLIB_LORAWAN_NEW_SESSION &&
+      state != RADIOLIB_LORAWAN_SESSION_RESTORED) {
+    (void)saveNoncesToNvs();
+    rtcSessionMagic = 0;
+    Serial.printf("[LORAWAN] OTAA activation failed: %d\n", state);
+    return false;
+  }
+
+  if (state == RADIOLIB_LORAWAN_NEW_SESSION && !saveNoncesToNvs()) {
+    Serial.println("[LORAWAN] Warning: OTAA nonces were not saved.");
+  }
+  saveSessionToRtc();
+
+  state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_A);
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORAWAN] Could not select Class A: %d\n", state);
+    return false;
+  }
+  Serial.println("[LORAWAN] Class A session ready.");
+  return true;
+}
+
+void printHexFrame(const uint8_t *data, size_t length) {
+  Serial.print("[LORAWAN] Telemetry FPort 40: ");
+  for (size_t i = 0; i < length; ++i) {
+    if (data[i] < 0x10) Serial.print('0');
+    Serial.print(data[i], HEX);
+    if (i + 1 < length) Serial.print(' ');
+  }
+  Serial.println();
+}
+
+void sendTelemetry(const lora_protocol::Telemetry &telemetry) {
+  uint8_t uplink[lora_protocol::TELEMETRY_SIZE] = {};
+  lora_protocol::encodeTelemetry(telemetry, uplink);
+  printHexFrame(uplink, sizeof(uplink));
+
+  uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
+  size_t downlinkLength = sizeof(downlink);
+  LoRaWANEvent_t downlinkEvent = {};
+  const int16_t state = lorawan.sendReceive(
+      uplink, sizeof(uplink), config::lorawan::TELEMETRY_FPORT, downlink,
+      &downlinkLength, config::lorawan::CONFIRMED_UPLINK, nullptr,
+      &downlinkEvent);
+  saveSessionToRtc();
+
+  if (state < RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORAWAN] Uplink failed: %d\n", state);
+    return;
+  }
+
+  Serial.println("[LORAWAN] Telemetry sent; RX1/RX2 completed.");
+  if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
+    Serial.printf(
+        "[LORAWAN] Ignored %u-byte application downlink on FPort %u; "
+        "remote control is intentionally disabled.\n",
+        static_cast<unsigned>(downlinkLength), downlinkEvent.fPort);
   }
 }
+
+void enterDeepSleep() {
+  if (radioInitialized) {
+    const int16_t state = radio.sleep(true);
+    if (state != RADIOLIB_ERR_NONE) {
+      Serial.printf("[LORAWAN] Radio sleep warning: %d\n", state);
+    }
+  }
+  setRfSwitchOff();
+  rs485.end();
+  SPI.end();
+
+  gpio_hold_en(static_cast<gpio_num_t>(config::pins::LOAD_CONTROL));
+  gpio_deep_sleep_hold_en();
+  esp_sleep_enable_timer_wakeup(
+      static_cast<uint64_t>(config::lorawan::SLEEP_SECONDS) * 1000000ULL);
+
+  Serial.printf("[POWER] Deep sleeping for %lu seconds; load output is held %s.\n",
+                static_cast<unsigned long>(config::lorawan::SLEEP_SECONDS),
+                retainedLoadOn ? "ON" : "OFF");
+  Serial.flush();
+  delay(20);
+  esp_deep_sleep_start();
+  while (true) delay(1000);
+}
+
+}  // namespace
 
 void setup() {
+  const bool wokeFromDeepSleep =
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+  initializeLoadOutput(wokeFromDeepSleep);
+  setRfSwitchOff();
+
   Serial.begin(115200);
-  rs485.begin(9600, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
+  delay(300);
+  Serial.println("====================================");
+  Serial.println("ESP32 WaterLevel Class A cycle started");
+  Serial.println("====================================");
 
-  pinMode(BATTERY_PIN, INPUT);
-  analogSetPinAttenuation(BATTERY_PIN, ADC_11db);
-  pinMode(LOAD_CONTROL_PIN, OUTPUT);
-  digitalWrite(LOAD_CONTROL_PIN, LOW);
+  pinMode(config::pins::BATTERY_ADC, INPUT);
+  analogSetPinAttenuation(config::pins::BATTERY_ADC, ADC_11db);
+  if (config::pins::RS485_DE_RE >= 0) {
+    pinMode(config::pins::RS485_DE_RE, OUTPUT);
+    digitalWrite(config::pins::RS485_DE_RE, LOW);
+  }
+  rs485.begin(9600, SERIAL_8N1, config::pins::RS485_RX,
+              config::pins::RS485_TX);
 
-  if (RS485_DE_RE_PIN != 255) {
-    pinMode(RS485_DE_RE_PIN, OUTPUT);
-    digitalWrite(RS485_DE_RE_PIN, LOW);
+  const lora_protocol::Telemetry telemetry =
+      runMeasurementAndControlCycle();
+
+  if (!lora_secrets::CONFIGURED) {
+    Serial.println(
+        "[LORAWAN] WaterLevel OTAA credentials are not configured; "
+        "telemetry was not sent.");
+    enterDeepSleep();
+    return;
   }
 
-  Serial.println("====================================");
-  Serial.println("ESP32 Water Level Monitoring Started");
-  Serial.println("====================================");
-  Serial.println("Battery divider: 100k -> GPIO35 -> 22k -> GND");
-  Serial.println("RS485: TX17 RX16");
-  Serial.println("Load control: GPIO27 -> 2N2222 base via 1k");
-  delay(1000);
+  if (setupLoRaWan()) sendTelemetry(telemetry);
+  enterDeepSleep();
 }
 
 void loop() {
-  float batteryVoltage = readBatteryVoltage();
-
-  float pressureBar = 0.0f;
-  bool pressureOk = readPressureFromRS485(pressureBar);
-
-  float depthM = 0.0f;
-  float levelPercent = 0.0f;
-
-  if (pressureOk) {
-    // Bar ni Pa ga o'tkazib, suv ustuni balandligini hisoblash.
-    depthM = (pressureBar * 100000.0f) / (WATER_DENSITY * GRAVITY);
-    levelPercent = constrain((depthM / SENSOR_RANGE_M) * 100.0f, 0.0f, 100.0f);
-  }
-
-  Serial.print("Battery: ");
-  Serial.print(batteryVoltage, 2);
-  Serial.println(" V");
-
-  Serial.print("Pressure transmitter: ");
-  Serial.print(pressureBar, 3);
-  Serial.print(" bar / ");
-  Serial.print(pressureBar * 100.0f, 2);
-  Serial.println(" kPa");
-
-  Serial.print("Depth: ");
-  Serial.print(depthM, 2);
-  Serial.println(" m");
-
-  Serial.print("Water level: ");
-  Serial.print(levelPercent, 1);
-  Serial.println(" %");
-
-  updateLoadControl(batteryVoltage, levelPercent);
-
-  Serial.println("------------------------------------");
-  delay(2000);
+  delay(1000);
 }
