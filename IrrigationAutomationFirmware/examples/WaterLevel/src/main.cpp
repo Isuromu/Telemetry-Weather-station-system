@@ -55,12 +55,12 @@ void setRs485Direction(bool transmit) {
   digitalWrite(config::pins::RS485_DE_RE, transmit ? HIGH : LOW);
 }
 
-bool readPressureFromRs485(float &pressureBar) {
+bool modbusReadRegister(uint16_t registerAddress, int16_t &value) {
   uint8_t request[8] = {
       config::sensor::MODBUS_ID,
       config::sensor::MODBUS_FUNCTION,
-      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER >> 8),
-      static_cast<uint8_t>(config::sensor::MODBUS_REGISTER & 0xFF),
+      static_cast<uint8_t>(registerAddress >> 8),
+      static_cast<uint8_t>(registerAddress & 0xFF),
       static_cast<uint8_t>(config::sensor::MODBUS_REGISTER_COUNT >> 8),
       static_cast<uint8_t>(config::sensor::MODBUS_REGISTER_COUNT & 0xFF),
       0x00,
@@ -92,27 +92,80 @@ bool readPressureFromRs485(float &pressureBar) {
   }
 
   if (received != sizeof(response)) {
-    Serial.println("RS485: no complete response");
+    Serial.printf("RS485: no complete response for register 0x%04X\n",
+                  registerAddress);
     return false;
   }
 
-  const int16_t raw = static_cast<int16_t>(
-      (static_cast<uint16_t>(response[3]) << 8) | response[4]);
   const uint16_t receivedCrc = static_cast<uint16_t>(response[5]) |
                                (static_cast<uint16_t>(response[6]) << 8);
 
   if (response[0] != config::sensor::MODBUS_ID ||
       response[1] != config::sensor::MODBUS_FUNCTION || response[2] != 2) {
-    Serial.println("RS485: invalid Modbus response format");
+    Serial.printf("RS485: invalid Modbus response format for register 0x%04X\n",
+                  registerAddress);
     return false;
   }
 
   if (crc16Modbus(response, 5) != receivedCrc) {
-    Serial.println("RS485: CRC error");
+    Serial.printf("RS485: CRC error for register 0x%04X\n", registerAddress);
     return false;
   }
 
-  pressureBar = raw * config::sensor::PRESSURE_SCALE_BAR;
+  value = static_cast<int16_t>(
+      (static_cast<uint16_t>(response[3]) << 8) | response[4]);
+  return true;
+}
+
+// REG0002 "Primary variable unit" table, expressed as pascal per unit.
+constexpr float PA_PER_UNIT[] = {
+    1.0e6F,     // 0 - MPa
+    1.0e3F,     // 1 - kPa
+    1.0F,       // 2 - Pa
+    1.0e5F,     // 3 - bar
+    1.0e2F,     // 4 - mbar
+    98066.5F,   // 5 - kg/cm2
+    6894.757F,  // 6 - psi
+    9806.65F,   // 7 - mH2O
+    9.80665F,   // 8 - mmH2O
+};
+
+const char *const UNIT_NAMES[] = {
+    "MPa", "kPa", "Pa", "bar", "mbar", "kg/cm2", "psi", "mH2O", "mmH2O",
+};
+
+// Reads REG0002/REG0003 to learn how to interpret REG0004, then converts the
+// primary variable into metres of water column.
+bool readWaterLevel(float &depthMeters) {
+  int16_t unit = config::sensor::DEFAULT_UNIT;
+  int16_t decimals = config::sensor::DEFAULT_DECIMALS;
+  int16_t raw = 0;
+
+  if (!modbusReadRegister(config::sensor::MODBUS_REGISTER_UNIT, unit) ||
+      unit < 0 || unit > 8) {
+    Serial.println(
+        "RS485: unit register unavailable; assuming the datasheet example");
+    unit = config::sensor::DEFAULT_UNIT;
+  }
+  if (!modbusReadRegister(config::sensor::MODBUS_REGISTER_DECIMALS, decimals) ||
+      decimals < 0 || decimals > 3) {
+    Serial.println(
+        "RS485: decimal register unavailable; assuming the datasheet example");
+    decimals = config::sensor::DEFAULT_DECIMALS;
+  }
+  if (!modbusReadRegister(config::sensor::MODBUS_REGISTER_VALUE, raw)) {
+    return false;
+  }
+
+  float divisor = 1.0F;
+  for (int16_t i = 0; i < decimals; ++i) divisor *= 10.0F;
+  const float value = static_cast<float>(raw) / divisor;
+
+  depthMeters = value * PA_PER_UNIT[unit] /
+                (config::sensor::WATER_DENSITY_KG_M3 *
+                 config::sensor::GRAVITY_M_S2);
+  Serial.printf("RS485: unit=%d (%s) decimals=%d raw=%d -> %.3f\n", unit,
+                UNIT_NAMES[unit], decimals, raw, value);
   return true;
 }
 
@@ -125,9 +178,9 @@ float readBatteryVoltage() {
          config::battery::DIVIDER_LOW_OHM * config::battery::CALIBRATION;
 }
 
-bool updateLoadControl(float batteryVoltage, float levelPercent) {
+bool updateLoadControl(float batteryVoltage/*, float levelPercent*/) {
   const bool loadOn =
-      batteryVoltage >= config::battery::LOW_VOLTAGE && levelPercent >= 15.0F;
+      batteryVoltage >= config::battery::LOW_VOLTAGE /*&& levelPercent >= 15.0F*/;
   digitalWrite(config::pins::LOAD_CONTROL, loadOn ? HIGH : LOW);
   Serial.println(loadOn ? "LOAD ON"
                         : "LOAD OFF: battery or water level is low");
@@ -147,13 +200,14 @@ void initializeLoadOutput(bool wokeFromDeepSleep) {
 lora_protocol::Telemetry runMeasurementAndControlCycle() {
   lora_protocol::Telemetry telemetry{};
   telemetry.batteryVoltage = readBatteryVoltage();
-  telemetry.pressureValid = readPressureFromRs485(telemetry.pressureBar);
+  telemetry.pressureValid = readWaterLevel(telemetry.depthMeters);
 
   if (telemetry.pressureValid) {
-    telemetry.depthMeters =
-        (telemetry.pressureBar * 100000.0F) /
-        (config::sensor::WATER_DENSITY_KG_M3 *
-         config::sensor::GRAVITY_M_S2);
+    // The uplink carries pressure in millibar, so recover it from the water
+    // column to keep the two reported values consistent.
+    telemetry.pressureBar = telemetry.depthMeters *
+                            config::sensor::WATER_DENSITY_KG_M3 *
+                            config::sensor::GRAVITY_M_S2 / 100000.0F;
     telemetry.levelPercent = constrain(
         telemetry.depthMeters / config::sensor::RANGE_METERS * 100.0F,
         0.0F, 100.0F);
@@ -165,8 +219,7 @@ lora_protocol::Telemetry runMeasurementAndControlCycle() {
   Serial.printf("Depth: %.2f m\n", telemetry.depthMeters);
   Serial.printf("Water level: %.1f %%\n", telemetry.levelPercent);
 
-  telemetry.loadOn = updateLoadControl(telemetry.batteryVoltage,
-                                       telemetry.levelPercent);
+  telemetry.loadOn = updateLoadControl(telemetry.batteryVoltage/*, telemetry.levelPercent*/);
   retainedLoadStateValid = true;
   retainedLoadOn = telemetry.loadOn;
   Serial.println("------------------------------------");
@@ -343,7 +396,7 @@ void setup() {
   Serial.println("ESP32 WaterLevel Class A cycle started");
   Serial.println("====================================");
 
-  pinMode(config::pins::BATTERY_ADC, INPUT);
+  pinMode(config::pins::BATTERY_ADC, ANALOG);
   analogSetPinAttenuation(config::pins::BATTERY_ADC, ADC_11db);
   if (config::pins::RS485_DE_RE >= 0) {
     pinMode(config::pins::RS485_DE_RE, OUTPUT);

@@ -7,8 +7,11 @@ logic.
 Each wake cycle:
 
 1. reads the GPIO35 battery divider;
-2. reads the RD-RWG-01 pressure transmitter on UART2 GPIO16/GPIO17;
-3. calculates depth and percentage for the existing 5 m range;
+2. reads the RD-RWG-01 on UART2 GPIO16/GPIO17: REG0002 (primary variable unit)
+   and REG0003 (decimal places) tell the firmware how to interpret REG0004
+   (measurement output value);
+3. converts the measurement to metres of water column and to a percentage of the
+   existing 5 m range;
 4. applies the existing GPIO27 load rule (battery at least 11.5 V and level at
    least 15 percent);
 5. sends one FPort 40 uplink and completes RX1/RX2;

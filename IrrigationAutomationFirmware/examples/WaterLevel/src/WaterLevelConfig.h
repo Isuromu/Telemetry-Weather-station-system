@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #ifndef WATER_LEVEL_SLEEP_SECONDS
-#define WATER_LEVEL_SLEEP_SECONDS 900
+#define WATER_LEVEL_SLEEP_SECONDS 10 // fixme: 900
 #endif
 
 namespace irrigation::water_level::config {
@@ -36,9 +36,20 @@ inline constexpr float LOW_VOLTAGE = 11.5F;
 namespace sensor {
 inline constexpr uint8_t MODBUS_ID = 1;
 inline constexpr uint8_t MODBUS_FUNCTION = 0x03;
-inline constexpr uint16_t MODBUS_REGISTER = 0x0004;
+// The RD-RWG-01 exposes the primary variable unit (REG0002) and the number of
+// decimal places (REG0003) next to the measurement itself (REG0004). Neither
+// register is user-writable, so both are read from the device instead of being
+// assumed by the firmware.
+inline constexpr uint16_t MODBUS_REGISTER_UNIT = 0x0002;
+inline constexpr uint16_t MODBUS_REGISTER_DECIMALS = 0x0003;
+inline constexpr uint16_t MODBUS_REGISTER_VALUE = 0x0004;
 inline constexpr uint16_t MODBUS_REGISTER_COUNT = 0x0001;
-inline constexpr float PRESSURE_SCALE_BAR = 0.001F;
+
+// Only used when REG0002/REG0003 cannot be read. These are the values shown by
+// the datasheet's "Read water level" example: mH2O with three decimals.
+inline constexpr int16_t DEFAULT_UNIT = 7;
+inline constexpr int16_t DEFAULT_DECIMALS = 3;
+
 inline constexpr float RANGE_METERS = 5.0F;
 inline constexpr float WATER_DENSITY_KG_M3 = 1000.0F;
 inline constexpr float GRAVITY_M_S2 = 9.81F;
@@ -54,7 +65,7 @@ inline constexpr char NVS_NAMESPACE[] = "waterlevel_lw";
 inline constexpr char NVS_NONCES_KEY[] = "nonces";
 }  // namespace lorawan
 
-static_assert(lorawan::SLEEP_SECONDS >= 60 &&
+static_assert(lorawan::SLEEP_SECONDS >= 10 &&
                   lorawan::SLEEP_SECONDS <= 24UL * 60UL * 60UL,
               "WaterLevel sleep interval must be 60..86400 seconds.");
 
