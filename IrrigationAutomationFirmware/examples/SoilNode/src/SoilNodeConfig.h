@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #ifndef SOIL_NODE_SLEEP_SECONDS
-#define SOIL_NODE_SLEEP_SECONDS 600
+#define SOIL_NODE_SLEEP_SECONDS 10 // @fixme: 600
 #endif
 
 #ifndef SOIL_NODE_SENSOR_POWER_PIN
@@ -63,13 +63,17 @@ namespace lorawan {
 inline constexpr const LoRaWANBand_t &REGION = EU868;
 inline constexpr uint8_t SUB_BAND = 0;
 inline constexpr uint8_t TELEMETRY_FPORT = 10;
-inline constexpr uint32_t SLEEP_SECONDS = SOIL_NODE_SLEEP_SECONDS;
+inline constexpr uint32_t DEFAULT_SLEEP_SECONDS = SOIL_NODE_SLEEP_SECONDS;
+inline constexpr uint32_t MIN_SLEEP_SECONDS = 10;
+inline constexpr uint32_t MAX_SLEEP_SECONDS = 24UL * 60UL * 60UL;
 inline constexpr char NVS_NAMESPACE[] = "soilnode_lw";
 inline constexpr char NVS_NONCES_KEY[] = "nonces";
+inline constexpr char NVS_SLEEP_SECONDS_KEY[] = "sleep_s";
 }  // namespace lorawan
 
-static_assert(lorawan::SLEEP_SECONDS >= 10 &&
-                  lorawan::SLEEP_SECONDS <= 24UL * 60UL * 60UL,
+static_assert(lorawan::DEFAULT_SLEEP_SECONDS >= lorawan::MIN_SLEEP_SECONDS &&
+                  lorawan::DEFAULT_SLEEP_SECONDS <=
+                      lorawan::MAX_SLEEP_SECONDS,
               "SoilNode sleep interval must be 10..86400 seconds.");
 
 }  // namespace irrigation::soil_node::config

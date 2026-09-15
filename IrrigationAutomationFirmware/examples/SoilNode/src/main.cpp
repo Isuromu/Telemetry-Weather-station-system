@@ -44,6 +44,7 @@ RTC_DATA_ATTR uint8_t
 
 bool radioInitialized = false;
 bool adsInitialized = false;
+uint32_t sleepIntervalSeconds = config::lorawan::DEFAULT_SLEEP_SECONDS;
 
 uint16_t crc16Modbus(const uint8_t *data, size_t length) {
   uint16_t crc = 0xFFFF;
@@ -195,6 +196,51 @@ bool saveNoncesToNvs() {
   return written == RADIOLIB_LORAWAN_NONCES_BUF_SIZE;
 }
 
+void loadSleepIntervalFromNvs() {
+  if (!preferences.begin(config::lorawan::NVS_NAMESPACE, true)) return;
+  const uint32_t stored = preferences.getUInt(
+      config::lorawan::NVS_SLEEP_SECONDS_KEY,
+      config::lorawan::DEFAULT_SLEEP_SECONDS);
+  preferences.end();
+  if (stored >= config::lorawan::MIN_SLEEP_SECONDS &&
+      stored <= config::lorawan::MAX_SLEEP_SECONDS) {
+    sleepIntervalSeconds = stored;
+  }
+}
+
+bool saveSleepIntervalToNvs(uint32_t seconds) {
+  if (!preferences.begin(config::lorawan::NVS_NAMESPACE, false)) return false;
+  const size_t written = preferences.putUInt(
+      config::lorawan::NVS_SLEEP_SECONDS_KEY, seconds);
+  preferences.end();
+  return written == sizeof(seconds);
+}
+
+void processDownlink(const uint8_t *payload, size_t length, uint8_t fPort) {
+  if (fPort != config::lorawan::TELEMETRY_FPORT) {
+    Serial.printf("[LORAWAN] Ignored downlink on unexpected FPort %u.\n",
+                  fPort);
+    return;
+  }
+
+  uint32_t requestedSeconds = 0;
+  if (!protocol::decodeSleepIntervalCommand(
+          payload, length, config::lorawan::MIN_SLEEP_SECONDS,
+          config::lorawan::MAX_SLEEP_SECONDS, requestedSeconds)) {
+    Serial.println("[LORAWAN] Invalid sleep-interval downlink.");
+    return;
+  }
+
+  if (requestedSeconds != sleepIntervalSeconds &&
+      !saveSleepIntervalToNvs(requestedSeconds)) {
+    Serial.println("[LORAWAN] Could not persist the sleep interval.");
+    return;
+  }
+  sleepIntervalSeconds = requestedSeconds;
+  Serial.printf("[LORAWAN] Sleep interval set to %lu seconds.\n",
+                static_cast<unsigned long>(sleepIntervalSeconds));
+}
+
 void saveSessionToRtc() {
   memcpy(rtcLoRaWanSession, lorawan.getBufferSession(),
          RADIOLIB_LORAWAN_SESSION_BUF_SIZE);
@@ -267,9 +313,9 @@ void enterDeepSleep() {
   rs485.end();
   SPI.end();
   esp_sleep_enable_timer_wakeup(
-      static_cast<uint64_t>(config::lorawan::SLEEP_SECONDS) * 1000000ULL);
+      static_cast<uint64_t>(sleepIntervalSeconds) * 1000000ULL);
   Serial.printf("[POWER] Deep sleeping for %lu seconds.\n",
-                static_cast<unsigned long>(config::lorawan::SLEEP_SECONDS));
+                static_cast<unsigned long>(sleepIntervalSeconds));
   Serial.flush();
   delay(20);
   esp_deep_sleep_start();
@@ -281,13 +327,21 @@ void sendTelemetry(const protocol::Telemetry &telemetry) {
   protocol::encodeTelemetry(telemetry, payload);
   printHexFrame("[LORAWAN] FPort 10: ", payload, sizeof(payload));
 
+  uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
+  size_t downlinkLength = sizeof(downlink);
+  LoRaWANEvent_t downlinkEvent = {};
   const int16_t state = lorawan.sendReceive(
-      payload, sizeof(payload), config::lorawan::TELEMETRY_FPORT, false);
+      payload, sizeof(payload), config::lorawan::TELEMETRY_FPORT, downlink,
+      &downlinkLength, false, nullptr, &downlinkEvent);
   saveSessionToRtc();
   if (state < RADIOLIB_ERR_NONE) {
     Serial.printf("[LORAWAN] Uplink failed: %d\n", state);
   } else {
     Serial.println("[LORAWAN] Uplink sent; RX1/RX2 completed.");
+    if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
+      printHexFrame("[LORAWAN] Downlink: ", downlink, downlinkLength);
+      processDownlink(downlink, downlinkLength, downlinkEvent.fPort);
+    }
   }
 }
 
@@ -305,6 +359,7 @@ void setup() {
   const bool wokeFromDeepSleep =
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
   rtcWakeCount = wokeFromDeepSleep ? rtcWakeCount + 1 : 0;
+  loadSleepIntervalFromNvs();
 
   Serial.println("ESP32-WROOM SoilNode Class A cycle started");
   Serial.printf("Wake count: %lu\n", static_cast<unsigned long>(rtcWakeCount));

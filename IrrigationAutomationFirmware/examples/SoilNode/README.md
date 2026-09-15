@@ -10,8 +10,10 @@ does not use the preliminary production ESP32-C6 pinout. Each Class A cycle:
 2. reads three holding registers from Modbus address 3 on UART1 GPIO16/GPIO17;
 3. turns sensor power off and reads the 1S battery through an ADS1115 on
    GPIO21/GPIO22;
-4. sends an eight-byte FPort 10 uplink and completes RX1/RX2;
-5. retains the RadioLib session in RTC memory and sleeps for 600 seconds.
+4. sends an eight-byte FPort 10 uplink and completes RX1/RX2, accepting an
+   optional sleep-interval command in those Class A receive windows;
+5. retains the RadioLib session in RTC memory and sleeps for the configured
+   interval.
 
 The automatic-direction RS485 converter requires no DE/RE GPIO.
 
@@ -79,5 +81,23 @@ FPort 10 carries eight big-endian bytes, matching the supplied sketch:
 The firmware accepts and ignores a local eight-byte transmit echo, retries the
 read three times, and requires the 11-byte `03 03 06 ...` CRC-valid sensor
 response shown by the USB tool. EU868, sensor register scaling, the ADS1115
-wiring, and the 600-second interval remain prototype values to validate before
-field deployment.
+wiring, and the reporting interval remain prototype values to validate before
+field deployment. The current 10-second default is for commissioning only.
+
+The active wake interval is held in `sleepIntervalSeconds` in `main.cpp`. It is
+initialized from `config::lorawan::DEFAULT_SLEEP_SECONDS` and passed to the
+ESP32 timer wake-up configuration. A valid ChirpStack downlink persists the
+new value in NVS. The five-byte FPort 10 command is opcode `0x01` followed by
+an unsigned 32-bit big-endian interval in seconds; accepted values are
+10-86400 seconds. Use `tools/chirpstack/soil_node_class_a_codec.js` in the
+ChirpStack device profile and queue, for example:
+
+```json
+{"sleep_seconds":600}
+```
+
+or:
+
+```json
+{"sleep_minutes":10}
+```

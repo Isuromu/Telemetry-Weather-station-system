@@ -21,4 +21,26 @@ void encodeTelemetry(const Telemetry &telemetry,
   payload[7] = telemetry.batteryEncoded;
 }
 
+bool decodeSleepIntervalCommand(
+    const uint8_t *payload, size_t length, uint32_t minimumSeconds,
+    uint32_t maximumSeconds, uint32_t &sleepSeconds) {
+  if (payload == nullptr || length != SET_SLEEP_INTERVAL_COMMAND_SIZE ||
+      payload[0] != SET_SLEEP_INTERVAL_COMMAND) {
+    return false;
+  }
+
+  const uint32_t requestedSeconds =
+      (static_cast<uint32_t>(payload[1]) << 24) |
+      (static_cast<uint32_t>(payload[2]) << 16) |
+      (static_cast<uint32_t>(payload[3]) << 8) |
+      static_cast<uint32_t>(payload[4]);
+  if (requestedSeconds < minimumSeconds ||
+      requestedSeconds > maximumSeconds) {
+    return false;
+  }
+
+  sleepSeconds = requestedSeconds;
+  return true;
+}
+
 }  // namespace irrigation::soil_node::lorawan_protocol

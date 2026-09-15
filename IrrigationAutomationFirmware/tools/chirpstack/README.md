@@ -88,6 +88,20 @@ opens another pair of Class A receive windows.
 
 The `pcv_serial_only` firmware does not use ChirpStack or a codec.
 
+## `soil_node_class_a_codec.js`
+
+Use with `examples/SoilNode` / `pio run -e soil_node`. Both directions use
+FPort 10. The uplink is the existing eight-byte soil telemetry payload. The
+downlink changes the persistent Class A sleep interval:
+
+```json
+{"sleep_seconds":600}
+```
+
+The equivalent `{"sleep_minutes":10}` form is also accepted. The current
+commissioning range is 10-86400 seconds; choose a field interval that meets the
+energy budget after commissioning.
+
 ## `pcv2_klapan_codec.js`
 
 Not a PCV codec. This belongs to the separate `examples/PressureControlNode2`
