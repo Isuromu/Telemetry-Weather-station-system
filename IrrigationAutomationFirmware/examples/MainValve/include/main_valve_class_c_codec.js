@@ -1,6 +1,6 @@
 /* ChirpStack v4 codec for the MainValve Class C example.
  * Downlink FPort 30: protocol-v1 target-angle command.
- * Status uplink FPort 31: protocol-v1 actuator and pressure status.
+ * Status uplink FPort 31: protocol-v2 actuator, pressure, and command phase.
  */
 
 function readU16(bytes, offset) {
@@ -11,11 +11,10 @@ function decodeUplink(input) {
   if (input.fPort !== 31) {
     return { errors: ["MainValve status must use FPort 31"] };
   }
-  if (!input.bytes || input.bytes.length !== 15) {
-    return { errors: ["MainValve status must contain 15 bytes"] };
-  }
-  if (input.bytes[0] !== 1) {
-    return { errors: ["Unsupported MainValve protocol version"] };
+  if (!input.bytes ||
+      !((input.bytes[0] === 1 && input.bytes.length === 15) ||
+        (input.bytes[0] === 2 && input.bytes.length === 18))) {
+    return { errors: ["MainValve status must be protocol v1/15 bytes or v2/18 bytes"] };
   }
 
   var b = input.bytes;
@@ -25,7 +24,13 @@ function decodeUplink(input) {
   var reasons = {
     0: "startup", 1: "local_command", 2: "remote_command",
     3: "duplicate_command", 4: "invalid_command", 5: "modbus_error",
-    6: "pressure_interlock", 7: "pressure_sensor_error"
+    6: "pressure_interlock", 7: "pressure_sensor_error",
+    8: "actuator_busy", 9: "movement_timeout", 10: "actuator_fault",
+    11: "local_override"
+  };
+  var phases = {
+    0: "none", 1: "accepted", 2: "moving", 3: "finished",
+    4: "rejected", 5: "failed"
   };
   var actual10 = readU16(b, 3);
   var target10 = readU16(b, 5);
@@ -53,7 +58,11 @@ function decodeUplink(input) {
     actuator_fault_code: actuatorOnline ? readU16(b, 9) : null,
     last_command_id: commandId !== 0xFFFF ? commandId : null,
     actuator_mode: b[13] === 1 ? "rs485_bus" :
-      (b[13] === 0 ? "analog" : "unavailable")
+      (b[13] === 0 ? "analog" : "unavailable"),
+    protocol_version: b[0],
+    reported_command_id: b[0] === 2 && readU16(b, 15) !== 0xFFFF ?
+      readU16(b, 15) : null,
+    command_phase: b[0] === 2 ? (phases[b[17]] || "unknown") : "unavailable"
   };
   return { data: data, warnings: warnings };
 }

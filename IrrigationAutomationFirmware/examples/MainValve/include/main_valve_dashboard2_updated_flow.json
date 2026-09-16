@@ -1,0 +1,336 @@
+[
+  {
+    "id": "7912d461840ce992",
+    "type": "group",
+    "z": "8df55dba201de6b7",
+    "style": {
+      "stroke": "#999999",
+      "stroke-opacity": "1",
+      "fill": "none",
+      "fill-opacity": "1",
+      "label": true,
+      "label-position": "nw",
+      "color": "#767676"
+    },
+    "nodes": [
+      "mv_mqtt_in",
+      "mv_ingest",
+      "mv_ui",
+      "mv_command",
+      "mv_mqtt_out",
+      "2d95d3bec4422b97"
+    ],
+    "x": 54,
+    "y": 59,
+    "w": 1392,
+    "h": 222
+  },
+  {
+    "id": "mv_mqtt_in",
+    "type": "mqtt in",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "name": "ChirpStack events",
+    "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/756c38f8ffede19a/event/+",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "ae0178f3742ff530",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 170,
+    "y": 120,
+    "wires": [
+      [
+        "mv_ingest",
+        "2d95d3bec4422b97"
+      ]
+    ]
+  },
+  {
+    "id": "mv_ingest",
+    "type": "function",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "name": "Filter and decode MainValve events",
+    "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"756c38f8ffede19a\";\nif (!app || !/^[a-f0-9]{16}$/.test(eui)) { node.status({fill:'red',shape:'ring',text:'set flow environment variables'}); return null; }\nconst parts = String(msg.topic || '').split('/');\nif (parts.length !== 6 || parts[0] !== 'application' || parts[2] !== 'device' || parts[4] !== 'event' || parts[1] !== app || parts[3].toLowerCase() !== eui) return null;\nlet event = msg.payload;\ntry { if (Buffer.isBuffer(event)) event = JSON.parse(event.toString('utf8')); else if (typeof event === 'string') event = JSON.parse(event); } catch (err) { node.warn('Invalid ChirpStack JSON: ' + err.message); return null; }\nif (!event || typeof event !== 'object') return null;\nconst kind = parts[5];\nlet s = flow.get('mv_state') || {};\nlet advance = null;\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nif (kind === 'up') {\n  if (event.fPort !== 31) return null;\n  let d = event.object;\n  let b = null;\n  if (!d || typeof d !== 'object' || !Object.prototype.hasOwnProperty.call(d, 'command_phase')) {\n    try { b = Buffer.from(event.data || '', 'base64'); } catch (_) { b = null; }\n    if (!b || !((b[0] === 1 && b.length === 15) || (b[0] === 2 && b.length === 18))) { node.warn('MainValve FPort 31 payload is not v1/15 or v2/18 bytes'); return null; }\n    const u16 = i => (b[i] << 8) | b[i + 1]; const flags = b[1];\n    const reasons = ['startup','local_command','remote_command','duplicate_command','invalid_command','modbus_error','pressure_interlock','pressure_sensor_error','actuator_busy','movement_timeout','actuator_fault','local_override'];\n    d = { actuator_online: !!(flags & 1), pressure_valid: !!(flags & 2), rs485_bus_mode: !!(flags & 4), valve_moving: !!(flags & 8), overpressure: !!(flags & 16), lorawan_active: !!(flags & 32), class_c_active: !!(flags & 64), reason_code: b[2], reason: reasons[b[2]] || 'unknown', actual_angle_deg: (flags & 1) && u16(3) !== 65535 ? u16(3) / 10 : null, target_angle_deg: (flags & 1) && u16(5) !== 65535 ? u16(5) / 10 : null, pressure_bar: (flags & 2) && u16(7) !== 65535 ? u16(7) / 100 : null, actuator_fault_code: (flags & 1) ? u16(9) : null, last_command_id: u16(11) === 65535 ? null : u16(11), actuator_mode: b[13] === 1 ? 'rs485_bus' : b[13] === 0 ? 'analog' : 'unavailable', pressure_temperature_c: (flags & 2) ? b[14] - 40 : null };\n  }\n  if (b && b[0] === 2) {\n    const phases = ['none','accepted','moving','finished','rejected','failed'];\n    d.protocol_version = 2;\n    d.reported_command_id = b.readUInt16BE(15) === 65535 ? null : b.readUInt16BE(15);\n    d.command_phase = phases[b[17]] || 'unknown';\n  } else if (b) {\n    d.protocol_version = 1;\n    d.reported_command_id = null;\n    d.command_phase = 'unavailable';\n  }\n  s = Object.assign(s, d); s.last_seen = event.time || new Date().toISOString();\n  s.f_port = event.fPort; s.f_cnt = event.fCnt == null ? null : event.fCnt;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) { const best = rx.reduce((a,b) => Number(b.snr) > Number(a.snr) ? b : a); s.rssi = best.rssi; s.snr = best.snr; s.gateway_id = best.gatewayId || ''; }\n  const p = flow.get('mv_pending');\n  if (p && d.reported_command_id === p.id) {\n    if (d.command_phase === 'accepted') s.command_state = 'Accepted; waiting for movement';\n    else if (d.command_phase === 'moving') s.command_state = 'Moving';\n    else if (d.command_phase === 'finished') {\n      const wasExpired = s.pending_expired === true;\n      s.command_state = 'Finished; actual angle ' + d.actual_angle_deg;\n      s.pending_expired = false;\n      flow.set('mv_pending',null);\n      if (wasExpired) s.queue_paused = true;\n      else advance = {_mvInternal:true,payload:{kind:'advance'}};\n    } else if (d.command_phase === 'rejected') {\n      s.command_state = 'Rejected: ' + (d.reason || 'unknown') + '; queue paused';\n      s.queue_paused = true;\n      flow.set('mv_pending',null);\n    } else if (d.command_phase === 'failed') {\n      s.command_state = 'Failed: ' + (d.reason || 'unknown') + '; inspect before unlocking';\n      s.pending_expired = true;\n      s.queue_paused = true;\n    }\n  }\n  node.status({fill:'green',shape:'dot',text:'status ' + s.last_seen});\n} else if (kind === 'ack') { s.network_ack = event.acknowledged === true ? 'Confirmed downlink ACK' : 'Downlink not acknowledged'; }\nelse if (kind === 'txack') { s.network_txack = 'Gateway transmission acknowledged'; }\nelse if (kind === 'join') { s.network_join = s.last_event_time; }\nelse if (kind === 'log') { s.network_log = event.description || event.code || 'Device log'; }\nelse return null;\ns.queue = (flow.get('mv_queue') || []).slice();\ns.active_command = flow.get('mv_pending') || null;\nflow.set('mv_state', s);\nmsg.payload = {kind:'state', state:s}; return [msg,advance];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 160,
+    "wires": [
+      [
+        "mv_ui"
+      ],
+      [
+        "mv_command"
+      ]
+    ]
+  },
+  {
+    "id": "mv_ui",
+    "type": "ui-template",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "group": "ui-group-telemetry",
+    "page": "",
+    "ui": "",
+    "name": "MainValve controls and telemetry",
+    "order": 1,
+    "width": "12",
+    "height": "13",
+    "head": "",
+    "format": "<template>\n<div class=\"mv\">\n  <div class=\"mv-head\"><strong>MainValve</strong><span>{{ state.last_seen ? 'Last uplink: ' + state.last_seen : 'Waiting for status uplink' }}</span></div>\n  <div class=\"mv-grid\">\n    <div><small>Actual angle</small><b>{{ show(state.actual_angle_deg, ' deg') }}</b></div>\n    <div><small>Target angle</small><b>{{ show(state.target_angle_deg, ' deg') }}</b></div>\n    <div><small>Upstream pressure</small><b>{{ show(state.pressure_bar, ' bar') }}</b></div>\n    <div><small>Temperature</small><b>{{ show(state.pressure_temperature_c, ' C') }}</b></div>\n    <div><small>Actuator</small><b>{{ state.actuator_online === undefined ? '-' : state.actuator_online ? 'Online' : 'Offline' }}</b></div>\n    <div><small>Movement</small><b>{{ state.valve_moving ? 'Moving' : 'Stopped' }}</b></div>\n    <div><small>LoRaWAN</small><b>{{ state.class_c_active ? 'Class C' : state.lorawan_active ? 'Class A fallback' : 'Unknown / offline' }}</b></div>\n    <div><small>Signal</small><b>{{ show(state.rssi, ' dBm') }} / {{ show(state.snr, ' dB') }}</b></div>\n  </div>\n  <div class=\"mv-alert\" v-if=\"state.overpressure || state.actuator_fault_code\">{{ state.overpressure ? 'OVERPRESSURE ' : '' }}{{ state.actuator_fault_code ? 'Actuator fault: ' + state.actuator_fault_code : '' }}</div>\n  <div class=\"mv-controls\"><h3>Queue valve positions</h3><p>0 deg = closed; 90 deg = open. New commands wait in Node-RED until the active movement finishes.</p>\n    <div class=\"mv-buttons\"><v-btn color=\"error\" @click=\"issue(0)\">Queue close</v-btn><v-btn color=\"primary\" @click=\"issue(45)\">Queue half</v-btn><v-btn color=\"success\" @click=\"issue(90)\">Queue open</v-btn></div>\n    <div class=\"mv-custom\"><v-text-field v-model.number=\"angle\" type=\"number\" min=\"0\" max=\"90\" step=\"0.1\" label=\"Target angle (degrees)\" density=\"compact\"></v-text-field><v-btn @click=\"issue(angle)\">Queue angle</v-btn></div>\n    <div class=\"mv-custom\"><v-text-field v-model.number=\"percent\" type=\"number\" min=\"0\" max=\"100\" step=\"0.1\" label=\"Travel percent\" density=\"compact\"></v-text-field><v-btn @click=\"issuePercent\">Queue percent</v-btn></div>\n  </div>\n  <div class=\"mv-queue\">\n    <h3>Command queue <small>({{ queue.length }} waiting)</small></h3>\n    <div class=\"mv-active\"><b>Active:</b> <span v-if=\"state.active_command\">ID {{ state.active_command.id }} - {{ state.active_command.angle_deg }} deg ({{ state.command_state }})</span><span v-else>None</span></div>\n    <div v-if=\"state.queue_paused\" class=\"mv-alert\">Queue paused. Check the last result before resuming.<br><v-btn v-if=\"!state.active_command\" @click=\"resume\">Resume queue</v-btn></div>\n    <ol v-if=\"queue.length\" class=\"mv-list\">\n      <li v-for=\"(item,index) in queue\" :key=\"item.queue_id\"><span>{{ index + 1 }}. {{ item.angle_deg }} deg <small>queued {{ item.queued_at }}</small></span><v-btn icon=\"mdi-close\" size=\"x-small\" variant=\"text\" color=\"error\" title=\"Remove waiting command\" @click=\"remove(item.queue_id)\"></v-btn></li>\n    </ol>\n    <p v-else>No waiting commands.</p>\n  </div>\n  <div class=\"mv-footer\">\n    <div><b>Status reason:</b> {{state.reason || '-'}} | <b>Last accepted ID:</b> {{show(state.last_command_id)}} | <b>Reported ID:</b> {{show(state.reported_command_id)}} | <b>Phase:</b> {{state.command_phase || '-'}}</div>\n    <div><b>RS485:</b> {{state.actuator_mode || '-'}} | <b>Pressure valid:</b> {{state.pressure_valid ? 'yes' : 'no'}} | <b>FPort:</b> {{show(state.f_port)}} | <b>FCnt:</b> {{show(state.f_cnt)}}</div>\n    <div v-if=\"state.pending_expired\" class=\"mv-alert\">Movement failed or no final status within 5 minutes. Check valve position and ChirpStack events before unlocking.<br><v-btn @click=\"unlock\">Unlock after inspection</v-btn></div>\n    <div v-if=\"state.ui_error\" class=\"mv-alert\">{{state.ui_error}}</div>\n  </div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{},angle:45,percent:50} },\n  computed: {queue() { return Array.isArray(this.state.queue) ? this.state.queue : [] }},\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix },\n    issue(a) { const n=Number(a); if (!Number.isFinite(n)||n<0||n>90) {this.state.ui_error='Angle must be 0 to 90 degrees';return;} if (window.confirm('Queue MainValve target '+n+' degrees?')) this.send({payload:{kind:'command',angle_deg:n}}); },\n    issuePercent() { const p=Number(this.percent); if (!Number.isFinite(p)||p<0||p>100) {this.state.ui_error='Percent must be 0 to 100';return;} this.issue(p*0.9); },\n    remove(id) { this.send({payload:{kind:'remove',queue_id:id}}); },\n    unlock() { if (window.confirm('I checked the physical valve and ChirpStack queue. Unlock the active command?')) this.send({payload:{kind:'unlock'}}); },\n    resume() { if (window.confirm('Resume dispatching waiting commands in order?')) this.send({payload:{kind:'resume'}}); }\n  }\n}\n</script>\n<style>\n.mv{padding:8px}.mv-head{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:1.15rem}.mv-head span{font-size:.8rem}.mv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:16px 0}.mv-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}.mv-grid small{display:block;color:#566}.mv-grid b{font-size:1.3rem}.mv-controls,.mv-queue{border-top:1px solid #ccd7df;padding-top:12px;margin-top:12px}.mv-controls p,.mv-queue p{font-size:.85rem}.mv-buttons{display:flex;gap:8px;flex-wrap:wrap}.mv-custom{display:flex;align-items:center;gap:12px;max-width:430px;margin-top:8px}.mv-custom .v-input{flex:1}.mv-active{padding:8px;background:#eef5f7;border-radius:6px}.mv-list{list-style:none;padding:0}.mv-list li{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #dde5e8;padding:5px 0}.mv-list small{display:block;color:#667}.mv-footer{font-size:.84rem;line-height:1.7;border-top:1px solid #ccd7df;margin-top:12px;padding-top:10px}.mv-alert{background:#b3261e;color:white;border-radius:5px;padding:8px;margin:8px 0}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 790,
+    "y": 240,
+    "wires": [
+      [
+        "mv_command"
+      ]
+    ]
+  },
+  {
+    "id": "mv_command",
+    "type": "function",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "name": "Queue, remove, and dispatch commands",
+    "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"756c38f8ffede19a\";\nlet s = flow.get('mv_state') || {};\nlet queue = flow.get('mv_queue') || [];\nconst action = msg.payload || {};\nfunction snapshot() {\n  s.queue = queue.slice();\n  s.active_command = flow.get('mv_pending') || null;\n  flow.set('mv_state', s);\n  return {payload:{kind:'state',state:s}};\n}\nfunction feedback(text) { s.ui_error = text; return [null,snapshot()]; }\nfunction dispatchNext() {\n  if (flow.get('mv_pending') || s.queue_paused || queue.length === 0) return [null,snapshot()];\n  const next = queue.shift();\n  flow.set('mv_queue', queue);\n  let id = flow.get('mv_next_id');\n  if (!Number.isInteger(id) || id < 0 || id > 65534) id = (Number(s.last_command_id) + 1) % 65535;\n  if (id === Number(s.last_command_id)) id = (id + 1) % 65535;\n  flow.set('mv_next_id', (id + 1) % 65535);\n  const angle10 = Math.round(next.angle_deg * 10);\n  const bytes = Buffer.from([1,1,angle10 >> 8,angle10 & 255,id >> 8,id & 255]);\n  flow.set('mv_pending',{id,angle_deg:angle10 / 10,queue_id:next.queue_id,queued_at:new Date().toISOString()});\n  s.queued_id = id;\n  s.command_state = 'Sent; awaiting acceptance';\n  s.pending_expired = false;\n  s.ui_error = '';\n  node.status({fill:'yellow',shape:'dot',text:'active ID '+id+', waiting '+queue.length});\n  return [{\n    topic:'application/'+app+'/device/'+eui+'/command/down',\n    payload:JSON.stringify({devEui:eui,confirmed:false,fPort:30,data:bytes.toString('base64')}),\n    qos:'0',retain:false\n  },snapshot()];\n}\nif (action.kind === 'advance') {\n  if (msg._mvInternal !== true) return null;\n  return dispatchNext();\n}\nif (action.kind === 'remove') {\n  const index = queue.findIndex(x => x.queue_id === action.queue_id);\n  if (index < 0) return feedback('Waiting command not found; it may already be active.');\n  queue.splice(index,1);\n  flow.set('mv_queue',queue);\n  s.ui_error = '';\n  return [null,snapshot()];\n}\nif (action.kind === 'unlock') {\n  if (s.pending_expired !== true) return feedback('Unlock is available after failure or timeout.');\n  flow.set('mv_pending',null);\n  s.queue_paused = true;\n  s.pending_expired = false;\n  s.command_state = 'Operator unlocked; queue paused';\n  s.ui_error = '';\n  return [null,snapshot()];\n}\nif (action.kind === 'resume') {\n  if (flow.get('mv_pending')) return feedback('Wait for the active command or inspect and unlock it.');\n  if (!s.queue_paused) return feedback('Queue is already running.');\n  s.queue_paused = false;\n  s.ui_error = '';\n  return dispatchNext();\n}\nif (action.kind !== 'command') return null;\nif (!app || !/^[a-f0-9]{16}$/.test(eui)) return feedback('Configure the ChirpStack application and DevEUI.');\nif (!s.last_seen || s.protocol_version !== 2) return feedback('Wait for a protocol-v2 FPort 31 status uplink.');\nconst angle = Number(action.angle_deg);\nif (!Number.isFinite(angle) || angle < 0 || angle > 90) return feedback('Angle must be 0 to 90 degrees.');\nif (queue.length >= 20) return feedback('Waiting queue is full (20 commands).');\nconst queueId = (flow.get('mv_queue_counter') || 0) + 1;\nflow.set('mv_queue_counter',queueId);\nqueue.push({queue_id:queueId,angle_deg:Math.round(angle * 10) / 10,queued_at:new Date().toISOString()});\nflow.set('mv_queue',queue);\ns.ui_error = '';\nreturn dispatchNext();",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1030,
+    "y": 140,
+    "wires": [
+      [
+        "mv_mqtt_out"
+      ],
+      [
+        "mv_ui"
+      ]
+    ]
+  },
+  {
+    "id": "mv_mqtt_out",
+    "type": "mqtt out",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "name": "Queue ChirpStack downlink",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "ae0178f3742ff530",
+    "x": 1300,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "2d95d3bec4422b97",
+    "type": "debug",
+    "z": "8df55dba201de6b7",
+    "g": "7912d461840ce992",
+    "name": "debug 3",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 400,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "ae0178f3742ff530",
+    "type": "mqtt-broker",
+    "name": "chirpstack_mosquito",
+    "broker": "localhost",
+    "port": 1883,
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": 4,
+    "keepalive": 60,
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "ui-group-telemetry",
+    "type": "ui-group",
+    "z": "8df55dba201de6b7",
+    "name": "Main Valve info",
+    "page": "46258ab1c2ef86c9",
+    "width": "12",
+    "height": "1",
+    "order": 1,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "46258ab1c2ef86c9",
+    "type": "ui-page",
+    "name": "Page 1",
+    "ui": "f53e93e9ba219e63",
+    "path": "/page1",
+    "icon": "home",
+    "layout": "grid",
+    "theme": "e49416861823a329",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Small Desktop",
+        "px": "768",
+        "cols": "9"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": true,
+    "disabled": false
+  },
+  {
+    "id": "f53e93e9ba219e63",
+    "type": "ui-base",
+    "name": "My Dashboard",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": false
+  },
+  {
+    "id": "e49416861823a329",
+    "type": "ui-theme",
+    "name": "MyTheme",
+    "colors": {
+      "surface": "#ffffff",
+      "primary": "#0094ce",
+      "bgPage": "#eeeeee",
+      "groupBg": "#ffffff",
+      "groupOutline": "#cccccc"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "4px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "25e3d54c93b6bf39",
+    "type": "global-config",
+    "env": [],
+    "modules": {
+      "@flowfuse/node-red-dashboard": "1.30.2"
+    }
+  },
+  {
+    "id": "mv_watchdog_inject",
+    "type": "inject",
+    "z": "8df55dba201de6b7",
+    "name": "Check command timeout",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 300,
+    "wires": [
+      [
+        "mv_watchdog"
+      ]
+    ]
+  },
+  {
+    "id": "mv_watchdog",
+    "type": "function",
+    "z": "8df55dba201de6b7",
+    "name": "Show missing final result",
+    "func": "const p = flow.get('mv_pending');\nconst s = flow.get('mv_state') || {};\nif (p && !s.pending_expired && Date.now() - Date.parse(p.queued_at) >= 300000) {\n  s.pending_expired = true;\n  s.queue_paused = true;\n  s.command_state = 'Outcome unknown; inspect valve before unlocking';\n}\ns.queue = (flow.get('mv_queue') || []).slice();\ns.active_command = p || null;\nflow.set('mv_state',s);\nmsg.payload = {kind:'state',state:s};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 455,
+    "y": 300,
+    "wires": [
+      [
+        "mv_ui"
+      ]
+    ]
+  }
+]

@@ -121,6 +121,11 @@ constexpr uint8_t STATUS_FPORT = 31;
 constexpr uint32_t STATUS_INTERVAL_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t SENSOR_INTERVAL_MS = 1000;
 constexpr uint32_t ACTUATOR_STATUS_INTERVAL_MS = 2000;
+// Commissioning value: verify against measured full-travel time before field use.
+constexpr uint32_t MOVEMENT_TIMEOUT_MS = 180000;
+constexpr float MOVEMENT_START_DELTA_DEGREES = 0.5f;
+constexpr float TARGET_TOLERANCE_DEGREES = 1.0f;
+constexpr uint8_t TARGET_STABLE_POLLS = 2;
 constexpr uint32_t CLASS_C_ACTIVATION_RETRY_MS = 3000;
 
 constexpr char NVS_NAMESPACE[] = "main_valve";
@@ -149,7 +154,36 @@ enum StatusReason : uint8_t {
   REASON_INVALID_COMMAND = 4,
   REASON_MODBUS_ERROR = 5,
   REASON_PRESSURE_INTERLOCK = 6,
-  REASON_PRESSURE_SENSOR_ERROR = 7
+  REASON_PRESSURE_SENSOR_ERROR = 7,
+  REASON_ACTUATOR_BUSY = 8,
+  REASON_MOVEMENT_TIMEOUT = 9,
+  REASON_ACTUATOR_FAULT = 10,
+  REASON_LOCAL_OVERRIDE = 11
+};
+
+enum CommandPhase : uint8_t {
+  PHASE_NONE = 0,
+  PHASE_ACCEPTED = 1,
+  PHASE_MOVING = 2,
+  PHASE_FINISHED = 3,
+  PHASE_REJECTED = 4,
+  PHASE_FAILED = 5
+};
+
+struct StatusEvent {
+  uint16_t commandId;
+  CommandPhase phase;
+  uint8_t reason;
+};
+
+struct MovementTracking {
+  bool active;
+  bool movingSeen;
+  uint16_t commandId;
+  float startDegrees;
+  float targetDegrees;
+  uint32_t acceptedAtMs;
+  uint8_t stablePolls;
 };
 
 struct ActuatorStatus {
@@ -182,6 +216,28 @@ uint32_t lastModbusTransactionMs = 0;
 uint32_t lastPressureMs = 0;
 uint32_t lastActuatorStatusMs = 0;
 uint32_t lastStatusUplinkMs = 0;
+MovementTracking movement = {};
+constexpr uint8_t STATUS_EVENT_CAPACITY = 16;
+StatusEvent statusEvents[STATUS_EVENT_CAPACITY] = {};
+uint8_t statusEventHead = 0;
+uint8_t statusEventCount = 0;
+uint16_t lastReportedCommandId = 0xFFFF;
+CommandPhase lastCommandPhase = PHASE_NONE;
+
+void queueStatusEvent(uint16_t commandId, CommandPhase phase, uint8_t reason) {
+  lastReportedCommandId = commandId;
+  lastCommandPhase = phase;
+  if (statusEventCount == STATUS_EVENT_CAPACITY) {
+    // Preserve the newest result if the network has been unavailable.
+    statusEventHead = (statusEventHead + 1) % STATUS_EVENT_CAPACITY;
+    --statusEventCount;
+    Serial.println("Status event queue full; oldest event dropped.");
+  }
+  const uint8_t tail = (statusEventHead + statusEventCount) % STATUS_EVENT_CAPACITY;
+  statusEvents[tail] = {commandId, phase, reason};
+  ++statusEventCount;
+  statusPending = true;
+}
 
 uint16_t modbusCrc(const uint8_t *data, size_t length) {
   uint16_t crc = 0xFFFF;
@@ -503,9 +559,49 @@ bool setValveAngle(float degrees, bool remoteCommand) {
   const float commandedPercent = rawPositionToPercent(raw);
   Serial.printf("Target set: %.1f degrees (%.1f%%, raw=%u).\n",
                 percentToDegrees(commandedPercent), commandedPercent, raw);
+  if (!remoteCommand && movement.active) {
+    const uint16_t interruptedId = movement.commandId;
+    movement.active = false;
+    queueStatusEvent(interruptedId, PHASE_FAILED, REASON_LOCAL_OVERRIDE);
+  }
   statusReason = remoteCommand ? REASON_REMOTE_COMMAND : REASON_LOCAL_COMMAND;
   statusPending = true;
   return true;
+}
+
+void trackMovement() {
+  if (!movement.active) return;
+  const uint32_t now = millis();
+  if (actuator.communicationValid) {
+    if (actuator.faultCode != 0) {
+      movement.active = false;
+      statusReason = REASON_ACTUATOR_FAULT;
+      queueStatusEvent(movement.commandId, PHASE_FAILED, statusReason);
+      return;
+    }
+    if (!movement.movingSeen &&
+        fabsf(actuator.actualDegrees - movement.startDegrees) >=
+          MOVEMENT_START_DELTA_DEGREES) {
+      movement.movingSeen = true;
+      queueStatusEvent(movement.commandId, PHASE_MOVING, REASON_REMOTE_COMMAND);
+    }
+    if (fabsf(actuator.actualDegrees - movement.targetDegrees) <=
+        TARGET_TOLERANCE_DEGREES) {
+      if (movement.stablePolls < TARGET_STABLE_POLLS) ++movement.stablePolls;
+      if (movement.stablePolls >= TARGET_STABLE_POLLS) {
+        movement.active = false;
+        queueStatusEvent(movement.commandId, PHASE_FINISHED, REASON_REMOTE_COMMAND);
+        return;
+      }
+    } else {
+      movement.stablePolls = 0;
+    }
+  }
+  if (now - movement.acceptedAtMs >= MOVEMENT_TIMEOUT_MS) {
+    movement.active = false;
+    statusReason = REASON_MOVEMENT_TIMEOUT;
+    queueStatusEvent(movement.commandId, PHASE_FAILED, statusReason);
+  }
 }
 
 uint16_t scaledOrFFFF(float value, float multiplier) {
@@ -515,7 +611,7 @@ uint16_t scaledOrFFFF(float value, float multiplier) {
     static_cast<int32_t>(lroundf(scaled)), 0L, 65534L));
 }
 
-void buildStatusPayload(uint8_t payload[15]) {
+void buildStatusPayload(uint8_t payload[18], const StatusEvent *event) {
   const uint16_t actualAngle10 = actuator.communicationValid
     ? scaledOrFFFF(actuator.actualDegrees, 10.0f) : 0xFFFF;
   const uint16_t targetAngle10 = actuator.communicationValid
@@ -533,9 +629,9 @@ void buildStatusPayload(uint8_t payload[15]) {
   if (lorawanActive) flags |= 0x20;
   if (classCActive) flags |= 0x40;
 
-  payload[0] = 1;
+  payload[0] = 2;
   payload[1] = flags;
-  payload[2] = statusReason;
+  payload[2] = event ? event->reason : statusReason;
   payload[3] = static_cast<uint8_t>(actualAngle10 >> 8);
   payload[4] = static_cast<uint8_t>(actualAngle10);
   payload[5] = static_cast<uint8_t>(targetAngle10 >> 8);
@@ -550,6 +646,10 @@ void buildStatusPayload(uint8_t payload[15]) {
     ? static_cast<uint8_t>(actuator.mode) : 0xFF;
   payload[14] = static_cast<uint8_t>(
     constrain(lroundf(pressure.temperatureC + 40.0f), 0L, 255L));
+  const uint16_t reportedId = event ? event->commandId : lastReportedCommandId;
+  payload[15] = static_cast<uint8_t>(reportedId >> 8);
+  payload[16] = static_cast<uint8_t>(reportedId);
+  payload[17] = event ? event->phase : lastCommandPhase;
 }
 
 void saveSessionToRtc() {
@@ -587,7 +687,7 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
     Serial.printf("Invalid downlink: FPort=%u length=%u.\n",
                   fPort, static_cast<unsigned>(length));
     statusReason = REASON_INVALID_COMMAND;
-    statusPending = true;
+    queueStatusEvent(0xFFFF, PHASE_REJECTED, statusReason);
     return false;
   }
   const uint16_t angle10 =
@@ -596,20 +696,26 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
     (static_cast<uint16_t>(data[4]) << 8) | data[5];
   if (angle10 > static_cast<uint16_t>(VALVE_TRAVEL_DEGREES * 10.0f)) {
     statusReason = REASON_INVALID_COMMAND;
-    statusPending = true;
+    queueStatusEvent(commandId, PHASE_REJECTED, statusReason);
     return false;
   }
   if (commandId == rtcLastCommandId) {
     if (angle10 == rtcLastTargetAngle10) {
       Serial.printf("Duplicate remote command %u ignored safely.\n", commandId);
       statusReason = REASON_DUPLICATE_COMMAND;
-      statusPending = true;
+      queueStatusEvent(commandId, PHASE_ACCEPTED, statusReason);
       return true;
     }
     Serial.printf("Rejected reused command ID %u with a different angle.\n",
                   commandId);
     statusReason = REASON_INVALID_COMMAND;
-    statusPending = true;
+    queueStatusEvent(commandId, PHASE_REJECTED, statusReason);
+    return false;
+  }
+
+  if (movement.active) {
+    statusReason = REASON_ACTUATOR_BUSY;
+    queueStatusEvent(commandId, PHASE_REJECTED, statusReason);
     return false;
   }
 
@@ -617,8 +723,13 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
   if (applied) {
     rtcLastCommandId = commandId;
     rtcLastTargetAngle10 = angle10;
+    movement = {true, false, commandId,
+                actuator.communicationValid ? actuator.actualDegrees : NAN,
+                angle10 / 10.0f, millis(), 0};
+    queueStatusEvent(commandId, PHASE_ACCEPTED, REASON_REMOTE_COMMAND);
+  } else {
+    queueStatusEvent(commandId, PHASE_REJECTED, statusReason);
   }
-  statusPending = true;
   return applied;
 }
 
@@ -626,8 +737,9 @@ bool sendStatusUplink(bool confirmed) {
   if (!lorawanActive) return false;
   readPressure();
   readActuatorStatus();
-  uint8_t uplink[15] = {};
-  buildStatusPayload(uplink);
+  const StatusEvent *event = statusEventCount ? &statusEvents[statusEventHead] : nullptr;
+  uint8_t uplink[18] = {};
+  buildStatusPayload(uplink, event);
   uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
   size_t downlinkLength = 0;
   LoRaWANEvent_t downlinkEvent = {};
@@ -638,12 +750,16 @@ bool sendStatusUplink(bool confirmed) {
     nullptr, &downlinkEvent);
   saveSessionToRtc();
   lastStatusUplinkMs = millis();
-  statusPending = false;
 
   if (state < RADIOLIB_ERR_NONE) {
     Serial.printf("LoRaWAN status uplink failed: %d\n", state);
     return false;
   }
+  if (event) {
+    statusEventHead = (statusEventHead + 1) % STATUS_EVENT_CAPACITY;
+    --statusEventCount;
+  }
+  statusPending = statusEventCount > 0;
   Serial.println("LoRaWAN status uplink sent.");
   if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
     processRemoteCommand(downlink, downlinkLength, downlinkEvent.fPort);
@@ -846,6 +962,7 @@ void loop() {
   if (now - lastActuatorStatusMs >= ACTUATOR_STATUS_INTERVAL_MS) {
     lastActuatorStatusMs = now;
     readActuatorStatus();
+    trackMovement();
   }
 
   if (classCActive) {
