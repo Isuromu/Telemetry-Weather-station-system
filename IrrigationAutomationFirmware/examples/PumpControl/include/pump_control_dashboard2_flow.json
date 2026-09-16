@@ -1,0 +1,289 @@
+[
+  {
+    "id": "pump_dashboard_tab_v1",
+    "type": "tab",
+    "label": "Pump Control Dashboard",
+    "disabled": false,
+    "info": "Pump Control FPort 50/51 dashboard"
+  },
+  {
+    "id": "pump_mqtt_in_v1",
+    "type": "mqtt in",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Pump ChirpStack uplinks",
+    "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/025fcb86b98f2c48/event/up",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "ae0178f3742ff530",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 180,
+    "y": 120,
+    "wires": [
+      [
+        "pump_ingest_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_ingest_v1",
+    "type": "function",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Decode Pump status",
+    "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"025fcb86b98f2c48\";\nconst parts = String(msg.topic || \"\").split(\"/\");\nif (parts.length !== 6 || parts[0] !== \"application\" || parts[1] !== app ||\n    parts[2] !== \"device\" || parts[3].toLowerCase() !== eui ||\n    parts[4] !== \"event\" || parts[5] !== \"up\") return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (error) {\n  node.warn(\"Invalid ChirpStack event JSON: \" + error.message);\n  return null;\n}\nif (!event || event.fPort !== 51) return null;\nlet d = event.object;\nif (!d || typeof d !== \"object\" || d.command_result === undefined) {\n  let b;\n  try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { return null; }\n  if (b.length !== 17 || b[0] !== 1) {\n    node.warn(\"Pump status requires protocol v1, FPort 51, 17 bytes\");\n    return null;\n  }\n  const u16 = i => (b[i] << 8) | b[i + 1];\n  const results = [\"none\", \"accepted\", \"failed\", \"duplicate\", \"invalid\", \"storage_error\"];\n  const states = [\"unknown\", \"forward\", \"reverse\", \"stopped\"];\n  d = {\n    communication_ok: !!(b[1] & 1),\n    configuration_valid: !!(b[1] & 2),\n    running: !!(b[1] & 4),\n    frequency_armed: !!(b[1] & 8),\n    lorawan_active: !!(b[1] & 16),\n    class_c_active: !!(b[1] & 32),\n    command_result: results[b[2]] || \"unknown\",\n    last_command_id: u16(3) === 65535 ? null : u16(3),\n    commanded_frequency_hz: u16(5) / 100,\n    actual_frequency_hz: u16(7) / 100,\n    motor_current_a: u16(9) / 100,\n    vfd_fault_code: u16(11),\n    output_voltage_v: u16(13) / 10,\n    run_state: states[b[15]] || \"unknown\",\n    communication_error_code: b[16]\n  };\n}\nconst now = Date.now();\nconst s = flow.get(\"pump_state\") || {};\nObject.assign(s, d);\ns.last_seen = event.time || new Date(now).toISOString();\ns.last_seen_ms = now;\ns.stale = false;\ns.f_port = event.fPort;\nconst rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\nif (rx.length) {\n  const best = rx.reduce((a, b) => Number(b.snr) > Number(a.snr) ? b : a);\n  s.rssi = best.rssi;\n  s.snr = best.snr;\n}\nconst reportedId = d.last_command_id == null ? NaN : Number(d.last_command_id);\nconst next = flow.get(\"pump_next_id\");\nif (Number.isInteger(reportedId) && reportedId >= 0 && reportedId <= 65534) {\n  const expected = (reportedId + 1) % 65535;\n  if (!Number.isInteger(next) || next < 0 || next > 65534 ||\n      (next !== expected && ((expected - next + 65535) % 65535) < 32767)) {\n    flow.set(\"pump_next_id\", expected);\n  }\n} else if (!Number.isInteger(next)) {\n  flow.set(\"pump_next_id\", 0);\n}\nconst pending = flow.get(\"pump_pending\");\nif (pending && Number.isInteger(reportedId) && reportedId === pending.id) {\n  s.command_state = d.command_result;\n  s.last_command = pending;\n  flow.set(\"pump_pending\", null);\n}\ns.pending = flow.get(\"pump_pending\") || null;\nflow.set(\"pump_state\", s);\nmsg.payload = {kind: \"state\", state: s};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 120,
+    "wires": [
+      [
+        "pump_ui_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_tick_v1",
+    "type": "inject",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Refresh status and timeout",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "15",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 260,
+    "wires": [
+      [
+        "pump_watchdog_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_watchdog_v1",
+    "type": "function",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Check stale status",
+    "func": "const s = flow.get(\"pump_state\") || {};\nconst now = Date.now();\ns.stale = !s.last_seen_ms || now - s.last_seen_ms > 150000;\nconst pending = flow.get(\"pump_pending\");\nif (pending && now - pending.queued_at_ms > 150000) {\n  s.command_state = \"no device confirmation\";\n  s.last_command = pending;\n  s.pending = null;\n  flow.set(\"pump_pending\", null);\n} else {\n  s.pending = pending || null;\n}\nflow.set(\"pump_state\", s);\nmsg.payload = {kind: \"state\", state: s};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 260,
+    "wires": [
+      [
+        "pump_ui_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_ui_v1",
+    "type": "ui-template",
+    "z": "pump_dashboard_tab_v1",
+    "group": "pump_ui_group_v1",
+    "name": "Pump controls and status",
+    "order": 1,
+    "width": "12",
+    "height": "11",
+    "head": "",
+    "format": "<template>\n<div class=\"pump\">\n  <div class=\"pump-head\">\n    <div><strong>Pump Control</strong><small>Grandfar pump / DELIXI VFD</small></div>\n    <span class=\"pump-pill\" :class=\"state.stale ? 'stale' : state.running ? 'running' : 'stopped'\">{{ state.stale ? 'No recent status' : state.run_state === 'unknown' ? 'Unknown' : state.running ? 'Running' : 'Stopped' }}</span>\n  </div>\n  <div class=\"pump-grid\">\n    <div><small>Actual frequency</small><b>{{ show(state.actual_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Commanded frequency</small><b>{{ show(state.commanded_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Motor current</small><b>{{ show(state.motor_current_a, ' A') }}</b></div>\n    <div><small>VFD communication</small><b>{{ state.stale ? 'Unknown' : state.communication_ok ? 'OK' : 'Error' }}</b></div>\n    <div><small>VFD fault</small><b>{{ show(state.vfd_fault_code) }}</b></div>\n    <div><small>LoRaWAN</small><b>{{ state.stale ? 'Unknown' : state.class_c_active ? 'Class C' : state.lorawan_active ? 'Class A' : 'Unknown' }}</b></div>\n  </div>\n  <div class=\"pump-alert\" v-if=\"!state.stale && (state.vfd_fault_code || state.communication_ok === false)\">VFD fault or communication problem. Check the pump before starting.</div>\n  <div class=\"pump-controls\">\n    <h3>Controls</h3>\n    <div class=\"pump-frequency\"><v-text-field v-model.number=\"frequency\" type=\"number\" min=\"10\" max=\"50\" step=\"0.1\" label=\"Frequency (Hz)\" density=\"compact\" hide-details></v-text-field><v-btn color=\"primary\" @click=\"issue('set_frequency')\">Set frequency</v-btn></div>\n    <div class=\"pump-buttons\"><v-btn color=\"success\" @click=\"issue('start')\">Start</v-btn><v-btn color=\"error\" @click=\"issue('stop')\">Stop</v-btn></div>\n    <small>Start requires a valid VFD configuration and an explicit frequency command after boot.</small>\n  </div>\n  <div class=\"pump-feedback\">\n    <h3>Command feedback</h3>\n    <div v-if=\"state.pending\">ID {{ state.pending.id }} · {{ label(state.pending.command) }} · Queued {{ state.pending.queued_at }}</div>\n    <div v-else-if=\"state.last_command\">ID {{ state.last_command.id }} · {{ label(state.last_command.command) }} · {{ state.command_state || 'Unknown' }}</div>\n    <div v-else>No command sent from this dashboard.</div>\n    <small>Queued means sent to ChirpStack. Device status confirms the result.</small>\n  </div>\n  <div class=\"pump-footer\"><span>Last uplink: {{ state.last_seen || 'waiting' }}</span><span>Configuration: {{ state.stale ? 'unknown' : state.configuration_valid ? 'valid' : 'blocked' }} · Frequency armed: {{ state.stale ? 'unknown' : state.frequency_armed ? 'yes' : 'no' }}</span><span>Signal: {{ show(state.rssi, ' dBm') }} / {{ show(state.snr, ' dB') }}</span></div>\n  <div class=\"pump-alert\" v-if=\"state.ui_error\">{{ state.ui_error }}</div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{stale:true}, frequency:25} },\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix },\n    label(v) { return ({set_frequency:'Set frequency',start:'Start',stop:'Stop'})[v] || v },\n    issue(command) {\n      if (command === 'start' && !window.confirm('Start the pump?')) return;\n      this.send({payload:{kind:'command',command:command,frequency_hz:command === 'set_frequency' ? Number(this.frequency) : undefined}});\n    }\n  }\n}\n</script>\n<style>\n.pump{padding:8px}.pump-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:1.15rem}.pump-head small{display:block;color:#667;font-size:.8rem}.pump-pill{padding:6px 12px;border-radius:20px;background:#e5e7eb;font-size:.85rem}.pump-pill.running{background:#dcfce7;color:#166534}.pump-pill.stopped{background:#e6f0f5;color:#244b61}.pump-pill.stale{background:#fef3c7;color:#92400e}.pump-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:16px 0}.pump-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}.pump-grid small{display:block;color:#566}.pump-grid b{font-size:1.3rem}.pump-controls,.pump-feedback,.pump-footer{border-top:1px solid #ccd7df;padding-top:12px;margin-top:12px}.pump-controls h3,.pump-feedback h3{margin:0 0 10px}.pump-frequency{display:flex;align-items:center;gap:10px;max-width:440px}.pump-frequency .v-input{flex:1}.pump-buttons{display:flex;gap:8px;margin:12px 0}.pump-controls small,.pump-feedback small,.pump-footer{color:#566;font-size:.82rem}.pump-footer{display:flex;flex-wrap:wrap;gap:8px 20px}.pump-alert{background:#b3261e;color:white;border-radius:5px;padding:8px;margin:8px 0}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 700,
+    "y": 180,
+    "wires": [
+      [
+        "pump_command_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_command_v1",
+    "type": "function",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Send Pump command",
+    "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"025fcb86b98f2c48\";\nconst action = msg.payload || {};\nif (action.kind !== \"command\") return null;\nconst s = flow.get(\"pump_state\") || {};\nfunction reply(error) {\n  s.ui_error = error;\n  flow.set(\"pump_state\", s);\n  return [null, {payload: {kind: \"state\", state: s}}];\n}\nconst operations = {stop: 1, estop: 2, set_frequency: 3, start: 4};\nconst op = operations[action.command];\nif (!op) return reply(\"Unknown pump command.\");\nlet arg = 0;\nif (op === 3) {\n  const hz = Number(action.frequency_hz);\n  if (!Number.isFinite(hz) || hz < 10 || hz > 50)\n    return reply(\"Frequency must be 10 to 50 Hz.\");\n  arg = Math.round(hz * 100);\n}\nconst pending = flow.get(\"pump_pending\");\nif (pending && op !== 1) return reply(\"Wait for the current command result. Stop remains available.\");\nif (!s.last_seen_ms) return reply(\"Wait for a Pump status uplink before sending commands.\");\nif (op !== 1 && Date.now() - s.last_seen_ms > 150000)\n  return reply(\"Pump status is stale. Wait for a new uplink.\");\nconst id = flow.get(\"pump_next_id\");\nif (!Number.isInteger(id) || id < 0 || id > 65534)\n  return reply(\"Wait for a status uplink to synchronize command IDs.\");\nflow.set(\"pump_next_id\", (id + 1) % 65535);\nconst bytes = Buffer.from([1, op, id >> 8, id & 255, arg >> 8, arg & 255]);\nconst current = {id, command: action.command, frequency_hz: op === 3 ? arg / 100 : null,\n  queued_at: new Date().toISOString(), queued_at_ms: Date.now()};\nflow.set(\"pump_pending\", current);\ns.pending = current;\ns.last_command = current;\ns.command_state = \"queued\";\ns.ui_error = pending && op === 1\n  ? \"Stop queued. A previous downlink may still be waiting in ChirpStack.\"\n  : \"\";\nflow.set(\"pump_state\", s);\nreturn [{\n  topic: \"application/\" + app + \"/device/\" + eui + \"/command/down\",\n  payload: JSON.stringify({devEui: eui, confirmed: false, fPort: 50,\n    data: bytes.toString(\"base64\")}),\n  qos: \"0\",\n  retain: false\n}, {payload: {kind: \"state\", state: s}}];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 940,
+    "y": 180,
+    "wires": [
+      [
+        "pump_mqtt_out_v1"
+      ],
+      [
+        "pump_ui_v1"
+      ]
+    ]
+  },
+  {
+    "id": "pump_mqtt_out_v1",
+    "type": "mqtt out",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Queue Pump downlink",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "ae0178f3742ff530",
+    "x": 1180,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "ae0178f3742ff530",
+    "type": "mqtt-broker",
+    "name": "chirpstack_mosquito",
+    "broker": "localhost",
+    "port": 1883,
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": 4,
+    "keepalive": 60,
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "pump_ui_group_v1",
+    "type": "ui-group",
+    "z": "pump_dashboard_tab_v1",
+    "name": "Water Pump",
+    "page": "46258ab1c2ef86c9",
+    "width": "12",
+    "height": "1",
+    "order": 2,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "46258ab1c2ef86c9",
+    "type": "ui-page",
+    "name": "Pump and Main Valve",
+    "ui": "f53e93e9ba219e63",
+    "path": "/page1",
+    "icon": "home",
+    "layout": "grid",
+    "theme": "e49416861823a329",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Small Desktop",
+        "px": "768",
+        "cols": "9"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 1,
+    "className": "",
+    "visible": true,
+    "disabled": false
+  },
+  {
+    "id": "f53e93e9ba219e63",
+    "type": "ui-base",
+    "name": "My Dashboard",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "default",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": false
+  },
+  {
+    "id": "e49416861823a329",
+    "type": "ui-theme",
+    "name": "MyTheme",
+    "colors": {
+      "surface": "#ffffff",
+      "primary": "#0094ce",
+      "bgPage": "#eeeeee",
+      "groupBg": "#ffffff",
+      "groupOutline": "#cccccc"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "4px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "pump_dashboard_modules_v1",
+    "type": "global-config",
+    "env": [],
+    "modules": {
+      "@flowfuse/node-red-dashboard": "1.30.2"
+    }
+  }
+]
