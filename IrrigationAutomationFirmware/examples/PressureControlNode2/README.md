@@ -106,3 +106,24 @@ ESP32 deep-sleeps before retrying.
 For the Class A firmware, use `tools/chirpstack/pcv_low_power_class_a_codec.js`
 and JSON such as `{"pcv":"open","command_id":2001}` only after actuation is
 unlocked. The target sends the shared 32-byte protocol-v2 FPort-31 status.
+
+## Node-RED dashboard
+
+`include/pressure_node2_dashboard2_flow.json` is the Dashboard 2.0 flow for this
+node. It subscribes to `.../event/+`, decodes the FPort 31 status object, and
+shows the last uplink, the last downlink and the node state next to the pressure
+chart and gauges. Commands go to `.../command/down` with the codec's `object`
+input, the same path as the manual JSON above.
+
+Sleep intervals are set in **seconds**, over the same 10..86400 s range as
+`lorawan::MIN_REPORT_INTERVAL_SECONDS` and
+`lorawan::MAX_REPORT_INTERVAL_SECONDS` in `include/PressureNode2Config.h`.
+`{"sleep_seconds":12}` sets the interval alone; `{"pcv":"open","sleep_seconds":60}`
+changes the valve and the interval in one command. The dashboard allocates a
+fresh `command_id` for every command, because the node ignores an id it has
+already accepted.
+
+valve_2 is Class A, so a command waits in ChirpStack until the node's next uplink
+and is applied in the receive window that follows it. The `Simulate FPort 31
+uplink` inject node replays the 2026-09-16 status log, so the dashboard can be
+driven without a device.
