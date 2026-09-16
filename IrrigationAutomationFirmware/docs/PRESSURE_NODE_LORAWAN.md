@@ -7,11 +7,23 @@
 | `pcv_serial_only` | Serial | disabled | none | awake |
 | `pcv_hybrid_class_c` | Serial + Gateway | Class C | telemetry/report interval | awake; SX1262 continuously receiving |
 | `pcv_low_power_class_a` | Gateway; Serial output only | Class A | real deep-sleep time | timer deep sleep |
+| `pcv_low_power_class_a_without_flowmeter` | Gateway; Serial output only | Class A | real deep-sleep time | timer deep sleep |
 
-All three builds use the same `PressureControlValve`, sensor, battery,
-TUF-2000M and payload-protocol implementations. They differ only in runtime
-policy. A successful latching pulse records `last commanded`; it is not
-physical PCV-position feedback.
+The original three builds use the same `PressureControlValve`, sensor,
+battery, TUF-2000M and payload-protocol implementations; they differ in
+runtime policy. A successful latching pulse records `last commanded`; it is
+not physical PCV-position feedback.
+
+The fourth, no-flow-meter target builds its own
+`examples/PressureControlNode2/src/main.cpp` as a separate valve_2 Class A
+application. It reuses shared drivers and protocol, substitutes
+`UnavailableFlowMeter`, leaves the flow
+RS-485 transport off, and uses valve_2's ignored credentials. It retains the
+old `valve_lora` NVS namespace to preserve OTAA nonces, but uses the separate
+`node_state` key for application state. Missing nonce history blocks joining;
+do not erase NVS during migration. Its default sleep is 60 seconds. Valve
+actuation remains locked in the build until the valve_2 hardware is validated.
+Use the FPort 30/31 Class A codec, not the old valve_2 FPort-10 Class C codec.
 
 ## Serial-only firmware
 

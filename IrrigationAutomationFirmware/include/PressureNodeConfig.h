@@ -10,6 +10,22 @@
 #define PCV_LORAWAN_MIN_INTERVAL_SECONDS 60
 #endif
 
+#ifndef PCV_LORAWAN_NVS_NAMESPACE
+#define PCV_LORAWAN_NVS_NAMESPACE "pcv_node"
+#endif
+
+#ifndef PCV_BATTERY_DIVIDER_LOW_OHM
+#define PCV_BATTERY_DIVIDER_LOW_OHM 20000.0F
+#endif
+
+#ifndef PCV_BATTERY_CALIBRATION
+#define PCV_BATTERY_CALIBRATION 0.9883F
+#endif
+
+#ifndef PCV_NO_FLOW_ACTUATION_ENABLED
+#define PCV_NO_FLOW_ACTUATION_ENABLED 0
+#endif
+
 namespace irrigation::pressure_node::rev_a {
 
 namespace pins {
@@ -42,11 +58,11 @@ inline constexpr int8_t LORA_RX_ENABLE = 33;
 
 namespace battery {
 inline constexpr float DIVIDER_HIGH_OHM = 100000.0F;
-// The measured pair 12.435 V battery / 2.097 V at GPIO35 is consistent with a
-// nominal 100 kOhm / 20 kOhm divider. The calibration corrects the nominal 6x
-// ratio to the measured 5.930x ratio. Recheck after reading the resistor mark.
-inline constexpr float DIVIDER_LOW_OHM = 20000.0F;
-inline constexpr float CALIBRATION = 0.9883F;
+// The default reflects valve_1's measured 100 kOhm / 20 kOhm divider. The
+// no-flow-meter build overrides it with valve_2's imported 22 kOhm assumption;
+// that board still needs a multimeter calibration before voltage is trusted.
+inline constexpr float DIVIDER_LOW_OHM = PCV_BATTERY_DIVIDER_LOW_OHM;
+inline constexpr float CALIBRATION = PCV_BATTERY_CALIBRATION;
 inline constexpr uint8_t SAMPLE_COUNT = 32;
 // With 100 nF at the ADC input and about 16.7 kOhm Thevenin resistance, 10 ms
 // is longer than five RC time constants.
@@ -106,7 +122,7 @@ inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS =
     24UL * 60UL * 60UL;
 inline constexpr uint32_t JOIN_RETRY_INTERVAL_MS = 60UL * 1000UL;
 inline constexpr bool CONFIRMED_UPLINK = false;
-inline constexpr char NVS_NAMESPACE[] = "pcv_node";
+inline constexpr char NVS_NAMESPACE[] = PCV_LORAWAN_NVS_NAMESPACE;
 inline constexpr char NVS_NONCES_KEY[] = "nonces";
 inline constexpr char NVS_STATE_KEY[] = "node_state";
 }  // namespace lorawan

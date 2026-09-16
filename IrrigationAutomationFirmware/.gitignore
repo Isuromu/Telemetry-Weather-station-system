@@ -2,6 +2,7 @@ config/PressureNodeLoRaSecrets.h
 config/WaterLevelLoRaSecrets.h
 config/SoilNodeLoRaSecrets.h
 config/MainValveLoRaSecrets.h
-examples/PressureControlNode2/src/lorawan_keys.h
+config/PumpControlLoRaSecrets.h
+/config/PressureNode2LoRaSecrets.h
 /.vscode/
 /.idea/

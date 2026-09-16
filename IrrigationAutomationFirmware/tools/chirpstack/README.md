@@ -1,7 +1,7 @@
 # ChirpStack codecs for the PCV end node
 
-Select the codec that matches the PlatformIO firmware environment. Both radio
-variants use command FPort 30 and status FPort 31, but the interval has a
+Select the codec that matches the PlatformIO firmware environment. The PCV
+radio variants use command FPort 30 and status FPort 31, but the interval has a
 different meaning.
 
 ## `pcv_hybrid_class_c_codec.js`
@@ -34,8 +34,11 @@ commands remain available at the same time.
 
 ## `pcv_low_power_class_a_codec.js`
 
-Use only with `pcv_low_power_class_a`. The interval is real ESP32 deep-sleep
-time. A queued command is delivered in RX1/RX2 after the next status uplink.
+Use with `pcv_low_power_class_a` and
+`pcv_low_power_class_a_without_flowmeter`. The interval is real ESP32
+deep-sleep time. A queued command is delivered in RX1/RX2 after the next
+status uplink. The no-flow-meter build rejects flow-total reset and keeps
+valve actuation locked until its hardware is validated.
 The current valve_1 commissioning build and codec allow 10-second sleep; this
 temporary lower bound must return to at least 60 seconds before deployment.
 
@@ -101,13 +104,3 @@ downlink changes the persistent Class A sleep interval:
 The equivalent `{"sleep_minutes":10}` form is also accepted. The current
 commissioning range is 10-86400 seconds; choose a field interval that meets the
 energy budget after commissioning.
-
-## `pcv2_klapan_codec.js`
-
-Not a PCV codec. This belongs to the separate `examples/PressureControlNode2`
-bench node (`pio run -e pcv_low_power_class_a_without_flowmeter`), which
-shares no code with the PCV
-targets above. It uses FPort 10 for both directions, a 12-byte versioned
-uplink, and JSON text downlinks such as `{"command":"open"}`. None of the
-shared rules above apply: there is no `command_id`, no interval field, and no
-flow totalizer. See `examples/PressureControlNode2/README.md`.
