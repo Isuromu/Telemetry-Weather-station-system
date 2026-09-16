@@ -18,12 +18,14 @@ bool BatteryMonitor::begin() {
   }
 
   analogReadResolution(12);
-  // The pin must be configured as an analog channel before the per-pin
-  // attenuation is applied: the Arduino-ESP32 core rejects the attenuation
-  // call on a pin that is not yet an ADC channel, silently leaving the ADC
-  // at its default attenuation.
-  pinMode(configuration_.adcPin, ANALOG);
-  analogSetPinAttenuation(configuration_.adcPin, ADC_11db);
+  // Arduino-ESP32 3.x registers an ADC pin inside the first analogRead*(), not
+  // in pinMode(): pinMode(pin, ANALOG) leaves the pin configured as a disabled
+  // GPIO, after which analogSetPinAttenuation() logs "Pin is not configured as
+  // analog channel" and returns without applying anything. Set the attenuation
+  // before the first conversion, because the per-unit calibration handle is
+  // created from the attenuation in force and a later per-pin change does not
+  // rebuild it.
+  analogSetAttenuation(ADC_11db);
   initialized_ = true;
   return true;
 }

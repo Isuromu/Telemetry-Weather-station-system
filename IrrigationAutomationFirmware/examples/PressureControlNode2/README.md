@@ -17,7 +17,10 @@ historical `valve_lora` NVS namespace for OTAA nonce continuity. Its
 application state uses the distinct `node_state` key. A missing prior nonce
 buffer blocks OTAA; do not erase NVS during migration.
 
-The Class A source is selected explicitly in `platformio.ini`.
+The Class A source is selected explicitly in `platformio.ini`. valve_2 has its
+own board description, `include/PressureNode2Config.h`, separate from the
+shared `PressureNodeConfig.h` that valve_1 uses, so its pins and board
+constants can change without affecting the other node.
 
 ## Build and upload
 
@@ -50,6 +53,10 @@ The current default is 60 seconds. It does not accept Serial commands.
 
 Both XDB401 pressure sensors are 0-1 MPa / 0-10 bar. The I2C address is probed
 at `0x7F` first, then `0x6D`.
+
+Every pin in these two tables, plus the battery divider and calibration
+constants, is declared in `include/PressureNode2Config.h`. That file is the
+only place to change them.
 
 ## LoRaWAN
 

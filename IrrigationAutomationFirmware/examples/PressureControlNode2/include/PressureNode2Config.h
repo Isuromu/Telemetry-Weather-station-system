@@ -1,32 +1,30 @@
 #pragma once
 
+// Board description for valve_2, the no-flow-meter Class A node built from
+// examples/PressureControlNode2. It is separate from the shared
+// include/PressureNodeConfig.h (valve_1, namespace `rev_a`) so that valve_2's
+// pins and board constants can diverge freely: change them HERE, and do not
+// expect valve_1 to follow.
+//
+// The section layout deliberately mirrors include/PressureNodeConfig.h so the
+// two files can be compared section by section. Everything that is identical
+// today is identical only because both boards are built from the same
+// prototype design, not because it must stay that way.
+//
+// Build-shape switches stay in platformio.ini because they gate code structure
+// rather than describing hardware: PCV_NO_FLOW_METER,
+// PCV_NO_FLOW_ACTUATION_ENABLED and PRESSURE_NODE_RUNTIME_MODE.
+
 #include <stdint.h>
 
-#ifndef PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS
-#define PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS 10 // 60
-#endif
-
-#ifndef PCV_LORAWAN_MIN_INTERVAL_SECONDS
-#define PCV_LORAWAN_MIN_INTERVAL_SECONDS 10 // 60
-#endif
-
-#ifndef PCV_LORAWAN_NVS_NAMESPACE
-#define PCV_LORAWAN_NVS_NAMESPACE "pcv_node"
-#endif
-
-#ifndef PCV_BATTERY_DIVIDER_LOW_OHM
-#define PCV_BATTERY_DIVIDER_LOW_OHM 20000.0F
-#endif
-
-#ifndef PCV_BATTERY_CALIBRATION
-#define PCV_BATTERY_CALIBRATION 0.9883F
-#endif
-
+// This switch selects what the firmware is allowed to do, not what the board
+// is, so it stays a build flag. Declared here only to fail loudly if a future
+// edit drops it from the build.
 #ifndef PCV_NO_FLOW_ACTUATION_ENABLED
-#define PCV_NO_FLOW_ACTUATION_ENABLED 1 // fixme: 0
+# define PCV_NO_FLOW_ACTUATION_ENABLED 1 // fixme: 0
 #endif
 
-namespace irrigation::pressure_node::rev_a {
+namespace irrigation::pressure_node::valve_2 {
 
 namespace pins {
 inline constexpr int8_t BATTERY_ADC = 35;
@@ -58,11 +56,11 @@ inline constexpr int8_t LORA_RX_ENABLE = 33;
 
 namespace battery {
 inline constexpr float DIVIDER_HIGH_OHM = 100000.0F;
-// The default reflects valve_1's measured 100 kOhm / 20 kOhm divider. The
-// no-flow-meter build overrides it with valve_2's imported 22 kOhm assumption;
-// that board still needs a multimeter calibration before voltage is trusted.
-inline constexpr float DIVIDER_LOW_OHM = PCV_BATTERY_DIVIDER_LOW_OHM;
-inline constexpr float CALIBRATION = PCV_BATTERY_CALIBRATION;
+// Imported valve_2 divider value. The calibration factor is neutral because
+// the divider has not been verified against a multimeter on the assembled
+// board; measure and correct both before the voltage is trusted.
+inline constexpr float DIVIDER_LOW_OHM = 22000.0F;
+inline constexpr float CALIBRATION = 1.0F;
 inline constexpr uint8_t SAMPLE_COUNT = 32;
 // With 100 nF at the ADC input and about 16.7 kOhm Thevenin resistance, 10 ms
 // is longer than five RC time constants.
@@ -70,8 +68,8 @@ inline constexpr uint16_t ADC_SETTLING_TIME_MS = 10;
 }  // namespace battery
 
 namespace pressure_sensor {
-// These values reproduce the current prototype/trainee interpretation. The
-// exact XDB401/S1204 documentation must validate them before production use.
+// These values reproduce the current prototype interpretation. The exact
+// XDB401/S1204 documentation must validate them before production use.
 inline constexpr uint8_t ADDRESS_PRIMARY = 0x7F;
 inline constexpr uint8_t ADDRESS_ALTERNATE = 0x6D;
 inline constexpr uint8_t REG_PRESSURE = 0x06;
@@ -89,7 +87,8 @@ inline constexpr uint16_t READY_POLL_INTERVAL_MS = 5;
 namespace pcv {
 inline constexpr bool POWER_ENABLE_ACTIVE_HIGH = true;
 
-// Bench starting values only. Validate on the installed latching solenoid.
+// Bench starting values only. Validate on the installed latching solenoid of
+// valve_2 before enabling actuation.
 inline constexpr uint16_t POWER_SETTLE_MS = 20;
 inline constexpr uint16_t SOLENOID_PULSE_MS = 250;
 inline constexpr uint16_t POST_PULSE_MS = 20;
@@ -112,40 +111,31 @@ namespace lorawan {
 inline constexpr uint8_t COMMAND_FPORT = 30;
 inline constexpr uint8_t STATUS_FPORT = 31;
 inline constexpr uint8_t SUB_BAND = 0;
-// PlatformIO may lower these only for an explicitly marked commissioning
-// build. The production-safe shared default remains 60 seconds.
-inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS =
-    PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS;
-inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS =
-    PCV_LORAWAN_MIN_INTERVAL_SECONDS;
-inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS =
-    24UL * 60UL * 60UL;
+inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS = 10; // 60;
+inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS = 10; // 60;
+inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS = 24UL * 60UL * 60UL;
 inline constexpr uint32_t JOIN_RETRY_INTERVAL_MS = 60UL * 1000UL;
 inline constexpr bool CONFIRMED_UPLINK = false;
-inline constexpr char NVS_NAMESPACE[] = PCV_LORAWAN_NVS_NAMESPACE;
+// Must remain "valve_lora". That namespace holds the OTAA DevNonce history
+// from valve_2's former Class C firmware; pointing this at a fresh namespace
+// makes the device join with a replayed DevNonce, which this firmware blocks
+// on purpose. The application state uses the separate NVS_STATE_KEY.
+inline constexpr char NVS_NAMESPACE[] = "valve_lora";
 inline constexpr char NVS_NONCES_KEY[] = "nonces";
 inline constexpr char NVS_STATE_KEY[] = "node_state";
 }  // namespace lorawan
 
+// This build does not fit a flow meter and never starts the RS-485 transport,
+// so nothing here is instantiated while PCV_NO_FLOW_METER is 1. The section is
+// kept so that the shared flow code path still compiles if a meter is ever
+// added to valve_2.
 namespace flow_meter {
-// Confirmed by the TUF-2000M technical manual: Modbus RTU function 03,
-// factory serial framing 9600 8N1, REG0001-0002 flow rate in m3/h, and
-// REG0005-0006 velocity in m/s. M63 must be set to MODBUS_RTU.
 inline constexpr bool REGISTER_MAP_CONFIRMED = true;
 inline constexpr uint32_t BAUD = 9600;
 inline constexpr uint16_t RESPONSE_TIMEOUT_MS = 300;
-
-// Confirmed on the commissioned TUF-2000M front panel (M46).
 inline constexpr uint8_t SLAVE_ADDRESS = 1;
-
-// Hardware-verified on the commissioned meter: REG0221..REG0222 returned
-// 00 00 42 64, which decodes to the configured 57.0 mm inner diameter only
-// when the two 16-bit Modbus words are swapped before IEEE-754 decoding.
 inline constexpr bool FLOAT_WORD_ORDER_VALIDATED = true;
 inline constexpr bool LOW_WORD_FIRST = true;
-
-// GPIO16/17 are reserved for the auto-direction RS-485 converter. Normal
-// on-demand flow reads and the explicit diagnostic probe use this transport.
 inline constexpr bool CURRENT_RS485_PINS_AVAILABLE = true;
 inline constexpr int8_t UART_RX = pins::RS485_RX;
 inline constexpr int8_t UART_TX = pins::RS485_TX;
@@ -178,4 +168,4 @@ static_assert(lorawan::DEFAULT_REPORT_INTERVAL_SECONDS >=
                   lorawan::DEFAULT_REPORT_INTERVAL_SECONDS <=
                       lorawan::MAX_REPORT_INTERVAL_SECONDS,
               "Default LoRaWAN report interval is out of range.");
-}  // namespace irrigation::pressure_node::rev_a
+}  // namespace irrigation::pressure_node::valve_2

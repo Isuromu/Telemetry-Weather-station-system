@@ -18,7 +18,11 @@ The fourth, no-flow-meter target builds its own
 `examples/PressureControlNode2/src/main.cpp` as a separate valve_2 Class A
 application. It reuses shared drivers and protocol, substitutes
 `UnavailableFlowMeter`, leaves the flow
-RS-485 transport off, and uses valve_2's ignored credentials. It retains the
+RS-485 transport off, and uses valve_2's ignored credentials. Its pins and
+board constants live in
+`examples/PressureControlNode2/include/PressureNode2Config.h`, separate from
+the shared `include/PressureNodeConfig.h` used by the three valve_1 builds, so
+the two boards can diverge. It retains the
 old `valve_lora` NVS namespace to preserve OTAA nonces, but uses the separate
 `node_state` key for application state. Missing nonce history blocks joining;
 do not erase NVS during migration. Its default sleep is 60 seconds. Valve
