@@ -1,0 +1,3 @@
+This directory contains project-local headers for the standalone PlatformIO
+build. Copy MainValveLoRaSecrets.example.h to MainValveLoRaSecrets.h and add
+this device's OTAA credentials when building outside the repository root.

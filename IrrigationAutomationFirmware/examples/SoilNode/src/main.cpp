@@ -11,13 +11,6 @@
 
 #if __has_include("SoilNodeLoRaSecrets.h")
 #include "SoilNodeLoRaSecrets.h"
-#else
-namespace irrigation::soil_node::lorawan_secrets {
-inline constexpr bool CONFIGURED = false;
-inline constexpr uint64_t JOIN_EUI = 0;
-inline constexpr uint64_t DEV_EUI = 0;
-inline uint8_t APP_KEY[16] = {};
-}  // namespace irrigation::soil_node::lorawan_secrets
 #endif
 
 namespace {
