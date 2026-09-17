@@ -83,3 +83,10 @@ even where a node uses a large battery.
 The original ZIP is preserved alongside the extracted package as
 `SOURCE_ARCHIVE.zip`. Extraction and integrity details are recorded in
 `docs/codex_handoff/README.md`.
+
+For the Dashboard 2.0 `ui-template` in `examples/IntegratedDashboard`, do not
+name a Vue method `value`: Dashboard 2.0 already binds `value` in the widget
+render context, which shadows the method and causes a blank widget with
+`TypeError: value is not a function`. Use a distinct name such as `cardValue`.
+Parsing the script is insufficient to validate the widget; check the rendered
+Dashboard 2.0 page and browser console when changing its template.

@@ -1,0 +1,339 @@
+[
+    {
+        "id": "1b1d04fc6fb44f23",
+        "type": "group",
+        "z": "irrigation_single_page",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#767676"
+        },
+        "nodes": [
+            "ed48d40fb9c8be88",
+            "10d69a13e0ef3b67",
+            "ead0b4a53b77061f",
+            "4324bdb0175043d6",
+            "925c386701c02469",
+            "bc05f535c327903f",
+            "991a3e761899197d",
+            "f4548b0846299105"
+        ],
+        "x": 54,
+        "y": 99,
+        "w": 1052,
+        "h": 242
+    },
+    {
+        "id": "ed48d40fb9c8be88",
+        "type": "inject",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "Refresh safety and settings",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "0.5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 220,
+        "y": 140,
+        "wires": [
+            [
+                "10d69a13e0ef3b67",
+                "ead0b4a53b77061f"
+            ]
+        ]
+    },
+    {
+        "id": "10d69a13e0ef3b67",
+        "type": "function",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "Irrigation settings — edit limits here",
+        "func": "// Edit all site thresholds, limits and timeouts here (seconds unless noted).\nconst settings = {\n  startLevelCm: 20, stopLevelCm: 19,\n  startMoisturePercent: 70, stopMoisturePercent: 90,\n  mainOpenMinDeg: 45, mainOpenMaxDeg: 90, mainOpenTargetDeg: 90,\n  mainClosedMaxDeg: 5,\n  pumpFrequencyHz: 25, pumpMinFrequencyHz: 10, pumpMaxFrequencyHz: 50,\n  pumpFrequencyToleranceHz: 0.2,\n  waterMaxAgeSec: 1200, soilMaxAgeSec: 1200,\n  mainMaxAgeSec: 150, pumpMaxAgeSec: 150,\n  valve1MaxAgeSec: 1200, valve2MaxAgeSec: 180,\n  mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 2100,\n  pumpCommandTimeoutSec: 150, pumpStopTimeoutSec: 150,\n  maxWateringSec: 14400\n};\nflow.set('irrigation_settings', settings);\nmsg.payload = {kind:'tick'};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 140,
+        "wires": [
+            [
+                "bc05f535c327903f"
+            ]
+        ]
+    },
+    {
+        "id": "ead0b4a53b77061f",
+        "type": "function",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "Subscribe to configured ChirpStack application",
+        "func": "// Subscribe only to the configured ChirpStack application.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app)) {\n  node.status({fill:'red',shape:'ring',text:'IRRIGATION_APP_ID missing'});\n  return null;\n}\nconst topic = `application/${app}/device/+/event/up`;\nif (context.get('topic') === topic) return null;\ncontext.set('topic', topic);\nnode.status({fill:'green',shape:'dot',text:topic});\nreturn {action:'subscribe',topic,qos:0};",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 180,
+        "wires": [
+            [
+                "4324bdb0175043d6"
+            ]
+        ]
+    },
+    {
+        "id": "4324bdb0175043d6",
+        "type": "mqtt in",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "All six ChirpStack uplinks",
+        "topic": "",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "ae0178f3742ff530",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 1,
+        "x": 210,
+        "y": 220,
+        "wires": [
+            [
+                "bc05f535c327903f"
+            ]
+        ]
+    },
+    {
+        "id": "925c386701c02469",
+        "type": "status",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "MQTT connection",
+        "scope": [
+            "4324bdb0175043d6",
+            "991a3e761899197d"
+        ],
+        "x": 190,
+        "y": 300,
+        "wires": [
+            [
+                "bc05f535c327903f"
+            ]
+        ]
+    },
+    {
+        "id": "bc05f535c327903f",
+        "type": "function",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "Safety checks and irrigation sequence",
+        "func": "// Single owner of irrigation sequencing and safety decisions.\nconst cfg = flow.get('irrigation_settings');\nif (!cfg) { node.status({fill:'red',shape:'ring',text:'settings missing'}); return null; }\nconst keys = ['water','soil','main','valve1','valve2','pump'];\nconst app = String(env.get('IRRIGATION_APP_ID')||'').toLowerCase();\nconst ids = {};\nfor (const k of keys) {\n  ids[k] = {eui:String(env.get(k.toUpperCase()+'_DEV_EUI')||'').toLowerCase()};\n}\nconst configured = /^[a-f0-9-]{36}$/.test(app) &&\n  keys.every(k => /^[a-f0-9]{16}$/.test(ids[k].eui));\nlet s = flow.get('irrigation') || {phase:'idle',devices:{},selected:[],step:0,notice:'Waiting for telemetry',pending:null};\nconst now = Date.now();\nconst downlinks = [];\nconst emit = (k,port,body) => downlinks.push({topic:`application/${app}/device/${ids[k].eui}/command/down`,payload:JSON.stringify({devEui:ids[k].eui,confirmed:false,fPort:port,...body}),qos:'0',retain:false});\nconst device = k => s.devices[k] || {};\nconst fresh = (k,age) => !!device(k).at && now-device(k).at <= age*1000;\nconst num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;\nconst nextId = k => {let n=flow.get('irrigation_id_'+k); if (!Number.isInteger(n)||n<0||n>65534) {const last=num(device(k).last_command_id);n=last===null?1:(last+1)%65535;} flow.set('irrigation_id_'+k,(n+1)%65535);return n;};\nfunction command(k,op) {\n  const id=nextId(k); s.pending={device:k,op,id,at:now};\n  if (k==='main') {const angle=op==='open'?cfg.mainOpenTargetDeg:0, a=Math.round(angle*10);emit(k,30,{data:Buffer.from([1,1,a>>8,a&255,id>>8,id&255]).toString('base64')});}\n  else if (k==='pump') {const code={stop:1,estop:2,frequency:3,start:4}[op];const arg=op==='frequency'?Math.round(cfg.pumpFrequencyHz*100):0;emit(k,50,{data:Buffer.from([1,code,id>>8,id&255,arg>>8,arg&255]).toString('base64')});}\n  else emit(k,30,{object:{pcv:op,command_id:id}});\n  s.notice=`${k}: ${op} sent; awaiting device result`;\n}\nfunction advance(phase) {s.phase=phase;if (!phase.startsWith('wait_')) s.pending=null;s.phaseAt=now;}\nfunction stop(reason) {s.notice=reason;s.stopReason=reason;if (s.phase==='idle') s.selected=['valve1','valve2']; if (s.phase!=='stop_pump'&&s.phase!=='wait_pump_stop'&&s.phase!=='close_fields'&&s.phase!=='wait_field_close'&&s.phase!=='close_main'&&s.phase!=='wait_main_close') advance('stop_pump');}\nfunction ready() {\n  const w=device('water'), t=device('soil'), m=device('main'), p=device('pump');\n  if (!configured) return 'Set IRRIGATION_APP_ID and all six DEV_EUI environment variables';\n  if (!fresh('water',cfg.waterMaxAgeSec)||w.pressure_valid!==true||num(w.depth_m)===null) return 'Water level unavailable or stale';\n  if (w.depth_m*100<cfg.startLevelCm) return 'Reservoir below start level';\n  if (!fresh('soil',cfg.soilMaxAgeSec)||t.sensor_valid!==true||num(t.vwc_percent)===null) return 'Soil moisture unavailable or stale';\n  if (t.vwc_percent>=cfg.startMoisturePercent) return 'Soil is not dry enough';\n  if (!fresh('main',cfg.mainMaxAgeSec)||m.actuator_online!==true||m.overpressure===true||num(m.actuator_fault_code)!==0) return 'Main valve offline, stale or faulted';\n  if (!fresh('pump',cfg.pumpMaxAgeSec)||p.communication_ok!==true||p.configuration_valid!==true||num(p.vfd_fault_code)!==0||p.running===true) return 'Pump offline, running or faulted';\n  if (!p.frequency_armed && !(cfg.pumpFrequencyHz>=cfg.pumpMinFrequencyHz&&cfg.pumpFrequencyHz<=cfg.pumpMaxFrequencyHz)) return 'Pump frequency invalid';\n  for (const k of s.selected) if (!fresh(k,cfg[k+'MaxAgeSec'])) return k+' status unavailable or stale';\n  return '';\n}\nfunction decode(k,e) {\n  const d=e.object;\n  if (!d||typeof d!=='object') return null;\n  if ((k==='water'&&e.fPort!==40)||(k==='soil'&&e.fPort!==10)||(k==='main'&&e.fPort!==31)||(k==='pump'&&e.fPort!==51)||((k==='valve1'||k==='valve2')&&e.fPort!==31)) return null;\n  return d;\n}\nif (msg.topic && msg.topic.startsWith('application/')) {\n  const p=msg.topic.toLowerCase().split('/');\n  if (p.length===6&&p[0]==='application'&&p[2]==='device'&&p[4]==='event'&&p[5]==='up') {\n    const k=keys.find(x=>app===p[1]&&ids[x].eui===p[3]);\n    if (k) {let e=msg.payload;try {if(Buffer.isBuffer(e)) e=JSON.parse(e.toString('utf8'));else if(typeof e==='string') e=JSON.parse(e);}catch(err){e=null;}\n      const d=e&&decode(k,e);if(d){s.devices[k]={...s.devices[k],...d,at:now,last_seen:e.time||new Date(now).toISOString(),fPort:e.fPort};}}\n  }\n} else if (msg.payload&&msg.payload.kind==='start') {\n  if (s.phase!=='idle') s.notice='Irrigation is already active';\n  else {s.selected=['valve1','valve2'].filter(k=>msg.payload[k]===true);s.step=0;\n    if (!s.selected.length) s.notice='Select at least one field valve';\n    else {const problem=ready();if(problem) s.notice=problem;else {advance('open_main');s.notice='Start checks passed';}}}\n} else if (msg.payload&&msg.payload.kind==='stop') stop('Operator requested stop');\nif (msg.status && typeof msg.status.text==='string') s.mqtt_status=msg.status.text;\nconst w=device('water'),t=device('soil'),m=device('main'),p=device('pump');\nif (s.phase==='idle'&&p.running===true&&fresh('pump',cfg.pumpMaxAgeSec)) stop('Pump running outside dashboard sequence; stopping');\nconst mainOpen=()=>num(m.actual_angle_deg)!==null&&m.actual_angle_deg>=cfg.mainOpenMinDeg&&m.actual_angle_deg<=cfg.mainOpenMaxDeg&&m.valve_moving===false&&m.actuator_online===true&&num(m.actuator_fault_code)===0;\nconst done=(k,op)=>{const q=s.pending,d=device(k);if(!q||q.device!==k||q.op!==op||num(d.last_command_id)!==q.id||d.at<q.at)return false;\n  if(k==='main') return d.reported_command_id===q.id&&d.command_phase==='finished'&&d.valve_moving===false&&(op==='open'?mainOpen():num(d.actual_angle_deg)!==null&&d.actual_angle_deg<=cfg.mainClosedMaxDeg);\n  if(k==='pump') return d.command_result==='accepted'&&(op==='stop'||op==='estop'?d.running===false:op==='start'?d.running===true:op==='frequency'?d.frequency_armed===true:false);\n  return d.pcv_last_commanded===op&&d.status_reason!=='invalid_command';};\nconst timed=(seconds)=>s.pending&&now-s.pending.at>seconds*1000;\nif (s.phase==='running') {\n  if (now-s.runAt>cfg.maxWateringSec) stop('Maximum watering duration reached');\n  else if (!fresh('water',cfg.waterMaxAgeSec)||w.pressure_valid!==true||num(w.depth_m)===null||w.depth_m*100<=cfg.stopLevelCm) stop('Water level low or unavailable');\n  else if (!fresh('soil',cfg.soilMaxAgeSec)||t.sensor_valid!==true||num(t.vwc_percent)===null||t.vwc_percent>=cfg.stopMoisturePercent) stop('Soil wet enough or reading unavailable');\n  else if (!fresh('main',cfg.mainMaxAgeSec)||!mainOpen()||m.overpressure===true) stop('Main valve unsafe');\n  else if (!fresh('pump',cfg.pumpMaxAgeSec)||p.communication_ok!==true||num(p.vfd_fault_code)!==0||p.running!==true) stop('Pump status unsafe');\n  else if (s.selected.some(k=>!fresh(k,cfg[k+'MaxAgeSec'])||device(k).pcv_last_commanded!=='open')) stop('Field valve status unsafe');\n}\nif (s.phase==='open_main') {if(mainOpen()) advance('open_fields');else {command('main','open');advance('wait_main_open');}}\nif (s.phase==='wait_main_open') {if(done('main','open')) advance('open_fields');else if(timed(cfg.mainCommandTimeoutSec)||m.command_phase==='failed'||m.command_phase==='rejected') stop('Main valve open failed');}\nif (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='open'&&fresh(k,cfg[k+'MaxAgeSec'])) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}\nif (s.phase==='wait_field_open') {if(done(s.selected[s.step],'open')) {s.step++;advance('open_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed');}\nif (s.phase==='set_frequency') {const problem=ready();if(problem){stop('Start recheck: '+problem);}else if(p.frequency_armed===true&&Math.abs((num(p.commanded_frequency_hz)||0)-cfg.pumpFrequencyHz)<cfg.pumpFrequencyToleranceHz) advance('start_pump');else {command('pump','frequency');advance('wait_frequency');}}\nif (s.phase==='wait_frequency') {if(done('pump','frequency')) advance('start_pump');else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump frequency command unconfirmed');}\nif (s.phase==='start_pump') {const problem=ready();if(problem) stop('Start recheck: '+problem);else if(!mainOpen()||s.selected.some(k=>device(k).pcv_last_commanded!=='open')) stop('Valve readiness lost');else {command('pump','start');advance('wait_pump_start');}}\nif (s.phase==='wait_pump_start') {if(done('pump','start')) {advance('running');s.runAt=now;s.notice='Watering';}else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump start unconfirmed');}\nif (s.phase==='stop_pump') {if(p.running===false&&fresh('pump',cfg.pumpMaxAgeSec)) {s.step=s.selected.length-1;advance('close_fields');}else {command('pump','stop');advance('wait_pump_stop');}}\nif (s.phase==='wait_pump_stop') {if((done('pump','stop')||done('pump','estop')||p.running===false)&&fresh('pump',cfg.pumpMaxAgeSec)) {s.step=s.selected.length-1;advance('close_fields');}else if(timed(cfg.pumpStopTimeoutSec)){if(s.pending.op==='stop'){command('pump','estop');s.notice='Pump stop unconfirmed; emergency stop sent';}else {s.phase='fault';s.notice='Pump stop unconfirmed. Valves left open; inspect pump.';}}}\nif (s.phase==='close_fields') {if(s.step<0) advance('close_main');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='close'&&fresh(k,cfg[k+'MaxAgeSec'])) s.step--;else {command(k,'close');advance('wait_field_close');}}}\nif (s.phase==='wait_field_close') {if(done(s.selected[s.step],'close')) {s.step--;advance('close_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)){s.phase='fault';s.notice='Field valve close unconfirmed; inspect system';}}\nif (s.phase==='close_main') {if(num(m.actual_angle_deg)!==null&&m.actual_angle_deg<=cfg.mainClosedMaxDeg&&m.valve_moving===false) advance('idle');else {command('main','close');advance('wait_main_close');}}\nif (s.phase==='wait_main_close') {if(done('main','close')) {advance('idle');s.notice='Watering stopped; valves closed';}else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}\ns.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:!fresh(k,cfg[k+'MaxAgeSec'])}]));\nflow.set('irrigation',s);\nreturn [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 570,
+        "y": 280,
+        "wires": [
+            [
+                "991a3e761899197d"
+            ],
+            [
+                "f4548b0846299105"
+            ]
+        ]
+    },
+    {
+        "id": "991a3e761899197d",
+        "type": "mqtt out",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "name": "ChirpStack downlinks",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "ae0178f3742ff530",
+        "x": 940,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "f4548b0846299105",
+        "type": "ui-template",
+        "z": "irrigation_single_page",
+        "g": "1b1d04fc6fb44f23",
+        "group": "irrigation_group",
+        "page": "",
+        "ui": "",
+        "name": "Compact irrigation dashboard",
+        "order": 1,
+        "width": "12",
+        "height": "17",
+        "head": "",
+        "format": "<template>\n  <div class=\"irrigation-dashboard\">\n    <header class=\"ir-header\">\n      <div>\n        <div class=\"ir-eyebrow\">FIELD CONTROL</div>\n        <h1>Irrigation control</h1>\n        <p>Reservoir, soil, valves and pump in one view</p>\n      </div>\n      <div class=\"ir-header-status\">\n        <span class=\"ir-chip\" :class=\"phaseClass\">{{ phaseLabel }}</span>\n        <span class=\"ir-chip ir-mqtt\" :class=\"mqttClass\"><i></i>MQTT {{ mqttLabel }}</span>\n      </div>\n    </header>\n\n    <div class=\"ir-banner\" :class=\"state.phase === 'running' ? 'ir-banner-running' : state.check ? 'ir-banner-blocked' : 'ir-banner-ready'\" role=\"status\">\n      <span class=\"ir-banner-symbol\">{{ state.phase === 'running' ? '●' : state.check ? '!' : '✓' }}</span>\n      <div>\n        <strong>{{ state.phase === 'running' ? 'Watering in progress' : state.check ? 'Start blocked' : 'Ready to water' }}</strong>\n        <span>{{ state.phase === 'running' ? (state.notice || 'Monitoring safety conditions') : state.check || state.notice || 'All required checks passed' }}</span>\n      </div>\n    </div>\n\n    <div class=\"ir-grid\">\n      <article v-for=\"(d,k) in cards\" :key=\"k\" class=\"ir-card\" :class=\"cardClass(k,d)\">\n        <div class=\"ir-card-top\">\n          <div class=\"ir-card-title\"><span class=\"ir-icon\" :class=\"'ir-icon-' + k\">{{ icons[k] }}</span><b>{{ names[k] }}</b></div>\n          <span class=\"ir-state\" :class=\"statusClass(k,d)\">{{ statusLabel(k,d) }}</span>\n        </div>\n        <div class=\"ir-reading\">{{ cardValue(k,d) }}</div>\n        <div class=\"ir-card-detail\">{{ detail(k,d) }}</div>\n        <div class=\"ir-card-footer\"><span>{{ secondary(k,d) }}</span><time>{{ seen(d) }}</time></div>\n      </article>\n    </div>\n\n    <section class=\"ir-panel ir-control-panel\">\n      <div class=\"ir-panel-heading\"><div><h2>Watering zones</h2><p>Select one half of the field or both.</p></div><span class=\"ir-small-tag\">OPERATOR CONTROL</span></div>\n      <div class=\"ir-control-row\">\n        <div class=\"ir-zone-options\">\n          <label><input type=\"checkbox\" v-model=\"valve1\"><span><b>Half 1</b><small>valve_1</small></span></label>\n          <label><input type=\"checkbox\" v-model=\"valve2\"><span><b>Half 2</b><small>valve_2</small></span></label>\n        </div>\n        <div class=\"ir-buttons\">\n          <button class=\"ir-start\" :disabled=\"state.phase !== 'idle' || !state.configured || !!state.check\" @pointerdown=\"showRipple\" @click=\"start($event)\"><span class=\"ir-button-label\">Start watering</span></button>\n          <button class=\"ir-stop\" @pointerdown=\"showRipple\" @click=\"stop($event)\"><span class=\"ir-button-label\">Stop watering</span></button>\n        </div>\n      </div>\n      <p class=\"ir-sequence\">Shutdown order: stop pump → close selected field valves → close main valve.</p>\n    </section>\n\n    <section class=\"ir-panel ir-limits-panel\">\n      <div class=\"ir-panel-heading\"><div><h2>Safety limits</h2><p>Editable in the Irrigation settings function node.</p></div><span class=\"ir-small-tag\">CURRENT SETTINGS</span></div>\n      <div class=\"ir-limits\">\n        <span>Reservoir start <b>≥ {{ settings.startLevelCm }} cm</b></span>\n        <span>Reservoir stop <b>≤ {{ settings.stopLevelCm }} cm</b></span>\n        <span>Soil start <b>&lt; {{ settings.startMoisturePercent }}%</b></span>\n        <span>Soil stop <b>≥ {{ settings.stopMoisturePercent }}%</b></span>\n        <span>Main valve open <b>{{ settings.mainOpenMinDeg }}–{{ settings.mainOpenMaxDeg }}°</b></span>\n      </div>\n      <p class=\"ir-footnote\">Field-valve position is the last commanded state; physical position is not verified by current telemetry.</p>\n    </section>\n  </div>\n</template>\n\n<script>\nexport default {\n  data() {\n    return {\n      state: {phase:'idle',devices:{}}, valve1:true, valve2:true,\n      names: {water:'Reservoir',soil:'Soil',main:'Main valve',valve1:'Valve 1',valve2:'Valve 2',pump:'Pump'},\n      icons: {water:'💧',soil:'🌱',main:'⚙',valve1:'↔',valve2:'↔',pump:'◉'}\n    }\n  },\n  computed: {\n    settings() { return this.state.settings || {} },\n    cards() { return Object.fromEntries(Object.keys(this.names).map(k => [k,this.state.devices?.[k] || {stale:true}])) },\n    phaseLabel() { return String(this.state.phase || 'idle').replace(/_/g,' ').toUpperCase() },\n    phaseClass() { return this.state.phase === 'running' ? 'ir-phase-running' : this.state.phase === 'fault' ? 'ir-phase-fault' : 'ir-phase-idle' },\n    mqttLabel() { const t=String(this.state.mqtt_status||'').toLowerCase(); return t.includes('disconnected') ? 'disconnected' : t.includes('connected') ? 'connected' : t.includes('connecting') ? 'connecting' : 'unknown' },\n    mqttClass() { return 'ir-mqtt-' + this.mqttLabel }\n  },\n  watch: {msg: {handler(m) { if (m?.payload?.kind === 'state') this.state = m.payload.state || {phase:'idle',devices:{}} }, immediate:true}},\n  methods: {\n    fmt(v,suffix='') { return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) + suffix : '—' },\n    invalid(k,d) {\n      return (k === 'water' && d.pressure_valid !== true) ||\n        (k === 'soil' && d.sensor_valid !== true) ||\n        (k === 'main' && (d.actuator_online !== true || (typeof d.actuator_fault_code === 'number' && d.actuator_fault_code !== 0))) ||\n        (k === 'pump' && (d.communication_ok !== true || d.configuration_valid !== true || (typeof d.vfd_fault_code === 'number' && d.vfd_fault_code !== 0)));\n    },\n    statusLabel(k,d) { return !d.last_seen ? 'NO DATA' : d.stale ? 'STALE' : this.invalid(k,d) ? 'FAULT' : 'LIVE' },\n    statusClass(k,d) { return !d.last_seen ? 'ir-no-data' : d.stale ? 'ir-stale' : this.invalid(k,d) ? 'ir-fault' : 'ir-live' },\n    cardClass(k,d) { return !d.last_seen ? 'ir-card-empty' : d.stale ? 'ir-card-stale' : this.invalid(k,d) ? 'ir-card-fault' : 'ir-card-live' },\n    cardValue(k,d) {\n      if (!d.last_seen) return 'Waiting for uplink';\n      if (k === 'water') return this.fmt(typeof d.depth_m === 'number' ? d.depth_m * 100 : null,' cm');\n      if (k === 'soil') return this.fmt(d.vwc_percent,'%');\n      if (k === 'main') return this.fmt(d.actual_angle_deg,'°');\n      if (k === 'pump') return d.stale ? 'UNKNOWN' : d.running === true ? 'RUNNING' : d.running === false ? 'STOPPED' : 'UNKNOWN';\n      return (d.pcv_last_commanded || 'UNKNOWN').toUpperCase();\n    },\n    detail(k,d) {\n      if (!d.last_seen) return 'No device report received';\n      if (k === 'water') return d.pressure_valid ? 'Level sensor valid' : 'Level sensor invalid';\n      if (k === 'soil') return d.sensor_valid ? 'Moisture sensor valid' : 'Moisture sensor invalid';\n      if (k === 'main') return `Actuator ${d.actuator_online === true ? 'online' : 'offline'} · ${d.valve_moving ? 'moving' : 'stopped'}`;\n      if (k === 'pump') return `VFD link ${d.communication_ok === true ? 'OK' : 'fault'} · ${this.fmt(d.actual_frequency_hz,' Hz')}`;\n      return d.pcv_position_verified ? 'Physical position verified' : 'Physical position unverified';\n    },\n    secondary(k,d) {\n      if (!d.last_seen) return 'Awaiting telemetry';\n      if (k === 'main') return `Fault: ${d.actuator_fault_code ?? '—'}`;\n      if (k === 'pump') return `Fault: ${d.vfd_fault_code ?? '—'}`;\n      if (k === 'valve1' || k === 'valve2') return `Command ID: ${d.last_command_id ?? '—'}`;\n      return d.stale ? 'Reading too old for control' : 'Reading available';\n    },\n    seen(d) {\n      if (!d.last_seen) return 'Never seen';\n      const date=new Date(d.last_seen);\n      return Number.isNaN(date.getTime()) ? 'Time unknown' : date.toLocaleString();\n    },\n    showRipple(event) {\n      const button = event.currentTarget;\n      if (button.disabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;\n      const rect = button.getBoundingClientRect();\n      const size = Math.hypot(rect.width, rect.height) * 2;\n      const ripple = document.createElement('span');\n      ripple.className = 'ir-ripple';\n      Object.assign(ripple.style, {\n        position: 'absolute', zIndex: '0', borderRadius: '50%',\n        background: 'rgba(255,255,255,.38)', pointerEvents: 'none', animation: 'none'\n      });\n      ripple.style.width = ripple.style.height = `${size}px`;\n      ripple.style.left = `${(event.clientX || rect.left + rect.width / 2) - rect.left - size / 2}px`;\n      ripple.style.top = `${(event.clientY || rect.top + rect.height / 2) - rect.top - size / 2}px`;\n      button.appendChild(ripple);\n      ripple.animate([\n        {transform:'scale(0)',opacity:1},\n        {transform:'scale(1)',opacity:0}\n      ], {duration:550,easing:'ease-out'}).onfinish = () => ripple.remove();\n    },\n    start(event) {\n      if (event.detail === 0) this.showRipple(event);\n      if (!this.valve1 && !this.valve2) return;\n      window.setTimeout(() => {\n        if (!window.confirm('Start watering selected zones?')) return;\n        this.send({payload:{kind:'start',valve1:this.valve1,valve2:this.valve2}});\n      }, 100);\n    },\n    stop(event) {\n      if (event.detail === 0) this.showRipple(event);\n      this.send({payload:{kind:'stop'}});\n    }\n  }\n}\n</script>\n\n<style>\n.irrigation-dashboard{box-sizing:border-box;max-width:1500px;margin:0 auto;padding:16px 20px 28px;background:#f5f8fb;color:#182b3a;font-family:Inter,Roboto,Arial,sans-serif}\n.irrigation-dashboard *{box-sizing:border-box}\n.ir-header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:16px}\n.ir-eyebrow{font-size:11px;letter-spacing:.16em;font-weight:800;color:#46748e;margin-bottom:4px}\n.ir-header h1{font-size:30px;line-height:1.1;margin:0;color:#14283a;font-weight:800}\n.ir-header p,.ir-panel-heading p{font-size:13px;color:#667988;margin:6px 0 0}\n.ir-header-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap}\n.ir-chip{border-radius:999px;padding:9px 13px;font-size:12px;font-weight:800;letter-spacing:.04em;background:#e8eff4;color:#36566b;white-space:nowrap}\n.ir-phase-running,.ir-mqtt-connected{background:#d8f2e4;color:#176a42}\n.ir-phase-fault,.ir-mqtt-disconnected{background:#fbe3e3;color:#a63333}\n.ir-mqtt i{display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:currentColor}\n.ir-banner{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:11px;margin-bottom:16px;background:#e8f1f7;color:#235a79;border:1px solid #ccdfed}\n.ir-banner-running,.ir-banner-ready{background:#e8f6ed;color:#176b42;border-color:#c7e7d3}\n.ir-banner-blocked{background:#fff5e8;color:#8b5c16;border-color:#f3ddb3}\n.ir-banner-symbol{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:currentColor;color:white;font-weight:800;line-height:1}\n.ir-banner>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13px}.ir-banner strong{font-size:14px}\n.ir-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}\n.ir-card{min-height:188px;padding:17px 18px 13px;border:1px solid #dbe5ed;border-radius:13px;background:white;box-shadow:0 4px 14px rgba(24,57,80,.035);display:flex;flex-direction:column}\n.ir-card-live{border-color:#c8dfd4}.ir-card-stale,.ir-card-empty{border-color:#e6d9d1}.ir-card-fault{border-color:#e8adad}\n.ir-card-top,.ir-card-title,.ir-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}\n.ir-card-title{justify-content:flex-start;font-size:16px;color:#1b3445}.ir-card-title b{font-weight:750}\n.ir-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:#e7f2f8;color:#29729b;font-size:21px;line-height:1;font-weight:900}\n.ir-icon-soil{background:#e8f4e7}.ir-icon-valve1,.ir-icon-valve2{background:#e8f0f2;font-size:23px}\n.ir-icon-pump{background:#e6eef8}.ir-icon-main{background:#ebf0f7}\n.ir-state{padding:5px 8px;border-radius:7px;font-size:10px;font-weight:800;letter-spacing:.05em;white-space:nowrap}\n.ir-live{background:#dbf3e6;color:#1a7046}.ir-stale{background:#fff0dd;color:#9b5b15}.ir-no-data{background:#edf1f5;color:#596b78}.ir-fault{background:#fbe3e3;color:#a63333}\n.ir-reading{font-size:31px;line-height:1.15;font-weight:800;letter-spacing:-.03em;margin:17px 0 5px;color:#162d3e;white-space:nowrap}\n.ir-card-empty .ir-reading{font-size:20px;color:#748592;letter-spacing:0}.ir-card-stale .ir-reading{color:#667884}\n.ir-card-detail{font-size:13px;color:#516a79;margin-bottom:14px}\n.ir-card-footer{border-top:1px solid #edf1f4;padding-top:9px;margin-top:auto;color:#738592;font-size:11px;align-items:flex-start}\n.ir-card-footer time{text-align:right}\n.ir-panel{margin-top:13px;padding:17px 19px;border:1px solid #dbe5ed;border-radius:13px;background:#fff}\n.ir-panel-heading{display:flex;align-items:start;justify-content:space-between;gap:12px}.ir-panel-heading h2{font-size:17px;margin:0;color:#1a3445}\n.ir-small-tag{font-size:10px;font-weight:800;color:#7890a0;letter-spacing:.1em;white-space:nowrap}\n.ir-control-row{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:15px;flex-wrap:wrap}\n.ir-zone-options,.ir-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}\n.ir-zone-options label{display:flex;align-items:center;gap:9px;border:1px solid #dbe5ed;border-radius:9px;padding:9px 13px;min-width:155px;cursor:pointer}\n.ir-zone-options input{width:18px;height:18px;accent-color:#22875b}.ir-zone-options b,.ir-zone-options small{display:block}.ir-zone-options b{font-size:13px}.ir-zone-options small{font-size:11px;color:#718593}\n.ir-buttons button{position:relative;overflow:hidden;isolation:isolate;border:0;border-radius:9px;padding:12px 17px;font:700 13px Inter,Roboto,Arial,sans-serif;cursor:pointer;min-width:145px}\n.ir-button-label{position:relative;z-index:1;pointer-events:none}\n.ir-ripple{position:absolute;z-index:0;border-radius:50%;background:rgba(255,255,255,.38);pointer-events:none;transform:scale(0);animation:ir-ripple-expand 550ms ease-out forwards}\n@keyframes ir-ripple-expand{to{transform:scale(1);opacity:0}}\n@media(prefers-reduced-motion:reduce){.ir-ripple{animation:none}}\n.ir-start{background:#178552;color:#fff}.ir-start:disabled{background:#cde6d8;color:#719a83;cursor:not-allowed}.ir-stop{background:#d84949;color:#fff}\n.ir-sequence,.ir-footnote{font-size:11px;color:#728491;margin:13px 0 0}\n.ir-limits{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.ir-limits span{border:1px solid #dfe9ef;background:#f6f9fb;border-radius:8px;padding:9px 11px;font-size:12px;color:#5b7382}.ir-limits b{color:#1d4359}\n@media(max-width:1000px){.ir-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}\n@media(max-width:650px){.irrigation-dashboard{padding:12px}.ir-header{align-items:flex-start;flex-direction:column}.ir-header h1{font-size:24px}.ir-grid{grid-template-columns:1fr}.ir-card{min-height:170px}.ir-control-row{align-items:stretch}.ir-buttons{width:100%}.ir-buttons button{flex:1}}\n</style>\n",
+        "storeOutMessages": true,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 950,
+        "y": 280,
+        "wires": [
+            [
+                "bc05f535c327903f"
+            ]
+        ]
+    },
+    {
+        "id": "ae0178f3742ff530",
+        "type": "mqtt-broker",
+        "name": "chirpstack_mosquito",
+        "broker": "localhost",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "irrigation_group",
+        "type": "ui-group",
+        "z": "irrigation_single_page",
+        "name": "Irrigation",
+        "page": "irrigation_page",
+        "width": "12",
+        "height": "1",
+        "order": 1,
+        "showTitle": false,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "irrigation_page",
+        "type": "ui-page",
+        "z": "irrigation_single_page",
+        "name": "Irrigation",
+        "ui": "f53e93e9ba219e63",
+        "path": "/irrigation",
+        "icon": "water",
+        "layout": "grid",
+        "theme": "e49416861823a329",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 4,
+        "className": "",
+        "visible": true,
+        "disabled": false
+    },
+    {
+        "id": "f53e93e9ba219e63",
+        "type": "ui-base",
+        "name": "My Dashboard",
+        "path": "/dashboard",
+        "appIcon": "",
+        "includeClientData": true,
+        "acceptsClientConfig": [
+            "ui-notification",
+            "ui-control"
+        ],
+        "showPathInSidebar": false,
+        "headerContent": "page",
+        "navigationStyle": "fixed",
+        "titleBarStyle": "default",
+        "showReconnectNotification": true,
+        "notificationDisplayTime": 1,
+        "showDisconnectNotification": true,
+        "allowInstall": true
+    },
+    {
+        "id": "e49416861823a329",
+        "type": "ui-theme",
+        "name": "MyTheme",
+        "colors": {
+            "surface": "#ffffff",
+            "primary": "#0094ce",
+            "bgPage": "#eeeeee",
+            "groupBg": "#ffffff",
+            "groupOutline": "#cccccc"
+        },
+        "sizes": {
+            "density": "default",
+            "pagePadding": "12px",
+            "groupGap": "12px",
+            "groupBorderRadius": "4px",
+            "widgetGap": "12px"
+        }
+    },
+    {
+        "id": "7105117e4ccb8aec",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@flowfuse/node-red-dashboard": "1.30.2"
+        }
+    }
+]
