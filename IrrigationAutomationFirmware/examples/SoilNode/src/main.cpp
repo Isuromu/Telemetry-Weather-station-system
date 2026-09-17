@@ -209,29 +209,41 @@ bool saveSleepIntervalToNvs(uint32_t seconds) {
   return written == sizeof(seconds);
 }
 
-void processDownlink(const uint8_t *payload, size_t length, uint8_t fPort) {
+bool processDownlink(const uint8_t *payload, size_t length, uint8_t fPort,
+                     protocol::CommandAck &ack) {
   if (fPort != config::lorawan::TELEMETRY_FPORT) {
     Serial.printf("[LORAWAN] Ignored downlink on unexpected FPort %u.\n",
                   fPort);
-    return;
+    return false;
   }
 
+  ack.activeSleepSeconds = sleepIntervalSeconds;
+  if (payload != nullptr && length == protocol::SET_SLEEP_INTERVAL_COMMAND_SIZE &&
+      payload[0] == protocol::SET_SLEEP_INTERVAL_COMMAND) {
+    ack.commandId = (static_cast<uint16_t>(payload[1]) << 8) | payload[2];
+  }
   uint32_t requestedSeconds = 0;
+  uint16_t commandId = protocol::LEGACY_COMMAND_ID;
   if (!protocol::decodeSleepIntervalCommand(
           payload, length, config::lorawan::MIN_SLEEP_SECONDS,
-          config::lorawan::MAX_SLEEP_SECONDS, requestedSeconds)) {
+          config::lorawan::MAX_SLEEP_SECONDS, requestedSeconds, commandId)) {
     Serial.println("[LORAWAN] Invalid sleep-interval downlink.");
-    return;
+    return true;
   }
 
+  ack.commandId = commandId;
   if (requestedSeconds != sleepIntervalSeconds &&
       !saveSleepIntervalToNvs(requestedSeconds)) {
     Serial.println("[LORAWAN] Could not persist the sleep interval.");
-    return;
+    ack.status = protocol::CommandStatus::STORAGE_FAILED;
+    return true;
   }
   sleepIntervalSeconds = requestedSeconds;
+  ack.status = protocol::CommandStatus::APPLIED;
+  ack.activeSleepSeconds = sleepIntervalSeconds;
   Serial.printf("[LORAWAN] Sleep interval set to %lu seconds.\n",
                 static_cast<unsigned long>(sleepIntervalSeconds));
+  return true;
 }
 
 void saveSessionToRtc() {
@@ -333,7 +345,30 @@ void sendTelemetry(const protocol::Telemetry &telemetry) {
     Serial.println("[LORAWAN] Uplink sent; RX1/RX2 completed.");
     if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
       printHexFrame("[LORAWAN] Downlink: ", downlink, downlinkLength);
-      processDownlink(downlink, downlinkLength, downlinkEvent.fPort);
+      protocol::CommandAck ack{};
+      if (processDownlink(downlink, downlinkLength, downlinkEvent.fPort, ack)) {
+        uint8_t ackPayload[protocol::COMMAND_ACK_SIZE] = {};
+        protocol::encodeCommandAck(ack, ackPayload);
+        printHexFrame("[LORAWAN] FPort 11 command result: ", ackPayload,
+                      sizeof(ackPayload));
+        uint8_t ignoredDownlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
+        size_t ignoredLength = sizeof(ignoredDownlink);
+        LoRaWANEvent_t ignoredEvent = {};
+        const int16_t ackState = lorawan.sendReceive(
+            ackPayload, sizeof(ackPayload), config::lorawan::COMMAND_ACK_FPORT,
+            ignoredDownlink, &ignoredLength, false, nullptr, &ignoredEvent);
+        saveSessionToRtc();
+        if (ackState < RADIOLIB_ERR_NONE) {
+          Serial.printf("[LORAWAN] Application acknowledgement failed: %d\n",
+                        ackState);
+        } else {
+          Serial.println("[LORAWAN] Application acknowledgement sent.");
+          if (ackState > RADIOLIB_ERR_NONE && ignoredLength > 0) {
+            Serial.println("[LORAWAN] Additional queued downlink was not "
+                           "processed. Queue one command at a time.");
+          }
+        }
+      }
     }
   }
 }

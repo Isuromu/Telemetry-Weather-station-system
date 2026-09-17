@@ -1,17 +1,38 @@
 [
   {
-    "id": "pump_dashboard_tab_v1",
-    "type": "tab",
-    "label": "Pump Control Dashboard",
-    "disabled": false,
-    "info": "Pump Control FPort 50/51 dashboard"
+    "id": "ce6528cb089fcb74",
+    "type": "group",
+    "z": "e036313ddf417d8b",
+    "style": {
+      "stroke": "#999999",
+      "stroke-opacity": "1",
+      "fill": "none",
+      "fill-opacity": "1",
+      "label": true,
+      "label-position": "nw",
+      "color": "#767676"
+    },
+    "nodes": [
+      "90d57afbea51f3de",
+      "d252c62c590f32f5",
+      "da6f60e155cd7167",
+      "a364a787aba4f9ec",
+      "80e63cf073fc18b1",
+      "46d6e76c07878f6f",
+      "71efb750b43caf3c"
+    ],
+    "x": 54,
+    "y": 239,
+    "w": 1302,
+    "h": 222
   },
   {
-    "id": "pump_mqtt_in_v1",
+    "id": "90d57afbea51f3de",
     "type": "mqtt in",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Pump ChirpStack uplinks",
-    "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/025fcb86b98f2c48/event/up",
+    "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/025fcb86b98f2c48/event/+",
     "qos": "0",
     "datatype": "json",
     "broker": "ae0178f3742ff530",
@@ -19,18 +40,19 @@
     "rap": true,
     "rh": 0,
     "inputs": 0,
-    "x": 180,
-    "y": 120,
+    "x": 230,
+    "y": 280,
     "wires": [
       [
-        "pump_ingest_v1"
+        "d252c62c590f32f5"
       ]
     ]
   },
   {
-    "id": "pump_ingest_v1",
+    "id": "d252c62c590f32f5",
     "type": "function",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Decode Pump status",
     "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"025fcb86b98f2c48\";\nconst parts = String(msg.topic || \"\").split(\"/\");\nif (parts.length !== 6 || parts[0] !== \"application\" || parts[1] !== app ||\n    parts[2] !== \"device\" || parts[3].toLowerCase() !== eui ||\n    parts[4] !== \"event\" || parts[5] !== \"up\") return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (error) {\n  node.warn(\"Invalid ChirpStack event JSON: \" + error.message);\n  return null;\n}\nif (!event || event.fPort !== 51) return null;\nlet d = event.object;\nif (!d || typeof d !== \"object\" || d.command_result === undefined) {\n  let b;\n  try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { return null; }\n  if (b.length !== 17 || b[0] !== 1) {\n    node.warn(\"Pump status requires protocol v1, FPort 51, 17 bytes\");\n    return null;\n  }\n  const u16 = i => (b[i] << 8) | b[i + 1];\n  const results = [\"none\", \"accepted\", \"failed\", \"duplicate\", \"invalid\", \"storage_error\"];\n  const states = [\"unknown\", \"forward\", \"reverse\", \"stopped\"];\n  d = {\n    communication_ok: !!(b[1] & 1),\n    configuration_valid: !!(b[1] & 2),\n    running: !!(b[1] & 4),\n    frequency_armed: !!(b[1] & 8),\n    lorawan_active: !!(b[1] & 16),\n    class_c_active: !!(b[1] & 32),\n    command_result: results[b[2]] || \"unknown\",\n    last_command_id: u16(3) === 65535 ? null : u16(3),\n    commanded_frequency_hz: u16(5) / 100,\n    actual_frequency_hz: u16(7) / 100,\n    motor_current_a: u16(9) / 100,\n    vfd_fault_code: u16(11),\n    output_voltage_v: u16(13) / 10,\n    run_state: states[b[15]] || \"unknown\",\n    communication_error_code: b[16]\n  };\n}\nconst now = Date.now();\nconst s = flow.get(\"pump_state\") || {};\nObject.assign(s, d);\ns.last_seen = event.time || new Date(now).toISOString();\ns.last_seen_ms = now;\ns.stale = false;\ns.f_port = event.fPort;\nconst rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\nif (rx.length) {\n  const best = rx.reduce((a, b) => Number(b.snr) > Number(a.snr) ? b : a);\n  s.rssi = best.rssi;\n  s.snr = best.snr;\n}\nconst reportedId = d.last_command_id == null ? NaN : Number(d.last_command_id);\nconst next = flow.get(\"pump_next_id\");\nif (Number.isInteger(reportedId) && reportedId >= 0 && reportedId <= 65534) {\n  const expected = (reportedId + 1) % 65535;\n  if (!Number.isInteger(next) || next < 0 || next > 65534 ||\n      (next !== expected && ((expected - next + 65535) % 65535) < 32767)) {\n    flow.set(\"pump_next_id\", expected);\n  }\n} else if (!Number.isInteger(next)) {\n  flow.set(\"pump_next_id\", 0);\n}\nconst pending = flow.get(\"pump_pending\");\nif (pending && Number.isInteger(reportedId) && reportedId === pending.id) {\n  s.command_state = d.command_result;\n  s.last_command = pending;\n  flow.set(\"pump_pending\", null);\n}\ns.pending = flow.get(\"pump_pending\") || null;\nflow.set(\"pump_state\", s);\nmsg.payload = {kind: \"state\", state: s};\nreturn msg;",
     "outputs": 1,
@@ -39,18 +61,19 @@
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 430,
-    "y": 120,
+    "x": 480,
+    "y": 280,
     "wires": [
       [
-        "pump_ui_v1"
+        "80e63cf073fc18b1"
       ]
     ]
   },
   {
-    "id": "pump_tick_v1",
+    "id": "da6f60e155cd7167",
     "type": "inject",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Refresh status and timeout",
     "props": [
       {
@@ -64,18 +87,19 @@
     "topic": "",
     "payload": "",
     "payloadType": "date",
-    "x": 170,
-    "y": 260,
+    "x": 220,
+    "y": 420,
     "wires": [
       [
-        "pump_watchdog_v1"
+        "a364a787aba4f9ec"
       ]
     ]
   },
   {
-    "id": "pump_watchdog_v1",
+    "id": "a364a787aba4f9ec",
     "type": "function",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Check stale status",
     "func": "const s = flow.get(\"pump_state\") || {};\nconst now = Date.now();\ns.stale = !s.last_seen_ms || now - s.last_seen_ms > 150000;\nconst pending = flow.get(\"pump_pending\");\nif (pending && now - pending.queued_at_ms > 150000) {\n  s.command_state = \"no device confirmation\";\n  s.last_command = pending;\n  s.pending = null;\n  flow.set(\"pump_pending\", null);\n} else {\n  s.pending = pending || null;\n}\nflow.set(\"pump_state\", s);\nmsg.payload = {kind: \"state\", state: s};\nreturn msg;",
     "outputs": 1,
@@ -84,19 +108,22 @@
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 430,
-    "y": 260,
+    "x": 480,
+    "y": 420,
     "wires": [
       [
-        "pump_ui_v1"
+        "80e63cf073fc18b1"
       ]
     ]
   },
   {
-    "id": "pump_ui_v1",
+    "id": "80e63cf073fc18b1",
     "type": "ui-template",
-    "z": "pump_dashboard_tab_v1",
-    "group": "pump_ui_group_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "group": "c6dc5eedbdc49f18",
+    "page": "",
+    "ui": "",
     "name": "Pump controls and status",
     "order": 1,
     "width": "12",
@@ -108,18 +135,19 @@
     "resendOnRefresh": true,
     "templateScope": "local",
     "className": "",
-    "x": 700,
-    "y": 180,
+    "x": 750,
+    "y": 340,
     "wires": [
       [
-        "pump_command_v1"
+        "46d6e76c07878f6f"
       ]
     ]
   },
   {
-    "id": "pump_command_v1",
+    "id": "46d6e76c07878f6f",
     "type": "function",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Send Pump command",
     "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"025fcb86b98f2c48\";\nconst action = msg.payload || {};\nif (action.kind !== \"command\") return null;\nconst s = flow.get(\"pump_state\") || {};\nfunction reply(error) {\n  s.ui_error = error;\n  flow.set(\"pump_state\", s);\n  return [null, {payload: {kind: \"state\", state: s}}];\n}\nconst operations = {stop: 1, estop: 2, set_frequency: 3, start: 4};\nconst op = operations[action.command];\nif (!op) return reply(\"Unknown pump command.\");\nlet arg = 0;\nif (op === 3) {\n  const hz = Number(action.frequency_hz);\n  if (!Number.isFinite(hz) || hz < 10 || hz > 50)\n    return reply(\"Frequency must be 10 to 50 Hz.\");\n  arg = Math.round(hz * 100);\n}\nconst pending = flow.get(\"pump_pending\");\nif (pending && op !== 1) return reply(\"Wait for the current command result. Stop remains available.\");\nif (!s.last_seen_ms) return reply(\"Wait for a Pump status uplink before sending commands.\");\nif (op !== 1 && Date.now() - s.last_seen_ms > 150000)\n  return reply(\"Pump status is stale. Wait for a new uplink.\");\nconst id = flow.get(\"pump_next_id\");\nif (!Number.isInteger(id) || id < 0 || id > 65534)\n  return reply(\"Wait for a status uplink to synchronize command IDs.\");\nflow.set(\"pump_next_id\", (id + 1) % 65535);\nconst bytes = Buffer.from([1, op, id >> 8, id & 255, arg >> 8, arg & 255]);\nconst current = {id, command: action.command, frequency_hz: op === 3 ? arg / 100 : null,\n  queued_at: new Date().toISOString(), queued_at_ms: Date.now()};\nflow.set(\"pump_pending\", current);\ns.pending = current;\ns.last_command = current;\ns.command_state = \"queued\";\ns.ui_error = pending && op === 1\n  ? \"Stop queued. A previous downlink may still be waiting in ChirpStack.\"\n  : \"\";\nflow.set(\"pump_state\", s);\nreturn [{\n  topic: \"application/\" + app + \"/device/\" + eui + \"/command/down\",\n  payload: JSON.stringify({devEui: eui, confirmed: false, fPort: 50,\n    data: bytes.toString(\"base64\")}),\n  qos: \"0\",\n  retain: false\n}, {payload: {kind: \"state\", state: s}}];",
     "outputs": 2,
@@ -128,21 +156,22 @@
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 940,
-    "y": 180,
+    "x": 990,
+    "y": 340,
     "wires": [
       [
-        "pump_mqtt_out_v1"
+        "71efb750b43caf3c"
       ],
       [
-        "pump_ui_v1"
+        "80e63cf073fc18b1"
       ]
     ]
   },
   {
-    "id": "pump_mqtt_out_v1",
+    "id": "71efb750b43caf3c",
     "type": "mqtt out",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
     "name": "Queue Pump downlink",
     "topic": "",
     "qos": "",
@@ -153,8 +182,8 @@
     "correl": "",
     "expiry": "",
     "broker": "ae0178f3742ff530",
-    "x": 1180,
-    "y": 160,
+    "x": 1230,
+    "y": 320,
     "wires": []
   },
   {
@@ -189,14 +218,14 @@
     "sessionExpiry": ""
   },
   {
-    "id": "pump_ui_group_v1",
+    "id": "c6dc5eedbdc49f18",
     "type": "ui-group",
-    "z": "pump_dashboard_tab_v1",
+    "z": "e036313ddf417d8b",
     "name": "Water Pump",
     "page": "46258ab1c2ef86c9",
-    "width": "12",
-    "height": "1",
-    "order": 2,
+    "width": "6",
+    "height": "8",
+    "order": 1,
     "showTitle": true,
     "className": "",
     "visible": "true",
@@ -209,7 +238,7 @@
     "name": "Pump and Main Valve",
     "ui": "f53e93e9ba219e63",
     "path": "/page1",
-    "icon": "home",
+    "icon": "mdi-water-pump",
     "layout": "grid",
     "theme": "e49416861823a329",
     "breakpoints": [
@@ -236,8 +265,8 @@
     ],
     "order": 1,
     "className": "",
-    "visible": true,
-    "disabled": false
+    "visible": "true",
+    "disabled": "false"
   },
   {
     "id": "f53e93e9ba219e63",
@@ -252,12 +281,12 @@
     ],
     "showPathInSidebar": false,
     "headerContent": "page",
-    "navigationStyle": "default",
+    "navigationStyle": "fixed",
     "titleBarStyle": "default",
     "showReconnectNotification": true,
     "notificationDisplayTime": 1,
     "showDisconnectNotification": true,
-    "allowInstall": false
+    "allowInstall": true
   },
   {
     "id": "e49416861823a329",
@@ -279,7 +308,7 @@
     }
   },
   {
-    "id": "pump_dashboard_modules_v1",
+    "id": "2d006e8e753a43cd",
     "type": "global-config",
     "env": [],
     "modules": {

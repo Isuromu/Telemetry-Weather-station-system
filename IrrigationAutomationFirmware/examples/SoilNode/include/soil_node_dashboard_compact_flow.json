@@ -1,0 +1,676 @@
+[
+    {
+        "id": "0213c819b759b29f",
+        "type": "group",
+        "z": "soil_dashboard_tab",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#767676"
+        },
+        "nodes": [
+            "0bc55b69be62b8af",
+            "479cf79265adf1b9",
+            "d0e32239fceb43ae",
+            "835a8e033ba9d61b",
+            "a11854339c685abb",
+            "d475c1626727312a",
+            "6d8f958c7fe37a0a",
+            "a684f5d7791f886b",
+            "58694589d0e88877",
+            "e4232b9edd0bafd0",
+            "c5a1919110f9cc40",
+            "470a0b307e8d7858",
+            "85bcffc571fa5084",
+            "16bf625eecb4e1cb"
+        ],
+        "x": 74,
+        "y": 99,
+        "w": 1352,
+        "h": 422
+    },
+    {
+        "id": "0bc55b69be62b8af",
+        "type": "mqtt in",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "name": "ChirpStack events",
+        "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/6c6a898e97099034/event/+",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "sc_ae0178f3742ff530",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 190,
+        "y": 180,
+        "wires": [
+            [
+                "479cf79265adf1b9"
+            ]
+        ]
+    },
+    {
+        "id": "479cf79265adf1b9",
+        "type": "function",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "name": "Filter and decode SoilNode",
+        "func": "const app = String(env.get(\"SOIL_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:\"red\",shape:\"ring\",text:\"set SOIL_APP_ID and SOIL_DEV_EUI\"});\n  return null;\n}\nconst parts = String(msg.topic || \"\").toLowerCase().split(\"/\");\nif (parts.length !== 6 || parts[0] !== \"application\" || parts[1] !== app ||\n    parts[2] !== \"device\" || parts[3] !== eui || parts[4] !== \"event\") return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (err) { node.warn(\"Invalid ChirpStack JSON: \" + err.message); return null; }\nif (!event || typeof event !== \"object\") return null;\nconst kind = parts[5];\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nconst num = v => typeof v === \"number\" && Number.isFinite(v) ? v : null;\nif (kind === \"up\") {\n  if (event.fPort === 11) {\n    let result = event.object;\n    if (!result || result.message_type !== \"command_ack\") {\n      let b;\n      try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n      if (!b || b.length !== 8 || b[0] !== 1 || b[3] > 2) {\n        s.decode_error = \"Invalid FPort 11 command result. Check SoilNode codec.\";\n        flow.set(\"soil_state\",s);\n        return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n      }\n      result = {\n        command_id:b.readUInt16BE(1) === 65535 ? null : b.readUInt16BE(1),\n        command_status:[\"applied\",\"invalid\",\"storage_failed\"][b[3]],\n        active_sleep_seconds:b.readUInt32BE(4)\n      };\n    }\n    s.last_ack_at = event.time || new Date().toISOString();\n    s.last_ack_id = Number.isInteger(result.command_id) ? result.command_id : null;\n    s.last_ack_status = result.command_status;\n    s.active_sleep_seconds = num(result.active_sleep_seconds);\n    s.decode_error = \"\";\n    if (s.pending_command_id != null && s.last_ack_id === s.pending_command_id) {\n      s.command_state = result.command_status === \"applied\"\n        ? \"Applied by node; active sleep \" + s.active_sleep_seconds + \" s.\"\n        : \"Node rejected command: \" + result.command_status + \". Active sleep \" +\n          s.active_sleep_seconds + \" s.\";\n      s.pending_command_id = null;\n    }\n    flow.set(\"soil_state\",s);\n    node.status({fill:result.command_status === \"applied\" ? \"green\" : \"red\",\n      shape:\"dot\",text:\"command result \" + result.command_status});\n    return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n  }\n  if (event.fPort !== 10) return null;\n  let d = event.object;\n  if (!d || typeof d !== \"object\" || typeof d.sensor_valid !== \"boolean\") {\n    let b;\n    try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n    if (!b || b.length !== 8) {\n      s.decode_error = \"FPort 10 needs decoded object or eight raw bytes. Check SoilNode codec.\";\n      flow.set(\"soil_state\", s);\n      return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n    }\n    const valid = !!(b[0] & 1);\n    d = {\n      sensor_valid: valid,\n      temperature_c: valid ? b.readInt16BE(1) / 100 : null,\n      vwc_percent: valid ? b.readUInt16BE(3) / 100 : null,\n      ec_ms_cm: valid ? b.readUInt16BE(5) / 1000 : null,\n      battery_voltage_v: 2 + b[7] / 100\n    };\n  }\n  s.decode_error = \"\";\n  s.sensor_valid = d.sensor_valid === true;\n  s.temperature_c = s.sensor_valid ? num(d.temperature_c) : null;\n  s.vwc_percent = s.sensor_valid ? num(d.vwc_percent) : null;\n  s.ec_ms_cm = s.sensor_valid ? num(d.ec_ms_cm) : null;\n  s.battery_voltage_v = num(d.battery_voltage_v);\n  s.last_seen = event.time || new Date().toISOString();\n  s.f_cnt = num(event.fCnt);\n  s.uplink_count = (s.uplink_count || 0) + 1;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) {\n    const best = rx.reduce((a,b) => Number(b.snr) > Number(a.snr) ? b : a);\n    s.rssi = num(best.rssi);\n    s.snr = num(best.snr);\n    s.gateway_id = best.gatewayId || \"\";\n  }\n  const lora = (((event.txInfo || {}).modulation || {}).lora || {});\n  s.sf = num(lora.spreadingFactor);\n  s.dr = num(event.dr);\n  s.frequency_hz = num((event.txInfo || {}).frequency);\n  if (s.command_queued_at && !s.first_uplink_after_queue &&\n      Date.parse(s.last_seen) > Date.parse(s.command_queued_at)) {\n    s.first_uplink_after_queue = s.last_seen;\n    s.command_state = \"Later uplink received; interval application still unconfirmed.\";\n  }\n  node.status({fill:s.sensor_valid ? \"green\" : \"yellow\",shape:\"dot\",\n    text:s.sensor_valid ? \"soil reading valid\" : \"soil sensor invalid\"});\n} else if (kind === \"join\") {\n  s.last_join = s.last_event_time;\n} else if (kind === \"txack\") {\n  s.last_txack = s.last_event_time;\n} else if (kind === \"ack\") {\n  s.last_network_ack = event.acknowledged === true ? \"Network ACK received\" : \"Network ACK absent\";\n} else if (kind === \"log\") {\n  s.last_log = event.description || event.code || \"Device log\";\n} else if (kind === \"status\") {\n  s.last_network_status = event.battery == null ? \"Device status received\" : \"Network battery level \" + event.battery;\n} else return null;\nflow.set(\"soil_state\", s);\nconst point = (metric,topic,value) => value === null ? null : {soilMetric:metric,topic:topic,payload:value};\nreturn [\n  {payload:{kind:\"state\",state:s}},\n  kind === \"up\" && s.sensor_valid ? point(\"temp\",\"Temperature\",s.temperature_c) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"vwc\",\"Water content\",s.vwc_percent) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"ec\",\"Conductivity\",s.ec_ms_cm) : null,\n  kind === \"up\" ? point(\"battery\",\"Battery\",s.battery_voltage_v) : null\n];",
+        "outputs": 5,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 180,
+        "wires": [
+            [
+                "58694589d0e88877"
+            ],
+            [
+                "e4232b9edd0bafd0"
+            ],
+            [
+                "e4232b9edd0bafd0"
+            ],
+            [
+                "e4232b9edd0bafd0"
+            ],
+            [
+                "e4232b9edd0bafd0"
+            ]
+        ]
+    },
+    {
+        "id": "d0e32239fceb43ae",
+        "type": "function",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "name": "Validate and queue interval",
+        "func": "const action = msg.payload || {};\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\nconst snapshot = () => ({payload:{kind:\"state\",state:s}});\nif (action.kind === \"refresh\") return [null,snapshot()];\nif (action.kind !== \"command\") return null;\nconst app = String(env.get(\"SOIL_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  s.ui_error = \"Set SOIL_APP_ID and SOIL_DEV_EUI in Node-RED environment.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nconst seconds = action.sleep_seconds;\nif (typeof seconds !== \"number\" || !Number.isInteger(seconds) ||\n    seconds < 10 || seconds > 86400) {\n  s.ui_error = \"Sleep interval must be a whole number from 10 to 86400 seconds.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nlet id = flow.get(\"soil_next_command_id\");\nif (!Number.isInteger(id) || id < 1 || id > 65534) id = 1;\nflow.set(\"soil_next_command_id\",id === 65534 ? 1 : id + 1);\ns.pending_command_id = id;\ns.ui_error = \"\";\ns.command_queued_at = new Date().toISOString();\ns.command_requested_seconds = seconds;\ns.first_uplink_after_queue = null;\ns.command_state = \"Downlink submitted to ChirpStack; waiting for next Class A receive window.\";\nflow.set(\"soil_state\",s);\nnode.status({fill:\"yellow\",shape:\"dot\",text:\"queued \" + seconds + \" s\"});\nreturn [{\n  topic:\"application/\" + app + \"/device/\" + eui + \"/command/down\",\n  payload:JSON.stringify({devEui:eui,confirmed:false,fPort:10,object:{sleep_seconds:seconds,command_id:id}}),\n  qos:\"0\",retain:false\n},snapshot()];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1040,
+        "y": 140,
+        "wires": [
+            [
+                "835a8e033ba9d61b"
+            ],
+            [
+                "58694589d0e88877"
+            ]
+        ]
+    },
+    {
+        "id": "835a8e033ba9d61b",
+        "type": "mqtt out",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "name": "ChirpStack downlink",
+        "topic": "",
+        "qos": "0",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "sc_ae0178f3742ff530",
+        "x": 1300,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "a11854339c685abb",
+        "type": "ui-chart",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "name": "Temperature history",
+        "label": "Temperature (°C)",
+        "order": 1,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 940,
+        "y": 300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "d475c1626727312a",
+        "type": "ui-chart",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "name": "Water content history",
+        "label": "Water content (% VWC)",
+        "order": 3,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 940,
+        "y": 360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "6d8f958c7fe37a0a",
+        "type": "ui-chart",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "name": "Conductivity history",
+        "label": "Conductivity (mS/cm)",
+        "order": 5,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 940,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "a684f5d7791f886b",
+        "type": "ui-chart",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "name": "Battery history",
+        "label": "Battery (V)",
+        "order": 7,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 940,
+        "y": 480,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "58694589d0e88877",
+        "type": "ui-template",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_ui_group",
+        "page": "",
+        "ui": "",
+        "name": "SoilNode compact HTML",
+        "order": 1,
+        "width": "8",
+        "height": "11",
+        "head": "",
+        "format": "<template>\n<div class=\"sc-soil\">\n  <div class=\"sc-head\">\n    <div><strong>SoilNode</strong><small>Class A soil monitor</small></div>\n    <span class=\"sc-pill\" :class=\"state.sensor_valid ? 'ok' : 'bad'\">{{ state.last_seen ? (state.sensor_valid ? 'Sensor valid' : 'Sensor read failed') : 'Waiting for uplink' }}</span>\n  </div>\n  <div class=\"sc-grid\">\n    <div><small>Temperature</small><b>{{ show(state.temperature_c, ' °C') }}</b></div>\n    <div><small>Water content</small><b>{{ show(state.vwc_percent, ' % VWC') }}</b></div>\n    <div><small>Conductivity</small><b>{{ show(state.ec_ms_cm, ' mS/cm') }}</b></div>\n    <div><small>Battery</small><b>{{ show(state.battery_voltage_v, ' V') }}</b></div>\n    <div><small>Last uplink</small><b>{{ local(state.last_seen) }}</b></div>\n    <div><small>Signal</small><b>{{ show(state.rssi, ' dBm') }} / {{ show(state.snr, ' dB SNR') }}</b></div>\n  </div>\n  <div class=\"sc-section\">\n    <h3>Sleep interval</h3>\n    <div class=\"sc-controls\">\n      <v-text-field v-model.number=\"sleepSeconds\" type=\"number\" min=\"10\" max=\"86400\" step=\"1\" label=\"Seconds (10–86400)\" density=\"compact\" hide-details></v-text-field>\n      <v-btn color=\"primary\" :disabled=\"!validInterval()\" @click=\"sendSleep\">Queue interval</v-btn>\n    </div>\n    <small>Queued for next Class A receive window. Queue one command at a time.</small>\n  </div>\n  <div class=\"sc-section sc-feedback\">\n    <h3>Command feedback</h3>\n    <div><b>Requested:</b> {{ show(state.command_requested_seconds, ' s') }} · ID {{ show(state.pending_command_id) }} · {{ local(state.command_queued_at) }}</div>\n    <div><b>State:</b> {{ state.command_state || 'No command queued' }}</div>\n    <div><b>Application result:</b> {{ state.last_ack_status || '-' }} · ID {{ show(state.last_ack_id) }} · active {{ show(state.active_sleep_seconds, ' s') }} · {{ local(state.last_ack_at) }}</div>\n    <small>Network txack and network ACK do not confirm application.</small>\n  </div>\n  <div class=\"sc-footer\">\n    <span>Uplinks {{ show(state.uplink_count) }} · FCnt {{ show(state.f_cnt) }}</span>\n    <span>Gateway {{ state.gateway_id || '-' }}</span>\n    <span>Last event {{ state.last_event || '-' }} · {{ local(state.last_event_time) }}</span>\n  </div>\n  <div class=\"sc-alert\" v-if=\"state.ui_error\">{{ state.ui_error }}</div>\n  <div class=\"sc-alert\" v-if=\"state.decode_error\">{{ state.decode_error }}</div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{},sleepSeconds:600}; },\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix; },\n    local(iso) { if (!iso) return '-'; const d = new Date(iso); return isNaN(d.getTime()) ? '-' : d.toLocaleString(); },\n    validInterval() { const n=Number(this.sleepSeconds); return Number.isInteger(n) && n>=10 && n<=86400; },\n    sendSleep() {\n      if (!this.validInterval()) return;\n      this.send({payload:{kind:'command',sleep_seconds:Number(this.sleepSeconds)}});\n    }\n  }\n}\n</script>\n<style>\n.sc-soil{padding:8px}.sc-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:1.15rem}.sc-head small{display:block;color:#667;font-size:.8rem}.sc-pill{padding:6px 12px;border-radius:20px;background:#e5e7eb;font-size:.85rem}.sc-pill.ok{background:#dcfce7;color:#166534}.sc-pill.bad{background:#fef3c7;color:#92400e}.sc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:14px 0}.sc-grid>div{padding:10px;border:1px solid #ccd7df;border-radius:8px}.sc-grid small{display:block;color:#566}.sc-grid b{font-size:1.15rem}.sc-section,.sc-footer{border-top:1px solid #ccd7df;padding-top:10px;margin-top:10px}.sc-section h3{margin:0 0 9px}.sc-controls{display:flex;align-items:center;gap:10px;max-width:460px}.sc-controls .v-input{flex:1}.sc-section small,.sc-footer{color:#566;font-size:.82rem}.sc-feedback div{margin:5px 0}.sc-footer{display:flex;flex-wrap:wrap;gap:8px 18px}.sc-alert{background:#b3261e;color:#fff;border-radius:5px;padding:8px;margin-top:10px}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 790,
+        "y": 140,
+        "wires": [
+            [
+                "d0e32239fceb43ae"
+            ]
+        ]
+    },
+    {
+        "id": "e4232b9edd0bafd0",
+        "type": "function",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "name": "Soil chart time zoom",
+        "func": "// Per-chart time window. + shows a shorter span; - shows a longer span.\nconst windows = [\n  {label:\"30 min\",ms:1800000}, {label:\"1 h\",ms:3600000},\n  {label:\"3 h\",ms:10800000}, {label:\"6 h\",ms:21600000},\n  {label:\"12 h\",ms:43200000}, {label:\"24 h\",ms:86400000}\n];\nconst metrics = {temp:0,vwc:1,ec:2,battery:3};\nconst metric = msg.soilMetric || (msg.payload && msg.payload.metric);\nif (!Object.prototype.hasOwnProperty.call(metrics,metric)) return null;\nconst slot = metrics[metric];\nconst key = \"soil_zoom_\" + metric;\nlet index = Number(flow.get(key));\nif (!Number.isInteger(index) || index < 0 || index >= windows.length) index = 3;\nconst control = msg.payload && msg.payload.kind === \"zoom\";\nif (control) {\n  if (msg.payload.direction !== 1 && msg.payload.direction !== -1) return null;\n  index = Math.max(0,Math.min(windows.length-1,index - msg.payload.direction));\n  flow.set(key,index);\n} else if (typeof msg.payload !== \"number\" || !Number.isFinite(msg.payload)) return null;\nconst now = Date.now();\nconst axis = {ui_update:{chartOptions:{xAxis:{min:now-windows[index].ms,max:now}}}};\nconst out = Array(8).fill(null);\nout[slot] = control ? axis : [axis,{topic:msg.topic,payload:msg.payload}];\nif (control) out[slot+4] = {payload:{kind:\"zoom_state\",label:windows[index].label}};\nreturn out;",
+        "outputs": 8,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 670,
+        "y": 360,
+        "wires": [
+            [
+                "a11854339c685abb"
+            ],
+            [
+                "d475c1626727312a"
+            ],
+            [
+                "6d8f958c7fe37a0a"
+            ],
+            [
+                "a684f5d7791f886b"
+            ],
+            [
+                "c5a1919110f9cc40"
+            ],
+            [
+                "470a0b307e8d7858"
+            ],
+            [
+                "85bcffc571fa5084"
+            ],
+            [
+                "16bf625eecb4e1cb"
+            ]
+        ]
+    },
+    {
+        "id": "c5a1919110f9cc40",
+        "type": "ui-template",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "page": "",
+        "ui": "",
+        "name": "TEMP chart zoom",
+        "order": 2,
+        "width": "1",
+        "height": "4",
+        "head": "",
+        "format": "<template>\n<div class=\"sc-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"temp\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.sc-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.sc-zoom span{text-align:center;white-space:nowrap}\n.sc-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.sc-zoom button:hover{background:#e3edf4}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1150,
+        "y": 300,
+        "wires": [
+            [
+                "e4232b9edd0bafd0"
+            ]
+        ]
+    },
+    {
+        "id": "470a0b307e8d7858",
+        "type": "ui-template",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "page": "",
+        "ui": "",
+        "name": "VWC chart zoom",
+        "order": 4,
+        "width": "1",
+        "height": "4",
+        "head": "",
+        "format": "<template>\n<div class=\"sc-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"vwc\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.sc-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.sc-zoom span{text-align:center;white-space:nowrap}\n.sc-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.sc-zoom button:hover{background:#e3edf4}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1150,
+        "y": 360,
+        "wires": [
+            [
+                "e4232b9edd0bafd0"
+            ]
+        ]
+    },
+    {
+        "id": "85bcffc571fa5084",
+        "type": "ui-template",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "page": "",
+        "ui": "",
+        "name": "EC chart zoom",
+        "order": 6,
+        "width": "1",
+        "height": "4",
+        "head": "",
+        "format": "<template>\n<div class=\"sc-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"ec\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.sc-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.sc-zoom span{text-align:center;white-space:nowrap}\n.sc-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.sc-zoom button:hover{background:#e3edf4}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1140,
+        "y": 420,
+        "wires": [
+            [
+                "e4232b9edd0bafd0"
+            ]
+        ]
+    },
+    {
+        "id": "16bf625eecb4e1cb",
+        "type": "ui-template",
+        "z": "soil_dashboard_tab",
+        "g": "0213c819b759b29f",
+        "group": "sc_soil_graph_group",
+        "page": "",
+        "ui": "",
+        "name": "BATTERY chart zoom",
+        "order": 8,
+        "width": "1",
+        "height": "4",
+        "head": "",
+        "format": "<template>\n<div class=\"sc-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"battery\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.sc-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.sc-zoom span{text-align:center;white-space:nowrap}\n.sc-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.sc-zoom button:hover{background:#e3edf4}\n</style>",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1140,
+        "y": 480,
+        "wires": [
+            [
+                "e4232b9edd0bafd0"
+            ]
+        ]
+    },
+    {
+        "id": "sc_ae0178f3742ff530",
+        "type": "mqtt-broker",
+        "name": "chirpstack_mosquito",
+        "broker": "localhost",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "sc_soil_graph_group",
+        "type": "ui-group",
+        "z": "soil_dashboard_tab",
+        "name": "SoilNode history",
+        "page": "sc_soil_ui_page",
+        "width": "4",
+        "height": 1,
+        "order": 2,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "sc_soil_ui_group",
+        "type": "ui-group",
+        "z": "soil_dashboard_tab",
+        "name": "SoilNode compact status and control",
+        "page": "sc_soil_ui_page",
+        "width": "8",
+        "height": 1,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "sc_soil_ui_page",
+        "type": "ui-page",
+        "z": "soil_dashboard_tab",
+        "name": "SoilNode Compact",
+        "ui": "f53e93e9ba219e63",
+        "path": "/soil-node",
+        "icon": "mdi-waves-arrow-up",
+        "layout": "grid",
+        "theme": "e49416861823a329",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 1,
+        "className": "",
+        "visible": "true",
+        "disabled": "false"
+    },
+    {
+        "id": "f53e93e9ba219e63",
+        "type": "ui-base",
+        "name": "My Dashboard",
+        "path": "/dashboard",
+        "appIcon": "",
+        "includeClientData": true,
+        "acceptsClientConfig": [
+            "ui-notification",
+            "ui-control"
+        ],
+        "showPathInSidebar": false,
+        "headerContent": "page",
+        "navigationStyle": "fixed",
+        "titleBarStyle": "default",
+        "showReconnectNotification": true,
+        "notificationDisplayTime": 1,
+        "showDisconnectNotification": true,
+        "allowInstall": true
+    },
+    {
+        "id": "e49416861823a329",
+        "type": "ui-theme",
+        "name": "MyTheme",
+        "colors": {
+            "surface": "#ffffff",
+            "primary": "#0094ce",
+            "bgPage": "#eeeeee",
+            "groupBg": "#ffffff",
+            "groupOutline": "#cccccc"
+        },
+        "sizes": {
+            "density": "default",
+            "pagePadding": "12px",
+            "groupGap": "12px",
+            "groupBorderRadius": "4px",
+            "widgetGap": "12px"
+        }
+    },
+    {
+        "id": "337b48a10d0ffdab",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@flowfuse/node-red-dashboard": "1.30.2"
+        }
+    }
+]

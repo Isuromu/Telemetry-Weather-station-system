@@ -1,0 +1,647 @@
+[
+  {
+    "id": "e3f6f8117a9a7c9f",
+    "type": "group",
+    "z": "4e9925030f873fb0",
+    "style": {
+      "stroke": "#999999",
+      "stroke-opacity": "1",
+      "fill": "none",
+      "fill-opacity": "1",
+      "label": true,
+      "label-position": "nw",
+      "color": "#767676"
+    },
+    "nodes": [
+      "e0d15367f77b2132",
+      "73a450448666370f",
+      "57f7b14733df83e1",
+      "ef75919903862bac",
+      "bc9758d562df8a25",
+      "7ed2df20abdb6f80",
+      "c18c10fb6058ad56",
+      "738e75078638f145"
+    ],
+    "x": 154,
+    "y": 271.5,
+    "w": 1122,
+    "h": 329.5
+  },
+  {
+    "id": "e0d15367f77b2132",
+    "type": "function",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "name": "Build pressure battery and flow chart inputs",
+    "func": "// Build Valve 1 chart inputs from decoded FPort 31 telemetry only.\nconst topic = String(msg.topic || \"\");\nif (topic && !topic.endsWith(\"/up\")) return null;\nconst event = msg.payload || {};\nif (event.fPort !== 31) return null;\nconst raw = event.object || {};\nfunction num(v) { return typeof v === \"number\" && isFinite(v) ? v : null; }\nconst pressure = [];\nconst upstream = num(raw.upstream_pressure_bar);\nconst downstream = num(raw.downstream_pressure_bar);\nif (upstream !== null) pressure.push({pn1Metric:\"pressure\",topic:\"Upstream\",payload:upstream});\nif (downstream !== null) pressure.push({pn1Metric:\"pressure\",topic:\"Downstream\",payload:downstream});\nconst battery = num(raw.battery_voltage_v);\nconst flowRate = num(raw.flow_rate_m3_h);\nreturn [pressure.length ? pressure : null,\n        battery !== null ? {pn1Metric:\"battery\",topic:\"Battery\",payload:battery} : null,\n        flowRate !== null ? {pn1Metric:\"flow\",topic:\"Flow Rate\",payload:flowRate} : null];",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 350,
+    "y": 320,
+    "wires": [
+      [
+        "73a450448666370f"
+      ],
+      [
+        "73a450448666370f"
+      ],
+      [
+        "73a450448666370f"
+      ]
+    ]
+  },
+  {
+    "id": "73a450448666370f",
+    "type": "function",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "name": "Valve 1 chart time zoom",
+    "func": "// Per-chart time window. + shows a shorter span; - shows a longer span.\nconst windows = [\n  {label:\"30 min\",ms:1800000}, {label:\"1 h\",ms:3600000},\n  {label:\"3 h\",ms:10800000}, {label:\"6 h\",ms:21600000},\n  {label:\"12 h\",ms:43200000}, {label:\"24 h\",ms:86400000}\n];\nconst metrics = {pressure:0,battery:1,flow:2};\nconst metric = msg.pn1Metric || (msg.payload && msg.payload.metric);\nif (!Object.prototype.hasOwnProperty.call(metrics,metric)) return null;\nconst slot = metrics[metric];\nconst key = \"pn1_zoom_\" + metric;\nlet index = Number(flow.get(key));\nif (!Number.isInteger(index) || index < 0 || index >= windows.length) index = 3;\nconst control = msg.payload && msg.payload.kind === \"zoom\";\nif (control) {\n  if (msg.payload.direction !== 1 && msg.payload.direction !== -1) return null;\n  index = Math.max(0,Math.min(windows.length-1,index - msg.payload.direction));\n  flow.set(key,index);\n} else if (typeof msg.payload !== \"number\" || !Number.isFinite(msg.payload)) return null;\nconst now = Date.now();\nconst axis = {ui_update:{chartOptions:{xAxis:{min:now-windows[index].ms,max:now}}}};\nconst out = Array(6).fill(null);\nout[slot] = control ? axis : [axis,{topic:msg.topic,payload:msg.payload}];\nif (control) out[slot+3] = {payload:{kind:\"zoom_state\",label:windows[index].label}};\nreturn out;",
+    "outputs": 6,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 440,
+    "wires": [
+      [
+        "57f7b14733df83e1"
+      ],
+      [
+        "bc9758d562df8a25"
+      ],
+      [
+        "c18c10fb6058ad56"
+      ],
+      [
+        "ef75919903862bac"
+      ],
+      [
+        "7ed2df20abdb6f80"
+      ],
+      [
+        "738e75078638f145"
+      ]
+    ]
+  },
+  {
+    "id": "57f7b14733df83e1",
+    "type": "ui-chart",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "name": "Pressure history",
+    "label": "Pressure (bar)",
+    "order": 1,
+    "chartType": "line",
+    "category": "topic",
+    "categoryType": "msg",
+    "xAxisLabel": "",
+    "xAxisProperty": "",
+    "xAxisPropertyType": "timestamp",
+    "xAxisType": "time",
+    "xAxisFormat": "",
+    "xAxisFormatType": "{HH}:{mm}",
+    "xmin": "",
+    "xmax": "",
+    "yAxisLabel": "",
+    "yAxisProperty": "payload",
+    "yAxisPropertyType": "msg",
+    "ymin": "",
+    "ymax": "",
+    "bins": "",
+    "action": "append",
+    "stackSeries": false,
+    "pointShape": "circle",
+    "pointRadius": "",
+    "showLegend": true,
+    "removeOlder": "24",
+    "removeOlderUnit": "60",
+    "removeOlderPoints": "",
+    "colors": [
+      "#1f77b4",
+      "#ff7f0e",
+      "#2ca02c",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000"
+    ],
+    "textColor": [
+      "#666666"
+    ],
+    "textColorDefault": true,
+    "gridColor": [
+      "#e5e5e5"
+    ],
+    "gridColorDefault": true,
+    "width": "3",
+    "height": "4",
+    "className": "",
+    "interpolation": "linear",
+    "x": 910,
+    "y": 320,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ef75919903862bac",
+    "type": "ui-template",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "page": "",
+    "ui": "",
+    "name": "Pressure chart zoom",
+    "order": 2,
+    "width": "1",
+    "height": "4",
+    "head": "",
+    "format": "<template>\n<div class=\"pn1-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"pressure\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.pn1-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.pn1-zoom span{text-align:center;white-space:nowrap}\n.pn1-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.pn1-zoom button:hover{background:#e3edf4}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 1150,
+    "y": 320,
+    "wires": [
+      [
+        "73a450448666370f"
+      ]
+    ]
+  },
+  {
+    "id": "bc9758d562df8a25",
+    "type": "ui-chart",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "name": "Battery voltage history",
+    "label": "Battery voltage (V)",
+    "order": 3,
+    "chartType": "line",
+    "category": "topic",
+    "categoryType": "msg",
+    "xAxisLabel": "",
+    "xAxisProperty": "",
+    "xAxisPropertyType": "timestamp",
+    "xAxisType": "time",
+    "xAxisFormat": "",
+    "xAxisFormatType": "{HH}:{mm}",
+    "xmin": "",
+    "xmax": "",
+    "yAxisLabel": "",
+    "yAxisProperty": "payload",
+    "yAxisPropertyType": "msg",
+    "ymin": "",
+    "ymax": "",
+    "bins": "",
+    "action": "append",
+    "stackSeries": false,
+    "pointShape": "circle",
+    "pointRadius": "",
+    "showLegend": false,
+    "removeOlder": "24",
+    "removeOlderUnit": "60",
+    "removeOlderPoints": "",
+    "colors": [
+      "#1f77b4",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000"
+    ],
+    "textColor": [
+      "#666666"
+    ],
+    "textColorDefault": true,
+    "gridColor": [
+      "#e5e5e5"
+    ],
+    "gridColorDefault": true,
+    "width": "3",
+    "height": "4",
+    "className": "",
+    "interpolation": "linear",
+    "x": 910,
+    "y": 440,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "7ed2df20abdb6f80",
+    "type": "ui-template",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "page": "",
+    "ui": "",
+    "name": "Battery chart zoom",
+    "order": 4,
+    "width": "1",
+    "height": "4",
+    "head": "",
+    "format": "<template>\n<div class=\"pn1-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"battery\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.pn1-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.pn1-zoom span{text-align:center;white-space:nowrap}\n.pn1-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.pn1-zoom button:hover{background:#e3edf4}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 1150,
+    "y": 440,
+    "wires": [
+      [
+        "73a450448666370f"
+      ]
+    ]
+  },
+  {
+    "id": "c18c10fb6058ad56",
+    "type": "ui-chart",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "name": "Flow rate history",
+    "label": "Flow rate (m3/h)",
+    "order": 5,
+    "chartType": "line",
+    "category": "topic",
+    "categoryType": "msg",
+    "xAxisLabel": "",
+    "xAxisProperty": "",
+    "xAxisPropertyType": "timestamp",
+    "xAxisType": "time",
+    "xAxisFormat": "",
+    "xAxisFormatType": "{HH}:{mm}",
+    "xmin": "",
+    "xmax": "",
+    "yAxisLabel": "",
+    "yAxisProperty": "payload",
+    "yAxisPropertyType": "msg",
+    "ymin": "",
+    "ymax": "",
+    "bins": "",
+    "action": "append",
+    "stackSeries": false,
+    "pointShape": "circle",
+    "pointRadius": "",
+    "showLegend": false,
+    "removeOlder": "24",
+    "removeOlderUnit": "60",
+    "removeOlderPoints": "",
+    "colors": [
+      "#16a085",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000",
+      "#000000"
+    ],
+    "textColor": [
+      "#666666"
+    ],
+    "textColorDefault": true,
+    "gridColor": [
+      "#e5e5e5"
+    ],
+    "gridColorDefault": true,
+    "width": "3",
+    "height": "4",
+    "className": "",
+    "interpolation": "linear",
+    "x": 910,
+    "y": 560,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "738e75078638f145",
+    "type": "ui-template",
+    "z": "4e9925030f873fb0",
+    "g": "e3f6f8117a9a7c9f",
+    "group": "af380505a9b7e174",
+    "page": "",
+    "ui": "",
+    "name": "Flow rate chart zoom",
+    "order": 6,
+    "width": "1",
+    "height": "4",
+    "head": "",
+    "format": "<template>\n<div class=\"pn1-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"flow\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.pn1-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.pn1-zoom span{text-align:center;white-space:nowrap}\n.pn1-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.pn1-zoom button:hover{background:#e3edf4}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 1150,
+    "y": 560,
+    "wires": [
+      [
+        "73a450448666370f"
+      ]
+    ]
+  },
+  {
+    "id": "007fe31857b51bd8",
+    "type": "ui-page",
+    "z": "4e9925030f873fb0",
+    "name": "Valve 1",
+    "ui": "f53e93e9ba219e63",
+    "path": "/page3",
+    "icon": "mdi-pipe-valve",
+    "layout": "grid",
+    "theme": "e49416861823a329",
+    "breakpoints": [
+      {
+        "name": "Default",
+        "px": "0",
+        "cols": "3"
+      },
+      {
+        "name": "Tablet",
+        "px": "576",
+        "cols": "6"
+      },
+      {
+        "name": "Small Desktop",
+        "px": "768",
+        "cols": "12"
+      },
+      {
+        "name": "Desktop",
+        "px": "1024",
+        "cols": "12"
+      }
+    ],
+    "order": 2,
+    "className": "",
+    "visible": "true",
+    "disabled": "false"
+  },
+  {
+    "id": "f53e93e9ba219e63",
+    "type": "ui-base",
+    "name": "My Dashboard",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "fixed",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": true
+  },
+  {
+    "id": "e49416861823a329",
+    "type": "ui-theme",
+    "name": "MyTheme",
+    "colors": {
+      "surface": "#ffffff",
+      "primary": "#0094ce",
+      "bgPage": "#eeeeee",
+      "groupBg": "#ffffff",
+      "groupOutline": "#cccccc"
+    },
+    "sizes": {
+      "density": "default",
+      "pagePadding": "12px",
+      "groupGap": "12px",
+      "groupBorderRadius": "4px",
+      "widgetGap": "12px"
+    }
+  },
+  {
+    "id": "bed8609050b3e817",
+    "type": "group",
+    "z": "4e9925030f873fb0",
+    "style": {
+      "stroke": "#999999",
+      "stroke-opacity": "1",
+      "fill": "none",
+      "fill-opacity": "1",
+      "label": true,
+      "label-position": "nw",
+      "color": "#767676"
+    },
+    "nodes": [
+      "d23474ddb8f5da97",
+      "317ba651c9be9b81",
+      "353da4a7ddcce2f4",
+      "9c700fdb516de397",
+      "a20e5fd2abee3ea4"
+    ],
+    "x": 64,
+    "y": 49,
+    "w": 1342,
+    "h": 132
+  },
+  {
+    "id": "d23474ddb8f5da97",
+    "type": "mqtt in",
+    "z": "4e9925030f873fb0",
+    "g": "bed8609050b3e817",
+    "name": "ChirpStack events",
+    "topic": "application/SET_VALVE1_APP_ID/device/SET_VALVE1_DEV_EUI/event/+",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "ae0178f3742ff530",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 180,
+    "y": 140,
+    "wires": [
+      [
+        "317ba651c9be9b81",
+        "e0d15367f77b2132"
+      ]
+    ]
+  },
+  {
+    "id": "317ba651c9be9b81",
+    "type": "function",
+    "z": "4e9925030f873fb0",
+    "g": "bed8609050b3e817",
+    "name": "Track valve_1 state",
+    "func": "// Keep a dashboard snapshot of valve_1 in the flow context.\n// ChirpStack publishes every event kind on event/+, so ack, txack, join, log\n// and status are recorded too. Only FPort 31 \"up\" events carry the protocol v2\n// status object produced by the FPort 30/31 codec.\nconst APP_ID = \"SET_VALVE1_APP_ID\";\nconst DEV_EUI = \"SET_VALVE1_DEV_EUI\";\nconst PREFIX = \"application/\" + APP_ID + \"/device/\" + DEV_EUI + \"/event/\";\n\nlet event = msg.payload;\ntry {\n    if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n    else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (err) {\n    node.warn(\"Invalid ChirpStack JSON: \" + err.message);\n    return null;\n}\nif (!event || typeof event !== \"object\") return null;\n\nfunction num(v) { return typeof v === \"number\" && isFinite(v) ? v : null; }\n\nconst topic = String(msg.topic || \"\");\nconst kind = topic.indexOf(PREFIX) === 0 ? topic.slice(PREFIX.length).split(\"/\")[0] : \"up\";\n\nconst s = Object.assign({}, flow.get(\"pn1_state\"));\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\n\nif (kind === \"up\") {\n    if (event.fPort !== 31) {\n        s.decode_error = \"Ignored an FPort \" + event.fPort + \" uplink; valve_1 status is FPort 31.\";\n    } else if (!event.object || typeof event.object !== \"object\") {\n        s.decode_error = \"The FPort 31 uplink has no decoded object. Check that the protocol v2 codec (FPort 30 down, FPort 31 up) is set on the valve_1 device profile.\";\n    } else {\n        const d = event.object;\n        s.decode_error = \"\";\n        s.raw = d;\n        s.protocol_version = num(d.protocol_version);\n        s.runtime_mode = d.runtime_mode;\n        s.status_reason = d.status_reason;\n        s.pcv_last_commanded = d.pcv_last_commanded;\n        s.pcv_position_verified = d.pcv_position_verified === true;\n        s.sleep_seconds = num(d.sleep_seconds);\n        s.sleep_minutes = num(d.sleep_minutes);\n        s.last_command_id = num(d.last_command_id);\n        s.battery_voltage_v = num(d.battery_voltage_v);\n        s.battery_soc_percent = num(d.battery_soc_percent);\n        s.upstream_pressure_bar = num(d.upstream_pressure_bar);\n        s.upstream_temperature_c = num(d.upstream_temperature_c);\n        s.upstream_scale_validated = d.upstream_scale_validated === true;\n        s.downstream_pressure_bar = num(d.downstream_pressure_bar);\n        s.downstream_temperature_c = num(d.downstream_temperature_c);\n        s.downstream_scale_validated = d.downstream_scale_validated === true;\n        s.flow_rate_m3_h = num(d.flow_rate_m3_h);\n        s.flow_total_since_reset_m3 = num(d.flow_total_since_reset_m3);\n        s.water_velocity_m_s = num(d.water_velocity_m_s);\n        s.tuf_error_bits = num(d.tuf_error_bits);\n        s.last_seen = event.time || new Date().toISOString();\n        s.f_cnt = num(event.fCnt);\n        s.f_port = num(event.fPort);\n        s.dr = num(event.dr);\n        s.adr = event.adr === true;\n        s.dev_addr = event.devAddr;\n        s.device_class = (event.deviceInfo || {}).deviceClassEnabled;\n        s.uplink_count = (num(s.uplink_count) || 0) + 1;\n        const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n        if (rx.length > 0) {\n            let best = rx[0];\n            for (let i = 1; i < rx.length; i++) {\n                if (Number(rx[i].snr) > Number(best.snr)) best = rx[i];\n            }\n            s.rssi = num(best.rssi);\n            s.snr = num(best.snr);\n            s.gateway_id = best.gatewayId;\n        }\n        const lora = ((event.txInfo || {}).modulation || {}).lora || {};\n        s.frequency = num((event.txInfo || {}).frequency);\n        s.sf = num(lora.spreadingFactor);\n        s.bandwidth = num(lora.bandwidth);\n        if (s.sent_command_id !== null && s.sent_command_id !== undefined &&\n            s.last_command_id === s.sent_command_id) {\n            s.sent_state = \"Reported back by the device: \" + (d.status_reason || \"accepted\");\n        }\n        node.status({ fill: \"green\", shape: \"dot\", text: \"FPort 31 \" + (s.status_reason || \"uplink\") });\n    }\n} else if (kind === \"ack\") {\n    s.network_ack = event.acknowledged === true ? \"Downlink acknowledged\" : \"Downlink not acknowledged\";\n} else if (kind === \"txack\") {\n    s.network_txack = \"Gateway transmitted the downlink\";\n} else if (kind === \"join\") {\n    s.network_join = s.last_event_time;\n} else if (kind === \"log\") {\n    s.network_log = event.description || event.code || \"Device log\";\n} else if (kind === \"status\") {\n    s.network_status = \"Network server battery level \" + event.battery;\n} else {\n    return null;\n}\n\nflow.set(\"pn1_state\", s);\nmsg.payload = { kind: \"state\", state: s };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 450,
+    "y": 90,
+    "wires": [
+      [
+        "353da4a7ddcce2f4"
+      ]
+    ]
+  },
+  {
+    "id": "353da4a7ddcce2f4",
+    "type": "ui-template",
+    "z": "4e9925030f873fb0",
+    "g": "bed8609050b3e817",
+    "group": "ui_group_valve1_telemetry",
+    "page": "",
+    "ui": "",
+    "name": "valve_1 state and commands",
+    "order": 1,
+    "width": "8",
+    "height": "15",
+    "head": "",
+    "format": "<template>\n<div class=\"pn1\">\n  <div class=\"pn1-head\">\n    <strong>valve_1</strong>\n    <span v-if=\"state.last_seen\">Last uplink {{ local(state.last_seen) }} &middot; FCnt {{ show(state.f_cnt) }} &middot; {{ show(state.uplink_count) }} received</span>\n    <span v-else>Waiting for an FPort 31 status uplink</span>\n  </div>\n\n  <div class=\"pn1-grid\">\n    <div><small>Status reason</small><b>{{ show(state.status_reason) }}</b></div>\n    <div><small>Runtime mode</small><b>{{ show(state.runtime_mode) }}</b></div>\n    <div><small>PCV commanded</small><b>{{ show(state.pcv_last_commanded) }}</b></div>\n    <div><small>Position verified</small><b>{{ state.pcv_position_verified ? \"yes\" : \"no\" }}</b></div>\n    <div><small>Sleep interval</small><b>{{ sleepText(state.sleep_seconds) }}</b></div>\n    <div><small>Last command ID</small><b>{{ show(state.last_command_id) }}</b></div>\n    <div><small>Battery</small><b>{{ show(state.battery_voltage_v, \" V\") }}</b></div>\n    <div><small>Pressure upstream / downstream</small><b>{{ show(state.upstream_pressure_bar, \" bar\") }} / {{ show(state.downstream_pressure_bar, \" bar\") }}</b></div>\n    <div><small>Temperature upstream / downstream</small><b>{{ show(state.upstream_temperature_c, \" C\") }} / {{ show(state.downstream_temperature_c, \" C\") }}</b></div>\n    <div><small>Sensor scale</small><b>{{ state.upstream_scale_validated ? \"upstream validated\" : \"upstream not validated\" }} / {{ state.downstream_scale_validated ? \"downstream validated\" : \"downstream not validated\" }}</b></div>\n    <div><small>Flow meter</small><b>{{ show(state.flow_rate_m3_h, \" m3/h\") }}</b></div>\n    <div><small>Flow total since local reset</small><b>{{ show(state.flow_total_since_reset_m3, \" m3\") }}</b></div>\n    <div><small>Water velocity</small><b>{{ show(state.water_velocity_m_s, \" m/s\") }}</b></div>\n    <div><small>TUF error bits</small><b>{{ show(state.tuf_error_bits) }}</b></div>\n    <div><small>Radio</small><b>{{ radioText }}</b></div>\n    <div><small>Gateway</small><b>{{ state.gateway_id || \"-\" }}</b></div>\n  </div>\n\n  <div class=\"pn1-controls\">\n    <h3>Command valve_1</h3>\n    <p>valve_1 is Class A: it only hears a downlink in the receive window after one of its own uplinks, so every command below waits in ChirpStack until the node next wakes, and the node then sleeps for its configured interval. Each command is sent with a fresh command_id, because the node ignores an id it has already accepted. Flow total reset stores a new ESP32 baseline; it does not clear TUF-2000M totals.</p>\n    <div class=\"pn1-row\">\n      <v-text-field :model-value=\"sleep_seconds\" @update:model-value=\"onSleepInput\" type=\"number\" min=\"10\" max=\"86400\" step=\"1\" label=\"Sleep interval in seconds (10 to 86400)\" density=\"compact\"></v-text-field>\n      <span class=\"pn1-note\">{{ sleepNote }}</span>\n      <v-btn @click=\"sendSleep\" :disabled=\"!sleepValid\">Set sleep interval</v-btn>\n    </div>\n    <div class=\"pn1-row\">\n      <v-btn color=\"success\" @click=\"issue('open', true)\">Open + sleep</v-btn>\n      <v-btn color=\"error\" @click=\"issue('close', true)\">Close + sleep</v-btn>\n      <v-btn @click=\"issue('open', false)\">Open only</v-btn>\n      <v-btn @click=\"issue('close', false)\">Close only</v-btn>\n      <v-btn variant=\"text\" @click=\"issue('none', false)\">No-op test</v-btn>\n      <v-btn color=\"warning\" @click=\"resetFlowTotal\">Reset local flow total</v-btn>\n    </div>\n  </div>\n\n  <div class=\"pn1-footer\">\n    <div><b>Last downlink queued:</b> {{ state.sent_at ? local(state.sent_at) : \"-\" }}<span v-if=\"state.sent_object\"> &middot; ID {{ show(state.sent_command_id) }} &middot; {{ sentText }}</span></div>\n    <div><b>Delivery:</b> {{ state.sent_state || \"-\" }}</div>\n    <div><b>Last event:</b> {{ show(state.last_event) }} at {{ state.last_event_time ? local(state.last_event_time) : \"-\" }}<span v-if=\"state.network_ack\"> &middot; {{ state.network_ack }}</span><span v-if=\"state.network_txack\"> &middot; {{ state.network_txack }}</span><span v-if=\"state.network_join\"> &middot; joined {{ local(state.network_join) }}</span><span v-if=\"state.network_status\"> &middot; {{ state.network_status }}</span><span v-if=\"state.network_log\"> &middot; {{ state.network_log }}</span></div>\n    <div v-if=\"state.decode_error\" class=\"pn1-alert\">{{ state.decode_error }}</div>\n    <div v-if=\"state.ui_error\" class=\"pn1-alert\">{{ state.ui_error }}</div>\n    <div><v-btn variant=\"text\" size=\"small\" @click=\"show_raw = !show_raw\">{{ show_raw ? \"Hide\" : \"Show\" }} the raw status object</v-btn></div>\n    <pre v-if=\"show_raw\" class=\"pn1-raw\">{{ rawText }}</pre>\n  </div>\n</div>\n</template>\n<script>\nexport default {\n  data() {\n    return { state: {}, sleep_seconds: 60, touched: false, show_raw: false };\n  },\n  computed: {\n    sleepValid() {\n      const n = Number(this.sleep_seconds);\n      return Number.isInteger(n) && n >= 10 && n <= 86400;\n    },\n    sleepNote() {\n      if (!this.sleepValid) return \"whole number of seconds, 10 to 86400\";\n      const n = Number(this.sleep_seconds);\n      if (n >= 3600) return \"= \" + n + \" s (\" + (n / 3600).toFixed(2) + \" h)\";\n      if (n >= 60) return \"= \" + n + \" s (\" + (n / 60).toFixed(1) + \" min)\";\n      return \"= \" + n + \" s\";\n    },\n    sentText() {\n      return this.state.sent_object ? JSON.stringify(this.state.sent_object) : \"-\";\n    },\n    rawText() {\n      return this.state.raw ? JSON.stringify(this.state.raw, null, 1) : \"No FPort 31 status object received yet.\";\n    },\n    radioText() {\n      const parts = [];\n      if (this.state.rssi !== null && this.state.rssi !== undefined) parts.push(this.state.rssi + \" dBm\");\n      if (this.state.snr !== null && this.state.snr !== undefined) parts.push(this.state.snr + \" dB SNR\");\n      if (this.state.sf) parts.push(\"SF\" + this.state.sf);\n      if (this.state.dr !== null && this.state.dr !== undefined) parts.push(\"DR\" + this.state.dr);\n      if (this.state.frequency) parts.push((this.state.frequency / 1000000).toFixed(1) + \" MHz\");\n      return parts.length > 0 ? parts.join(\" | \") : \"-\";\n    }\n  },\n  watch: {\n    msg: {\n      handler(m) {\n        if (!m || !m.payload || m.payload.kind !== \"state\") return;\n        this.state = m.payload.state || {};\n        // Follow the interval the node is really sleeping for until the\n        // operator types a new one.\n        if (!this.touched && typeof this.state.sleep_seconds === \"number\" && this.state.sleep_seconds > 0) {\n          this.sleep_seconds = this.state.sleep_seconds;\n        }\n      },\n      immediate: true\n    }\n  },\n  methods: {\n    show(v, suffix) {\n      if (v === null || v === undefined || v === \"\") return \"-\";\n      return String(v) + (suffix || \"\");\n    },\n    local(iso) {\n      if (!iso) return \"-\";\n      const d = new Date(iso);\n      return isNaN(d.getTime()) ? String(iso) : d.toLocaleString();\n    },\n    sleepText(seconds) {\n      const n = Number(seconds);\n      if (!isFinite(n) || n <= 0) return \"-\";\n      if (n >= 3600) return n + \" s (\" + (n / 3600).toFixed(2) + \" h)\";\n      if (n >= 60) return n + \" s (\" + (n / 60).toFixed(1) + \" min)\";\n      return n + \" s\";\n    },\n    onSleepInput(value) {\n      this.touched = true;\n      this.sleep_seconds = value === \"\" || value === null || value === undefined ? null : Number(value);\n    },\n    sendSleep() {\n      if (!this.sleepValid) return;\n      this.state.ui_error = \"\";\n      this.send({ payload: { kind: \"command\", sleep_seconds: Number(this.sleep_seconds) } });\n    },\n    resetFlowTotal() {\n      if (!window.confirm(\"Reset valve_1 delivered-water baseline? The meter totals remain intact.\")) return;\n      this.state.ui_error = \"\";\n      this.send({ payload: { kind: \"command\", flow_total_reset: true } });\n    },\n    issue(pcv, withSleep) {\n      if (withSleep && !this.sleepValid) return;\n      const command = { kind: \"command\", pcv: pcv };\n      let text = pcv === \"none\" ? \"no valve movement\" : pcv.toUpperCase();\n      if (withSleep) {\n        command.sleep_seconds = Number(this.sleep_seconds);\n        text += \" plus a \" + command.sleep_seconds + \" second sleep interval\";\n      }\n      if (pcv === \"open\" || pcv === \"close\") {\n        if (!window.confirm(\"Send \" + text + \" to valve_1? The command is delivered after its next uplink.\")) return;\n      }\n      this.state.ui_error = \"\";\n      this.send({ payload: command });\n    }\n  }\n}\n</script>\n<style>\n.pn1{padding:8px}\n.pn1-head{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:1.15rem;flex-wrap:wrap}\n.pn1-head span{font-size:.8rem}\n.pn1-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:16px 0}\n.pn1-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}\n.pn1-grid small{display:block;color:#566}\n.pn1-grid b{font-size:1.05rem}\n.pn1-controls,.pn1-footer{border-top:1px solid #ccd7df;padding-top:12px;margin-top:12px}\n.pn1-controls p,.pn1-footer p{font-size:.85rem}\n.pn1-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}\n.pn1-note{font-size:.85rem;color:#566;white-space:nowrap}\n.pn1-footer div{font-size:.85rem;margin-bottom:4px}\n.pn1-alert{background:#b3261e;color:white;border-radius:5px;padding:8px;margin:8px 0}\n.pn1-raw{background:#f4f7f9;border:1px solid #ccd7df;border-radius:5px;padding:8px;font-size:.75rem;overflow:auto;max-height:320px}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 740,
+    "y": 90,
+    "wires": [
+      [
+        "9c700fdb516de397"
+      ]
+    ]
+  },
+  {
+    "id": "9c700fdb516de397",
+    "type": "function",
+    "z": "4e9925030f873fb0",
+    "g": "bed8609050b3e817",
+    "name": "Send valve_1 command",
+    "func": "// Build the FPort 30 downlink for valve_1. ChirpStack runs the codec's\n// encodeDownlink on \"object\", so the field names here are the codec's input\n// names: pcv, sleep_seconds, sleep_minutes, flow_total_reset and command_id.\nconst APP_ID = \"SET_VALVE1_APP_ID\";\nconst DEV_EUI = \"SET_VALVE1_DEV_EUI\";\nconst CMD_FPORT = 30;\n// Keep in step with PressureNodeConfig.h (MIN_REPORT_INTERVAL_SECONDS,\n// MAX_REPORT_INTERVAL_SECONDS) and with the codec's own 10..86400 s bound.\nconst MIN_SLEEP_SECONDS = 10;\nconst MAX_SLEEP_SECONDS = 86400;\n\nconst s = Object.assign({}, flow.get(\"pn1_state\"));\nconst action = msg.payload || {};\n\nfunction snapshot() {\n    flow.set(\"pn1_state\", s);\n    return { payload: { kind: \"state\", state: s } };\n}\nfunction feedback(text) {\n    s.ui_error = text;\n    return [null, snapshot()];\n}\n\nfunction dispatch(object, description) {\n    // valve_1 ignores a command_id it has already accepted, so every command\n    // needs a fresh one. Seed from the last id the device reported, then walk\n    // forward and remember the next candidate between messages.\n    let id = flow.get(\"pn1_next_cmd_id\");\n    if (!Number.isInteger(id) || id < 0 || id > 65534) {\n        const last = Number(s.last_command_id);\n        id = Number.isInteger(last) && last >= 0 && last < 65535 ? (last + 1) % 65535 : 1;\n    }\n    if (id === Number(s.last_command_id)) id = (id + 1) % 65535;\n    flow.set(\"pn1_next_cmd_id\", (id + 1) % 65535);\n\n    object.command_id = id;\n    s.sent_command_id = id;\n    s.sent_at = new Date().toISOString();\n    s.sent_description = description;\n    s.sent_object = object;\n    s.sent_state = \"Queued in ChirpStack. valve_1 is Class A, so it collects the command in the receive window after its next uplink.\";\n    s.ui_error = \"\";\n    node.status({ fill: \"yellow\", shape: \"dot\", text: \"command \" + id + \": \" + description });\n\n    return [{\n        topic: \"application/\" + APP_ID + \"/device/\" + DEV_EUI + \"/command/down\",\n        payload: { devEui: DEV_EUI, confirmed: false, fPort: CMD_FPORT, object: object },\n        qos: \"0\",\n        retain: false\n    }, snapshot()];\n}\n\nif (action.kind !== \"command\") return null;\n\nconst object = {};\nif (action.pcv === \"open\" || action.pcv === \"close\" || action.pcv === \"none\") {\n    object.pcv = action.pcv;\n}\nif (action.sleep_seconds !== undefined && action.sleep_seconds !== null && action.sleep_seconds !== \"\") {\n    const seconds = Number(action.sleep_seconds);\n    if (!Number.isInteger(seconds)) {\n        return feedback(\"Sleep interval must be a whole number of seconds.\");\n    }\n    if (seconds < MIN_SLEEP_SECONDS || seconds > MAX_SLEEP_SECONDS) {\n        return feedback(\"Sleep interval must be \" + MIN_SLEEP_SECONDS + \" to \" + MAX_SLEEP_SECONDS + \" seconds.\");\n    }\n    object.sleep_seconds = seconds;\n}\nif (action.flow_total_reset === true) object.flow_total_reset = true;\nif (object.pcv === undefined && object.sleep_seconds === undefined && !object.flow_total_reset) {\n    return feedback(\"Choose a valve action, a sleep interval, or both.\");\n}\n\nconst description = object.flow_total_reset ? \"reset local flow baseline\" : object.pcv === undefined\n    ? \"sleep \" + object.sleep_seconds + \" s\"\n    : object.pcv + (object.sleep_seconds === undefined ? \"\" : \" + sleep \" + object.sleep_seconds + \" s\");\nreturn dispatch(object, description);",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1010,
+    "y": 90,
+    "wires": [
+      [
+        "a20e5fd2abee3ea4"
+      ],
+      [
+        "353da4a7ddcce2f4"
+      ]
+    ]
+  },
+  {
+    "id": "a20e5fd2abee3ea4",
+    "type": "mqtt out",
+    "z": "4e9925030f873fb0",
+    "g": "bed8609050b3e817",
+    "name": "Queue ChirpStack downlink",
+    "topic": "",
+    "qos": "0",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "ae0178f3742ff530",
+    "x": 1260,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "ae0178f3742ff530",
+    "type": "mqtt-broker",
+    "name": "chirpstack_mosquito",
+    "broker": "localhost",
+    "port": 1883,
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": 4,
+    "keepalive": 60,
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthRetain": "false",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closeRetain": "false",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willRetain": "false",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "af380505a9b7e174",
+    "type": "ui-group",
+    "z": "4e9925030f873fb0",
+    "name": "Valve 1 charts",
+    "page": "007fe31857b51bd8",
+    "width": "4",
+    "height": 1,
+    "order": 2,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "ui_group_valve1_telemetry",
+    "type": "ui-group",
+    "z": "4e9925030f873fb0",
+    "name": "Valve 1 state and commands",
+    "page": "007fe31857b51bd8",
+    "width": "8",
+    "height": 1,
+    "order": 1,
+    "showTitle": true,
+    "className": "",
+    "visible": "true",
+    "disabled": "false",
+    "groupType": "default"
+  },
+  {
+    "id": "3f4741afccb71932",
+    "type": "global-config",
+    "env": [],
+    "modules": {
+      "@flowfuse/node-red-dashboard": "1.30.2"
+    }
+  }
+]

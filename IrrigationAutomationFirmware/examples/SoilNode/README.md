@@ -12,7 +12,9 @@ does not use the preliminary production ESP32-C6 pinout. Each Class A cycle:
    GPIO21/GPIO22;
 4. sends an eight-byte FPort 10 uplink and completes RX1/RX2, accepting an
    optional sleep-interval command in those Class A receive windows;
-5. retains the RadioLib session in RTC memory and sleeps for the configured
+5. sends an immediate FPort 11 application result when it receives an FPort 10
+   command, then completes another RX1/RX2 cycle;
+6. retains the RadioLib session in RTC memory and sleeps for the configured
    interval.
 
 The automatic-direction RS485 converter requires no DE/RE GPIO.
@@ -87,9 +89,11 @@ field deployment. The current 10-second default is for commissioning only.
 The active wake interval is held in `sleepIntervalSeconds` in `main.cpp`. It is
 initialized from `config::lorawan::DEFAULT_SLEEP_SECONDS` and passed to the
 ESP32 timer wake-up configuration. A valid ChirpStack downlink persists the
-new value in NVS. The five-byte FPort 10 command is opcode `0x01` followed by
-an unsigned 32-bit big-endian interval in seconds; accepted values are
-10-86400 seconds. Use `tools/chirpstack/soil_node_class_a_codec.js` in the
+new value in NVS. The FPort 10 command is opcode `0x01`, a two-byte big-endian
+command ID (1-65534), then a four-byte big-endian interval in seconds;
+accepted values are 10-86400 seconds. The earlier five-byte command without
+an ID remains accepted for compatibility and uses acknowledgement ID `65535`.
+Use `include/soil_node_class_a_codec.js` in the
 ChirpStack device profile and queue, for example:
 
 ```json
@@ -101,3 +105,69 @@ or:
 ```json
 {"sleep_minutes":10}
 ```
+
+The codec emits the seven-byte form when `command_id` is included. The
+Dashboard flow supplies this ID automatically. The eight-byte FPort 11 result
+is version `1`, two-byte command ID, one-byte status (`0` applied, `1` invalid,
+`2` NVS storage failed), and four-byte active sleep interval. The node sends
+the result after applying or rejecting the command. A failed result uplink
+leaves delivery unconfirmed; check the Serial log and retry if necessary.
+The interval command is idempotent, but this prototype does not deduplicate
+command IDs across resets. Queue one command at a time: the extra Class A
+receive window after the result uplink is not used for another application
+command. An additional downlink in that window is logged and not processed.
+
+## Node-RED Dashboard 2.0
+
+Import `include/soil_node_dashboard_compact_flow.json` through Node-RED's **Import**
+menu. Install Dashboard 2.0 (`@flowfuse/node-red-dashboard`) if its `ui-*`
+nodes are unavailable. The flow creates a `/soil-compact/soil-node` page with
+current readings, 24-hour history, network status, and sleep-interval control.
+For an existing import, remove the old SoilNode flow before importing this
+revision. Deploy and refresh the dashboard page. The 600-second input is only
+an initial draft; changing it does not queue a command until **Queue interval**
+is pressed.
+Small +/− buttons to the right of the temperature, water-content, conductivity,
+and battery charts change each chart's visible time range independently
+(30 minutes to 24 hours, initially 6 hours). They do not change the node's
+reporting interval or delete the chart's 24-hour history.
+The **Narrow dashboard sidebar (220 px)** CSS template uses **CSS (All Pages)**
+and sets the shared navigation menu to 220 px on desktop. If SoilNode shares
+the Dashboard UI with Valve and Pump pages, import
+`../PumpControl/include/dashboard2_shared_sidebar_width.json` into that Node-RED instance.
+It targets the shared `My Dashboard` UI shown in the supplied flow. To change
+the width, edit both `220px` declarations, then deploy and refresh.
+Configure the imported MQTT broker too; `SOIL_APP_ID` and `SOIL_DEV_EUI` are
+Node-RED environment variables.
+
+Configure the imported **ChirpStack MQTT** broker for the Mosquitto host,
+port, authentication, and TLS used by your ChirpStack installation. Set these
+Node-RED environment variables before deploying:
+
+| Variable | Value |
+| --- | --- |
+| `SOIL_APP_ID` | ChirpStack application UUID |
+| `SOIL_DEV_EUI` | This SoilNode's 16-hex-digit DevEUI |
+
+The MQTT input subscribes to `application/+/device/+/event/+`, then filters
+both IDs in the flow. Give its broker credentials access only to the intended
+application where possible. The flow does not contain OTAA credentials.
+
+Set `include/soil_node_class_a_codec.js` as the device-profile codec in
+ChirpStack. The flow accepts its decoded FPort 10 object and can decode the
+eight raw bytes if ChirpStack supplies no object. Only FPort 10 uplinks update
+measurements. Invalid soil readings clear temperature, VWC, and EC on the
+dashboard; battery voltage remains visible.
+
+The control queues an FPort 10 downlink through the codec using
+`{"sleep_seconds":600,"command_id":1}`. Input must be an integer from 10 to
+86400 seconds. This Class A node receives a queued downlink only after its
+next uplink. The dashboard matches the FPort 11 application result by command
+ID and shows the interval actually stored by the node. A `txack`, network ACK,
+or later telemetry uplink alone is not proof that the interval was applied.
+
+Readings show **stale** after 30 minutes without an uplink. This threshold is
+only a display hint; adjust it in the dashboard template for the deployed
+reporting interval. Stale does not prove that the node is offline. The current
+prototype does not report GNSS, detailed soil-probe error reasons, or battery
+state of charge, so the dashboard does not invent those values.

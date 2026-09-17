@@ -93,14 +93,19 @@ The `pcv_serial_only` firmware does not use ChirpStack or a codec.
 
 ## `soil_node_class_a_codec.js`
 
-Use with `examples/SoilNode` / `pio run -e soil_node`. Both directions use
-FPort 10. The uplink is the existing eight-byte soil telemetry payload. The
-downlink changes the persistent Class A sleep interval:
+Use `examples/SoilNode/include/soil_node_class_a_codec.js` with
+`examples/SoilNode` / `pio run -e soil_node`. FPort 10 carries the existing
+eight-byte soil telemetry uplink and the sleep-interval downlink. FPort 11
+carries the new eight-byte application result (command ID, status, and active
+interval). The downlink changes the persistent Class A sleep interval:
 
 ```json
 {"sleep_seconds":600}
 ```
 
-The equivalent `{"sleep_minutes":10}` form is also accepted. The current
+The equivalent `{"sleep_minutes":10}` form is also accepted. Include
+`"command_id":1` (1-65534) to correlate the FPort 11 result; the SoilNode
+Dashboard 2.0 flow generates IDs automatically. Old five-byte downlinks
+without IDs remain accepted. The current
 commissioning range is 10-86400 seconds; choose a field interval that meets the
 energy budget after commissioning.

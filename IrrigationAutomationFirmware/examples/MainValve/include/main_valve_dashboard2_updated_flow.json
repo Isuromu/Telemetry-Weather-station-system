@@ -1,6 +1,6 @@
 [
   {
-    "id": "7912d461840ce992",
+    "id": "1a3af649fb7e41e9",
     "type": "group",
     "z": "8df55dba201de6b7",
     "style": {
@@ -13,23 +13,207 @@
       "color": "#767676"
     },
     "nodes": [
-      "mv_mqtt_in",
-      "mv_ingest",
-      "mv_ui",
-      "mv_command",
-      "mv_mqtt_out",
-      "2d95d3bec4422b97"
+      "39db54868b9406e1",
+      "2cc81e7a4f64eb2a",
+      "89a07c737bbe1a55",
+      "a7a041eaf4f7e270",
+      "98ab5f9d9887e2f9",
+      "bc291b84a320963f"
     ],
-    "x": 54,
-    "y": 59,
-    "w": 1392,
-    "h": 222
+    "x": 114,
+    "y": 399,
+    "w": 1012,
+    "h": 202
   },
   {
-    "id": "mv_mqtt_in",
+    "id": "39db54868b9406e1",
+    "type": "inject",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "name": "",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 240,
+    "y": 480,
+    "wires": [
+      [
+        "2cc81e7a4f64eb2a"
+      ]
+    ]
+  },
+  {
+    "id": "2cc81e7a4f64eb2a",
+    "type": "function",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "name": "function 1",
+    "func": "// This formats data correctly for InfluxDB\nmsg.payload = {\n    freq: 9\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 480,
+    "wires": [
+      [
+        "98ab5f9d9887e2f9"
+      ]
+    ]
+  },
+  {
+    "id": "89a07c737bbe1a55",
+    "type": "influxdb out",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "influxdb": "6b15b438c5cf6d49",
+    "name": "",
+    "measurement": "main_valve_data",
+    "precision": "",
+    "retentionPolicy": "",
+    "database": "database",
+    "precisionV18FluxV20": "ms",
+    "retentionPolicyV18Flux": "",
+    "org": "amudario",
+    "bucket": "main_valve",
+    "x": 940,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "a7a041eaf4f7e270",
+    "type": "debug",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "name": "debug 1",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 840,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "98ab5f9d9887e2f9",
+    "type": "switch",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "name": "",
+    "property": "payload.freq",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "btwn",
+        "v": "10",
+        "vt": "num",
+        "v2": "50",
+        "v2t": "num"
+      },
+      {
+        "t": "else"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 610,
+    "y": 480,
+    "wires": [
+      [
+        "89a07c737bbe1a55",
+        "a7a041eaf4f7e270"
+      ],
+      [
+        "bc291b84a320963f"
+      ]
+    ]
+  },
+  {
+    "id": "bc291b84a320963f",
+    "type": "debug",
+    "z": "8df55dba201de6b7",
+    "g": "1a3af649fb7e41e9",
+    "name": "debug 2",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 840,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "6b15b438c5cf6d49",
+    "type": "influxdb",
+    "hostname": "127.0.0.1",
+    "port": 8086,
+    "protocol": "http",
+    "database": "database",
+    "name": "Bahmal_agrostar",
+    "usetls": false,
+    "tls": "",
+    "influxdbVersion": "2.0",
+    "url": "http://localhost:8086",
+    "timeout": 10,
+    "rejectUnauthorized": true
+  },
+  {
+    "id": "ff6a3e894e6bb146",
+    "type": "group",
+    "z": "8df55dba201de6b7",
+    "style": {
+      "stroke": "#999999",
+      "stroke-opacity": "1",
+      "fill": "none",
+      "fill-opacity": "1",
+      "label": true,
+      "label-position": "nw",
+      "color": "#767676"
+    },
+    "nodes": [
+      "5cd77201c9cedda0",
+      "592f34a506af7cbc",
+      "ce93528d6f960ba4",
+      "ceb54dc9bb9f3f1b",
+      "84e13bd54cdbbc93",
+      "4649a27b2f049d28",
+      "b5dc490b4b627d4d",
+      "3e2d92b9b9c64485",
+      "1d3690f33fd9d797",
+      "e8776b32f1bf3ad1"
+    ],
+    "x": 94,
+    "y": 19,
+    "w": 1412,
+    "h": 262
+  },
+  {
+    "id": "5cd77201c9cedda0",
     "type": "mqtt in",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "name": "ChirpStack events",
     "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/756c38f8ffede19a/event/+",
     "qos": "0",
@@ -39,20 +223,20 @@
     "rap": true,
     "rh": 0,
     "inputs": 0,
-    "x": 170,
-    "y": 120,
+    "x": 230,
+    "y": 80,
     "wires": [
       [
-        "mv_ingest",
-        "2d95d3bec4422b97"
+        "592f34a506af7cbc",
+        "4649a27b2f049d28"
       ]
     ]
   },
   {
-    "id": "mv_ingest",
+    "id": "592f34a506af7cbc",
     "type": "function",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "name": "Filter and decode MainValve events",
     "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"756c38f8ffede19a\";\nif (!app || !/^[a-f0-9]{16}$/.test(eui)) { node.status({fill:'red',shape:'ring',text:'set flow environment variables'}); return null; }\nconst parts = String(msg.topic || '').split('/');\nif (parts.length !== 6 || parts[0] !== 'application' || parts[2] !== 'device' || parts[4] !== 'event' || parts[1] !== app || parts[3].toLowerCase() !== eui) return null;\nlet event = msg.payload;\ntry { if (Buffer.isBuffer(event)) event = JSON.parse(event.toString('utf8')); else if (typeof event === 'string') event = JSON.parse(event); } catch (err) { node.warn('Invalid ChirpStack JSON: ' + err.message); return null; }\nif (!event || typeof event !== 'object') return null;\nconst kind = parts[5];\nlet s = flow.get('mv_state') || {};\nlet advance = null;\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nif (kind === 'up') {\n  if (event.fPort !== 31) return null;\n  let d = event.object;\n  let b = null;\n  if (!d || typeof d !== 'object' || !Object.prototype.hasOwnProperty.call(d, 'command_phase')) {\n    try { b = Buffer.from(event.data || '', 'base64'); } catch (_) { b = null; }\n    if (!b || !((b[0] === 1 && b.length === 15) || (b[0] === 2 && b.length === 18))) { node.warn('MainValve FPort 31 payload is not v1/15 or v2/18 bytes'); return null; }\n    const u16 = i => (b[i] << 8) | b[i + 1]; const flags = b[1];\n    const reasons = ['startup','local_command','remote_command','duplicate_command','invalid_command','modbus_error','pressure_interlock','pressure_sensor_error','actuator_busy','movement_timeout','actuator_fault','local_override'];\n    d = { actuator_online: !!(flags & 1), pressure_valid: !!(flags & 2), rs485_bus_mode: !!(flags & 4), valve_moving: !!(flags & 8), overpressure: !!(flags & 16), lorawan_active: !!(flags & 32), class_c_active: !!(flags & 64), reason_code: b[2], reason: reasons[b[2]] || 'unknown', actual_angle_deg: (flags & 1) && u16(3) !== 65535 ? u16(3) / 10 : null, target_angle_deg: (flags & 1) && u16(5) !== 65535 ? u16(5) / 10 : null, pressure_bar: (flags & 2) && u16(7) !== 65535 ? u16(7) / 100 : null, actuator_fault_code: (flags & 1) ? u16(9) : null, last_command_id: u16(11) === 65535 ? null : u16(11), actuator_mode: b[13] === 1 ? 'rs485_bus' : b[13] === 0 ? 'analog' : 'unavailable', pressure_temperature_c: (flags & 2) ? b[14] - 40 : null };\n  }\n  if (b && b[0] === 2) {\n    const phases = ['none','accepted','moving','finished','rejected','failed'];\n    d.protocol_version = 2;\n    d.reported_command_id = b.readUInt16BE(15) === 65535 ? null : b.readUInt16BE(15);\n    d.command_phase = phases[b[17]] || 'unknown';\n  } else if (b) {\n    d.protocol_version = 1;\n    d.reported_command_id = null;\n    d.command_phase = 'unavailable';\n  }\n  s = Object.assign(s, d); s.last_seen = event.time || new Date().toISOString();\n  s.f_port = event.fPort; s.f_cnt = event.fCnt == null ? null : event.fCnt;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) { const best = rx.reduce((a,b) => Number(b.snr) > Number(a.snr) ? b : a); s.rssi = best.rssi; s.snr = best.snr; s.gateway_id = best.gatewayId || ''; }\n  const p = flow.get('mv_pending');\n  if (p && d.reported_command_id === p.id) {\n    if (d.command_phase === 'accepted') s.command_state = 'Accepted; waiting for movement';\n    else if (d.command_phase === 'moving') s.command_state = 'Moving';\n    else if (d.command_phase === 'finished') {\n      const wasExpired = s.pending_expired === true;\n      s.command_state = 'Finished; actual angle ' + d.actual_angle_deg;\n      s.pending_expired = false;\n      flow.set('mv_pending',null);\n      if (wasExpired) s.queue_paused = true;\n      else advance = {_mvInternal:true,payload:{kind:'advance'}};\n    } else if (d.command_phase === 'rejected') {\n      s.command_state = 'Rejected: ' + (d.reason || 'unknown') + '; queue paused';\n      s.queue_paused = true;\n      flow.set('mv_pending',null);\n    } else if (d.command_phase === 'failed') {\n      s.command_state = 'Failed: ' + (d.reason || 'unknown') + '; inspect before unlocking';\n      s.pending_expired = true;\n      s.queue_paused = true;\n    }\n  }\n  node.status({fill:'green',shape:'dot',text:'status ' + s.last_seen});\n} else if (kind === 'ack') { s.network_ack = event.acknowledged === true ? 'Confirmed downlink ACK' : 'Downlink not acknowledged'; }\nelse if (kind === 'txack') { s.network_txack = 'Gateway transmission acknowledged'; }\nelse if (kind === 'join') { s.network_join = s.last_event_time; }\nelse if (kind === 'log') { s.network_log = event.description || event.code || 'Device log'; }\nelse return null;\ns.queue = (flow.get('mv_queue') || []).slice();\ns.active_command = flow.get('mv_pending') || null;\nflow.set('mv_state', s);\nmsg.payload = {kind:'state', state:s}; return [msg,advance];",
     "outputs": 2,
@@ -61,22 +245,22 @@
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 460,
-    "y": 160,
+    "x": 520,
+    "y": 120,
     "wires": [
       [
-        "mv_ui"
+        "ce93528d6f960ba4"
       ],
       [
-        "mv_command"
+        "ceb54dc9bb9f3f1b"
       ]
     ]
   },
   {
-    "id": "mv_ui",
+    "id": "ce93528d6f960ba4",
     "type": "ui-template",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "group": "ui-group-telemetry",
     "page": "",
     "ui": "",
@@ -91,19 +275,19 @@
     "resendOnRefresh": true,
     "templateScope": "local",
     "className": "",
-    "x": 790,
-    "y": 240,
+    "x": 860,
+    "y": 180,
     "wires": [
       [
-        "mv_command"
+        "ceb54dc9bb9f3f1b"
       ]
     ]
   },
   {
-    "id": "mv_command",
+    "id": "ceb54dc9bb9f3f1b",
     "type": "function",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "name": "Queue, remove, and dispatch commands",
     "func": "const app = \"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui = \"756c38f8ffede19a\";\nlet s = flow.get('mv_state') || {};\nlet queue = flow.get('mv_queue') || [];\nconst action = msg.payload || {};\nfunction snapshot() {\n  s.queue = queue.slice();\n  s.active_command = flow.get('mv_pending') || null;\n  flow.set('mv_state', s);\n  return {payload:{kind:'state',state:s}};\n}\nfunction feedback(text) { s.ui_error = text; return [null,snapshot()]; }\nfunction dispatchNext() {\n  if (flow.get('mv_pending') || s.queue_paused || queue.length === 0) return [null,snapshot()];\n  const next = queue.shift();\n  flow.set('mv_queue', queue);\n  let id = flow.get('mv_next_id');\n  if (!Number.isInteger(id) || id < 0 || id > 65534) id = (Number(s.last_command_id) + 1) % 65535;\n  if (id === Number(s.last_command_id)) id = (id + 1) % 65535;\n  flow.set('mv_next_id', (id + 1) % 65535);\n  const angle10 = Math.round(next.angle_deg * 10);\n  const bytes = Buffer.from([1,1,angle10 >> 8,angle10 & 255,id >> 8,id & 255]);\n  flow.set('mv_pending',{id,angle_deg:angle10 / 10,queue_id:next.queue_id,queued_at:new Date().toISOString()});\n  s.queued_id = id;\n  s.command_state = 'Sent; awaiting acceptance';\n  s.pending_expired = false;\n  s.ui_error = '';\n  node.status({fill:'yellow',shape:'dot',text:'active ID '+id+', waiting '+queue.length});\n  return [{\n    topic:'application/'+app+'/device/'+eui+'/command/down',\n    payload:JSON.stringify({devEui:eui,confirmed:false,fPort:30,data:bytes.toString('base64')}),\n    qos:'0',retain:false\n  },snapshot()];\n}\nif (action.kind === 'advance') {\n  if (msg._mvInternal !== true) return null;\n  return dispatchNext();\n}\nif (action.kind === 'remove') {\n  const index = queue.findIndex(x => x.queue_id === action.queue_id);\n  if (index < 0) return feedback('Waiting command not found; it may already be active.');\n  queue.splice(index,1);\n  flow.set('mv_queue',queue);\n  s.ui_error = '';\n  return [null,snapshot()];\n}\nif (action.kind === 'unlock') {\n  if (s.pending_expired !== true) return feedback('Unlock is available after failure or timeout.');\n  flow.set('mv_pending',null);\n  s.queue_paused = true;\n  s.pending_expired = false;\n  s.command_state = 'Operator unlocked; queue paused';\n  s.ui_error = '';\n  return [null,snapshot()];\n}\nif (action.kind === 'resume') {\n  if (flow.get('mv_pending')) return feedback('Wait for the active command or inspect and unlock it.');\n  if (!s.queue_paused) return feedback('Queue is already running.');\n  s.queue_paused = false;\n  s.ui_error = '';\n  return dispatchNext();\n}\nif (action.kind !== 'command') return null;\nif (!app || !/^[a-f0-9]{16}$/.test(eui)) return feedback('Configure the ChirpStack application and DevEUI.');\nif (!s.last_seen || s.protocol_version !== 2) return feedback('Wait for a protocol-v2 FPort 31 status uplink.');\nconst angle = Number(action.angle_deg);\nif (!Number.isFinite(angle) || angle < 0 || angle > 90) return feedback('Angle must be 0 to 90 degrees.');\nif (queue.length >= 20) return feedback('Waiting queue is full (20 commands).');\nconst queueId = (flow.get('mv_queue_counter') || 0) + 1;\nflow.set('mv_queue_counter',queueId);\nqueue.push({queue_id:queueId,angle_deg:Math.round(angle * 10) / 10,queued_at:new Date().toISOString()});\nflow.set('mv_queue',queue);\ns.ui_error = '';\nreturn dispatchNext();",
     "outputs": 2,
@@ -112,22 +296,22 @@
     "initialize": "",
     "finalize": "",
     "libs": [],
-    "x": 1030,
-    "y": 140,
+    "x": 1090,
+    "y": 100,
     "wires": [
       [
-        "mv_mqtt_out"
+        "84e13bd54cdbbc93"
       ],
       [
-        "mv_ui"
+        "ce93528d6f960ba4"
       ]
     ]
   },
   {
-    "id": "mv_mqtt_out",
+    "id": "84e13bd54cdbbc93",
     "type": "mqtt out",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "name": "Queue ChirpStack downlink",
     "topic": "",
     "qos": "",
@@ -138,17 +322,17 @@
     "correl": "",
     "expiry": "",
     "broker": "ae0178f3742ff530",
-    "x": 1300,
-    "y": 240,
+    "x": 1360,
+    "y": 200,
     "wires": []
   },
   {
-    "id": "2d95d3bec4422b97",
+    "id": "4649a27b2f049d28",
     "type": "debug",
     "z": "8df55dba201de6b7",
-    "g": "7912d461840ce992",
+    "g": "ff6a3e894e6bb146",
     "name": "debug 3",
-    "active": true,
+    "active": false,
     "tosidebar": true,
     "console": false,
     "tostatus": false,
@@ -156,9 +340,103 @@
     "targetType": "msg",
     "statusVal": "",
     "statusType": "auto",
-    "x": 400,
-    "y": 100,
+    "x": 460,
+    "y": 60,
     "wires": []
+  },
+  {
+    "id": "b5dc490b4b627d4d",
+    "type": "inject",
+    "z": "8df55dba201de6b7",
+    "g": "ff6a3e894e6bb146",
+    "name": "Check command timeout",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 250,
+    "y": 240,
+    "wires": [
+      [
+        "3e2d92b9b9c64485"
+      ]
+    ]
+  },
+  {
+    "id": "3e2d92b9b9c64485",
+    "type": "function",
+    "z": "8df55dba201de6b7",
+    "g": "ff6a3e894e6bb146",
+    "name": "Show missing final result",
+    "func": "const p = flow.get('mv_pending');\nconst s = flow.get('mv_state') || {};\nif (p && !s.pending_expired && Date.now() - Date.parse(p.queued_at) >= 300000) {\n  s.pending_expired = true;\n  s.queue_paused = true;\n  s.command_state = 'Outcome unknown; inspect valve before unlocking';\n}\ns.queue = (flow.get('mv_queue') || []).slice();\ns.active_command = p || null;\nflow.set('mv_state',s);\nmsg.payload = {kind:'state',state:s};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 510,
+    "y": 240,
+    "wires": [
+      [
+        "ce93528d6f960ba4",
+        "1d3690f33fd9d797"
+      ]
+    ]
+  },
+  {
+    "id": "1d3690f33fd9d797",
+    "type": "debug",
+    "z": "8df55dba201de6b7",
+    "g": "ff6a3e894e6bb146",
+    "name": "debug 6",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 740,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "e8776b32f1bf3ad1",
+    "type": "inject",
+    "z": "8df55dba201de6b7",
+    "g": "ff6a3e894e6bb146",
+    "name": "",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/756c38f8ffede19a/event/up",
+    "payload": "{\"deduplicationId\":\"c7c1493f-5fa7-4411-ba3e-c883028a83be\",\"time\":\"2026-09-16T08:51:46.643700355+00:00\",\"deviceInfo\":{\"tenantId\":\"454a66fb-4996-4373-94f5-4db6a10da709\",\"tenantName\":\"ChirpStack\",\"applicationId\":\"f21e23b5-408b-455b-8ac1-7c755870970e\",\"applicationName\":\"Prototype\",\"deviceProfileId\":\"36828731-bdbf-4c92-a358-184ef7e91017\",\"deviceProfileName\":\"Main Valve Node\",\"deviceName\":\"Main Valve\",\"devEui\":\"756c38f8ffede19a\",\"deviceClassEnabled\":\"CLASS_C\",\"tags\":{}},\"devAddr\":\"00566777\",\"adr\":true,\"dr\":5,\"fCnt\":4,\"fPort\":31,\"confirmed\":false,\"data\":\"AmcCAAAAAAACAAAABwFLAAcD\",\"object\":{\"pressure_temperature_c\":35,\"target_angle_deg\":11,\"overpressure\":false,\"actuator_fault_code\":0,\"valve_moving\":false,\"reported_command_id\":7,\"reason\":\"remote_command\",\"actuator_online\":true,\"actuator_mode\":\"rs485_bus\",\"pressure_bar\":0.02,\"last_command_id\":7,\"protocol_version\":2,\"pressure_valid\":true,\"command_phase\":\"finished\",\"lorawan_active\":true,\"reason_code\":2,\"class_c_active\":true,\"rs485_bus_mode\":true,\"actual_angle_deg\":25},\"rxInfo\":[{\"gatewayId\":\"e45f01fffea6f91c\",\"uplinkId\":965079014,\"nsTime\":\"2026-09-16T08:51:46.426659540+00:00\",\"rssi\":-75,\"snr\":-4,\"channel\":6,\"location\":{},\"context\":\"QqItkQ==\",\"crcStatus\":\"CRC_OK\"}],\"txInfo\":{\"frequency\":867700000,\"modulation\":{\"lora\":{\"bandwidth\":125000,\"spreadingFactor\":7,\"codeRate\":\"CR_4_5\"}}},\"regionConfigId\":\"eu868\"}",
+    "payloadType": "json",
+    "x": 220,
+    "y": 160,
+    "wires": [
+      [
+        "4649a27b2f049d28"
+      ]
+    ]
   },
   {
     "id": "ae0178f3742ff530",
@@ -197,7 +475,7 @@
     "z": "8df55dba201de6b7",
     "name": "Main Valve info",
     "page": "46258ab1c2ef86c9",
-    "width": "12",
+    "width": "6",
     "height": "1",
     "order": 1,
     "showTitle": true,
@@ -209,10 +487,10 @@
   {
     "id": "46258ab1c2ef86c9",
     "type": "ui-page",
-    "name": "Page 1",
+    "name": "Pump and Main Valve",
     "ui": "f53e93e9ba219e63",
     "path": "/page1",
-    "icon": "home",
+    "icon": "mdi-water-pump",
     "layout": "grid",
     "theme": "e49416861823a329",
     "breakpoints": [
@@ -239,8 +517,8 @@
     ],
     "order": 1,
     "className": "",
-    "visible": true,
-    "disabled": false
+    "visible": "true",
+    "disabled": "false"
   },
   {
     "id": "f53e93e9ba219e63",
@@ -255,12 +533,12 @@
     ],
     "showPathInSidebar": false,
     "headerContent": "page",
-    "navigationStyle": "default",
+    "navigationStyle": "fixed",
     "titleBarStyle": "default",
     "showReconnectNotification": true,
     "notificationDisplayTime": 1,
     "showDisconnectNotification": true,
-    "allowInstall": false
+    "allowInstall": true
   },
   {
     "id": "e49416861823a329",
@@ -282,55 +560,12 @@
     }
   },
   {
-    "id": "25e3d54c93b6bf39",
+    "id": "d7dd9725998e43f7",
     "type": "global-config",
     "env": [],
     "modules": {
+      "node-red-contrib-influxdb": "0.7.0",
       "@flowfuse/node-red-dashboard": "1.30.2"
     }
-  },
-  {
-    "id": "mv_watchdog_inject",
-    "type": "inject",
-    "z": "8df55dba201de6b7",
-    "name": "Check command timeout",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "10",
-    "crontab": "",
-    "once": true,
-    "onceDelay": 1,
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 180,
-    "y": 300,
-    "wires": [
-      [
-        "mv_watchdog"
-      ]
-    ]
-  },
-  {
-    "id": "mv_watchdog",
-    "type": "function",
-    "z": "8df55dba201de6b7",
-    "name": "Show missing final result",
-    "func": "const p = flow.get('mv_pending');\nconst s = flow.get('mv_state') || {};\nif (p && !s.pending_expired && Date.now() - Date.parse(p.queued_at) >= 300000) {\n  s.pending_expired = true;\n  s.queue_paused = true;\n  s.command_state = 'Outcome unknown; inspect valve before unlocking';\n}\ns.queue = (flow.get('mv_queue') || []).slice();\ns.active_command = p || null;\nflow.set('mv_state',s);\nmsg.payload = {kind:'state',state:s};\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 455,
-    "y": 300,
-    "wires": [
-      [
-        "mv_ui"
-      ]
-    ]
   }
 ]

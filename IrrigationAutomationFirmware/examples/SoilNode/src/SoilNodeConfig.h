@@ -63,6 +63,7 @@ namespace lorawan {
 inline constexpr const LoRaWANBand_t &REGION = EU868;
 inline constexpr uint8_t SUB_BAND = 0;
 inline constexpr uint8_t TELEMETRY_FPORT = 10;
+inline constexpr uint8_t COMMAND_ACK_FPORT = 11;
 inline constexpr uint32_t DEFAULT_SLEEP_SECONDS = SOIL_NODE_SLEEP_SECONDS;
 inline constexpr uint32_t MIN_SLEEP_SECONDS = 10;
 inline constexpr uint32_t MAX_SLEEP_SECONDS = 24UL * 60UL * 60UL;

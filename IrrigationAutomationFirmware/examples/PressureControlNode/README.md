@@ -59,3 +59,24 @@ REG0113-REG0118 provide net, positive, and negative accumulated cubic metres.
 baseline and reports later water use relative to it; it never erases the
 meter's own accumulators. Both ChirpStack codecs use protocol v2 and expose the
 local total in litres/m3. See `docs/FLOW_TOTALIZER.md`.
+
+## Node-RED Dashboard 2.0
+
+Import `include/pressure_node_dashboard_flow.json` for valve_1. It follows
+the working valve_2 dashboard layout: status and commands on the left, with a
+new chart group on the right. Pressure (upstream and downstream), battery
+voltage, and measured TUF-2000M flow rate each have a history chart with
+independent vertical time-zoom buttons. Water velocity and delivered volume
+since the local baseline remain in the status panel, along with a flow-total
+reset command. The reset changes only the ESP32 baseline; it does not clear
+the meter's accumulated registers. The dashboard uses the Class A FPort 30/31
+codec and queues downlinks until the next uplink receive window.
+
+Before deploying the imported flow, replace `SET_VALVE1_APP_ID` and
+`SET_VALVE1_DEV_EUI` in the MQTT-in topic and both Function nodes with this
+device's ChirpStack application ID and DevEUI. Use the valve_1 device profile
+with `pcv_low_power_class_a_codec.js` and check that the shared `localhost:1883`
+MQTT broker and Dashboard 2.0 base match your Node-RED installation. Do not
+use the valve_2 topic or its credentials for valve_1. The sleep-interval input
+uses the current 10-86400 second commissioning range; increase the minimum
+before field deployment together with firmware and codec.

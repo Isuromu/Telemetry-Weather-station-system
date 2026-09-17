@@ -1,0 +1,55 @@
+[
+  {
+    "id": "soil_shared_sidebar_width_220",
+    "type": "ui-template",
+    "z": "e036313ddf417d8b",
+    "g": "20d477d95af7c002",
+    "group": "",
+    "page": "",
+    "ui": "f53e93e9ba219e63",
+    "name": "Narrow dashboard sidebar (220 px)",
+    "order": 0,
+    "width": 0,
+    "height": 0,
+    "head": "",
+    "format": "/* Change both 220px values to adjust the expanded menu width. */\n@media (min-width: 768px) {\n  .v-navigation-drawer:not(.v-navigation-drawer--rail) {\n    width: 180px !important;\n  }\n  .v-main:has(> .v-navigation-drawer--active:not(.v-navigation-drawer--temporary):not(.v-navigation-drawer--rail)) {\n    --v-layout-left: 180px !important;\n  }\n}",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "site:style",
+    "className": "",
+    "x": 260,
+    "y": 80,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "f53e93e9ba219e63",
+    "type": "ui-base",
+    "name": "My Dashboard",
+    "path": "/dashboard",
+    "appIcon": "",
+    "includeClientData": true,
+    "acceptsClientConfig": [
+      "ui-notification",
+      "ui-control"
+    ],
+    "showPathInSidebar": false,
+    "headerContent": "page",
+    "navigationStyle": "fixed",
+    "titleBarStyle": "default",
+    "showReconnectNotification": true,
+    "notificationDisplayTime": 1,
+    "showDisconnectNotification": true,
+    "allowInstall": true
+  },
+  {
+    "id": "fb57f0d1ade833fb",
+    "type": "global-config",
+    "env": [],
+    "modules": {
+      "@flowfuse/node-red-dashboard": "1.30.2"
+    }
+  }
+]

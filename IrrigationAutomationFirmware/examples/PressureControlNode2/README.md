@@ -32,7 +32,7 @@ pio device monitor
 Serial Monitor runs at 115200 baud for diagnostics only. The node wakes,
 measures, transmits, receives one queued Class A downlink in RX1/RX2, sends an
 application result status when a command arrives, and enters timer deep sleep.
-The current default is 60 seconds. It does not accept Serial commands.
+The current commissioning default is 10 seconds. It does not accept Serial commands.
 
 ## Hardware
 
@@ -109,11 +109,18 @@ unlocked. The target sends the shared 32-byte protocol-v2 FPort-31 status.
 
 ## Node-RED dashboard
 
-`include/pressure_node2_dashboard2_flow.json` is the Dashboard 2.0 flow for this
+`include/pressure_node2_dashboard_flow.json` is the Dashboard 2.0 flow for this
 node. It subscribes to `.../event/+`, decodes the FPort 31 status object, and
-shows the last uplink, the last downlink and the node state next to the pressure
-chart and gauges. Commands go to `.../command/down` with the codec's `object`
+shows the last uplink, the last downlink and the node state next to separate
+pressure and battery-voltage history charts. Each chart has its own vertical
+time-zoom buttons (30 minutes to 24 hours). The flow has no flow-meter display
+because this device has no flow meter. Commands go to `.../command/down` with the codec's `object`
 input, the same path as the manual JSON above.
+
+The dashboard export contains the replacement chart group created in Node-RED
+and confirmed by the user to appear on the right of the Valve 2 page. The
+status/control group uses eight columns and the chart group uses four; on
+narrower screens Dashboard 2.0 may wrap them into separate rows.
 
 Sleep intervals are set in **seconds**, over the same 10..86400 s range as
 `lorawan::MIN_REPORT_INTERVAL_SECONDS` and
@@ -124,6 +131,4 @@ fresh `command_id` for every command, because the node ignores an id it has
 already accepted.
 
 valve_2 is Class A, so a command waits in ChirpStack until the node's next uplink
-and is applied in the receive window that follows it. The `Simulate FPort 31
-uplink` inject node replays the 2026-09-16 status log, so the dashboard can be
-driven without a device.
+and is applied in the receive window that follows it.
