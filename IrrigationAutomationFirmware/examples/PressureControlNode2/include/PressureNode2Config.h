@@ -1,28 +1,14 @@
 #pragma once
 
 // Board description for valve_2, the no-flow-meter Class A node built from
-// examples/PressureControlNode2. It is separate from the shared
-// include/PressureNodeConfig.h (valve_1, namespace `rev_a`) so that valve_2's
-// pins and board constants can diverge freely: change them HERE, and do not
-// expect valve_1 to follow.
-//
-// The section layout deliberately mirrors include/PressureNodeConfig.h so the
-// two files can be compared section by section. Everything that is identical
-// today is identical only because both boards are built from the same
-// prototype design, not because it must stay that way.
+// examples/PressureControlNode2. valve_2's pins and board constants can diverge
+// freely: change them HERE, and do not expect valve_1 to follow.
 //
 // Build-shape switches stay in platformio.ini because they gate code structure
 // rather than describing hardware: PCV_NO_FLOW_METER,
 // PCV_NO_FLOW_ACTUATION_ENABLED and PRESSURE_NODE_RUNTIME_MODE.
 
 #include <stdint.h>
-
-// This switch selects what the firmware is allowed to do, not what the board
-// is, so it stays a build flag. Declared here only to fail loudly if a future
-// edit drops it from the build.
-#ifndef PCV_NO_FLOW_ACTUATION_ENABLED
-# define PCV_NO_FLOW_ACTUATION_ENABLED 1 // fixme: 0
-#endif
 
 namespace irrigation::pressure_node::valve_2 {
 
@@ -87,8 +73,8 @@ inline constexpr uint16_t READY_POLL_INTERVAL_MS = 5;
 namespace pcv {
 inline constexpr bool POWER_ENABLE_ACTIVE_HIGH = true;
 
-// Bench starting values only. Validate on the installed latching solenoid of
-// valve_2 before enabling actuation.
+// Same provisional pulse timing and polarity as valve_1. Confirm these on
+// the installed valve_2 solenoid before relying on remote OPEN/CLOSE.
 inline constexpr uint16_t POWER_SETTLE_MS = 20;
 inline constexpr uint16_t SOLENOID_PULSE_MS = 250;
 inline constexpr uint16_t POST_PULSE_MS = 20;
@@ -124,25 +110,6 @@ inline constexpr char NVS_NAMESPACE[] = "valve_lora";
 inline constexpr char NVS_NONCES_KEY[] = "nonces";
 inline constexpr char NVS_STATE_KEY[] = "node_state";
 }  // namespace lorawan
-
-// This build does not fit a flow meter and never starts the RS-485 transport,
-// so nothing here is instantiated while PCV_NO_FLOW_METER is 1. The section is
-// kept so that the shared flow code path still compiles if a meter is ever
-// added to valve_2.
-namespace flow_meter {
-inline constexpr bool REGISTER_MAP_CONFIRMED = true;
-inline constexpr uint32_t BAUD = 9600;
-inline constexpr uint16_t RESPONSE_TIMEOUT_MS = 300;
-inline constexpr uint8_t SLAVE_ADDRESS = 1;
-inline constexpr bool FLOAT_WORD_ORDER_VALIDATED = true;
-inline constexpr bool LOW_WORD_FIRST = true;
-inline constexpr bool CURRENT_RS485_PINS_AVAILABLE = true;
-inline constexpr int8_t UART_RX = pins::RS485_RX;
-inline constexpr int8_t UART_TX = pins::RS485_TX;
-inline constexpr bool AUTOMATIC_DIRECTION = true;
-inline constexpr int8_t DE_RE = -1;
-inline constexpr bool DE_RE_ACTIVE_HIGH_TX = true;
-}  // namespace flow_meter
 
 inline constexpr uint32_t DEBUG_BAUD = 115200;
 

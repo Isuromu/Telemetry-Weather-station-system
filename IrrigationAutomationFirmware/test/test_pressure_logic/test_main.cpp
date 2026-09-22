@@ -7,8 +7,10 @@
 #include <PressureNodeRuntimeMode.h>
 #include <PressureNodeTypes.h>
 
+#include "examples/PressureControlNode/include/PressureNodeConfig.h"
+
 using namespace irrigation::pressure_node;
-namespace config = irrigation::pressure_node::rev_a;
+namespace config = irrigation::pressure_node::valve_1;
 namespace lora_protocol = irrigation::pressure_node::lorawan_protocol;
 
 static_assert(areOppositePolarities(

@@ -23,10 +23,10 @@
 #endif
 
 #ifndef PCV_NO_FLOW_ACTUATION_ENABLED
-#define PCV_NO_FLOW_ACTUATION_ENABLED 1 // fixme: 0
+#define PCV_NO_FLOW_ACTUATION_ENABLED 0
 #endif
 
-namespace irrigation::pressure_node::rev_a {
+namespace irrigation::pressure_node::valve_1 {
 
 namespace pins {
 inline constexpr int8_t BATTERY_ADC = 35;
@@ -178,4 +178,4 @@ static_assert(lorawan::DEFAULT_REPORT_INTERVAL_SECONDS >=
                   lorawan::DEFAULT_REPORT_INTERVAL_SECONDS <=
                       lorawan::MAX_REPORT_INTERVAL_SECONDS,
               "Default LoRaWAN report interval is out of range.");
-}  // namespace irrigation::pressure_node::rev_a
+}  // namespace irrigation::pressure_node::valve_1

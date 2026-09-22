@@ -183,12 +183,13 @@ Relevant menus:
 The register map is implemented. M46 address 1, M62 9600 none 8 1, M63
 MODBUS_RTU, `LOW_WORD_FIRST` decoding, live flow/velocity, and the physical
 ESP32 RS485 link are commissioned. Normal reads, accumulated-volume reads, and
-`flow probe` are enabled. The following still require validation:
+`flow probe` are enabled. These settings are centralized in
+`examples/PressureControlNode/include/PressureNodeConfig.h`.
+
+The following still require validation:
 
 - measured power-on stabilization time and whether power cycling the meter is
   acceptable.
-
-These settings are centralized in `include/PressureNodeConfig.h`.
 
 ## On-demand power strategy
 

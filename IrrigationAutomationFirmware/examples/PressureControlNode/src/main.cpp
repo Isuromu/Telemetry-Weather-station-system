@@ -27,7 +27,7 @@
 
 namespace {
 
-namespace config = irrigation::pressure_node::rev_a;
+namespace config = irrigation::pressure_node::valve_1;
 namespace lora_protocol = irrigation::pressure_node::lorawan_protocol;
 namespace lora_secrets = irrigation::pressure_node::lorawan_secrets;
 namespace runtime = irrigation::pressure_node::runtime;

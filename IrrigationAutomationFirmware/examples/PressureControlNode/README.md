@@ -45,6 +45,14 @@ accepts `sleep_seconds` down to 10 through its matching codec. This short
 interval is for bench testing only; restore the Class A PlatformIO flags and
 codec lower bound to at least 60 seconds before deployment.
 
+### Credentials
+
+The active Class A firmware reads the git-ignored
+`config/PressureNodeLoRaSecrets.h`. A fresh clone uses the all-zero
+`include/PressureNodeLoRaSecrets.example.h` fallback; copy its structure 
+to the ignored config header and enter only valve_1's JoinEUI, DevEUI
+and AppKey. Never log or commit real keys.
+
 Both LoRaWAN targets require a node-specific ignored
 `config/PressureNodeLoRaSecrets.h`. Never copy credentials from another end
 node. See `docs/PRESSURE_NODE_LORAWAN.md`.

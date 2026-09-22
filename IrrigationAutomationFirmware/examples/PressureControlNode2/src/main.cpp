@@ -346,7 +346,7 @@ void printBootStatus(bool essentialHardwareReady) {
                  true);
   logger.println(
       PCV_NO_FLOW_ACTUATION_ENABLED
-          ? F("[CONTROL] Valve pulses enabled after hardware validation.")
+          ? F("[CONTROL] Valve pulses enabled; verify polarity and timing on this valve.")
           : F("[CONTROL] Valve pulses locked pending polarity/pulse validation."),
       true);
 #else
