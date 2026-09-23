@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <BatteryMonitor.h>
+#include <EpeverLs1024b.h>
 #include <Preferences.h>
 #include <PressureControlNode.h>
 #include <PressureControlValve.h>
@@ -88,6 +89,13 @@ const Tuf2000mConfiguration tuf2000mConfiguration{
     false,
 };
 Tuf2000mFlowMeter flowMeter(flowTransport, tuf2000mConfiguration);
+irrigation::power::EpeverLs1024b epeverController(
+    flowTransport,
+    {
+        config::epever::SLAVE_ADDRESS,
+        config::epever::RESPONSE_TIMEOUT_MS,
+        config::epever::DEBUG_RS485
+    });
 
 PressureControlNode pressureNode(
     battery, upstreamPressure, downstreamPressure, pressureControlValve,
@@ -201,8 +209,10 @@ void loadPersistentState(bool wokeFromDeepSleep) {
   PersistentNodeState stored{};
   bool loaded = false;
   if (preferences.begin(config::lorawan::NVS_NAMESPACE, true)) {
-    const size_t length =
-        preferences.getBytesLength(config::lorawan::NVS_STATE_KEY);
+    const size_t length = preferences.isKey(config::lorawan::NVS_STATE_KEY)
+                              ? preferences.getBytesLength(
+                                    config::lorawan::NVS_STATE_KEY)
+                              : 0;
     if (length == sizeof(stored)) {
       loaded = preferences.getBytes(config::lorawan::NVS_STATE_KEY, &stored,
                                     sizeof(stored)) == sizeof(stored) &&
@@ -304,10 +314,48 @@ void initializeFlowTransportIfConfigured() {
         Rs485DirectionMode::Manual, config::flow_meter::DE_RE,
         config::flow_meter::DE_RE_ACTIVE_HIGH_TX);
   }
+  flowTransport.setDebug(&logger);
   flowTransport.begin(Serial2, config::flow_meter::BAUD,
                       config::flow_meter::UART_RX,
                       config::flow_meter::UART_TX, SERIAL_8N1);
   flowTransportStarted = true;
+}
+
+void readEpeverAtBoot() {
+  if (!config::epever::ENABLED || !flowTransportStarted) return;
+
+  // Both devices use one automatic-direction converter. Select EPEVER's baud,
+  // read once per wake, then restore the commissioned TUF-2000M baud.
+  flowTransport.begin(Serial2, config::epever::BAUD,
+                      config::flow_meter::UART_RX,
+                      config::flow_meter::UART_TX, SERIAL_8N1);
+  if (!epeverController.begin()) {
+    Serial.println("[EPEVER] RS-485 configuration invalid.");
+  } else {
+    const auto reading = epeverController.read();
+    if (reading.batteryVoltageValid)
+      Serial.printf("[EPEVER] Battery: %.2f V\n", reading.batteryVoltage);
+    else
+      Serial.println("[EPEVER] Battery voltage read failed.");
+    if (reading.loadCurrentValid)
+      Serial.printf("[EPEVER] LOAD current: %.2f A\n", reading.loadCurrentA);
+    else
+      Serial.println("[EPEVER] LOAD current read failed.");
+    if (reading.batteryStatusValid)
+      Serial.printf("[EPEVER] Battery status: 0x%04X\n",
+                    unsigned(reading.batteryStatus));
+    else
+      Serial.println("[EPEVER] Battery status read failed.");
+    if (reading.batteryTemperatureValid)
+      Serial.printf("[EPEVER] Battery temperature: %.2f C\n",
+                    reading.batteryTemperatureC);
+    else
+      Serial.println("[EPEVER] Battery temperature read failed.");
+  }
+
+  flowTransport.begin(Serial2, config::flow_meter::BAUD,
+                      config::flow_meter::UART_RX,
+                      config::flow_meter::UART_TX, SERIAL_8N1);
 }
 
 void printBootStatus(bool essentialHardwareReady) {
@@ -808,6 +856,7 @@ void setup() {
 
   initializeFlowTransportIfConfigured();
   const bool essentialHardwareReady = pressureNode.begin();
+  readEpeverAtBoot();
   const auto retainedValveState = static_cast<PressureControlValveState>(
       retainedNodeState.lastValveState);
   if (retainedValveState != PressureControlValveState::Unknown)

@@ -191,7 +191,7 @@ bool RS485Bus::selectResponseFrame(uint8_t expectedAddress,
       candidateLength = 5;
     } else if (function != expectedFunction) {
       continue;
-    } else if (expectedFunction == 0x03) {
+    } else if (expectedFunction == 0x03 || expectedFunction == 0x04) {
       if (offset + 8 <= rxLength_ && rxBuffer_[offset + 2] == 0xFF &&
           rxBuffer_[offset + 3] == 0x01) {
         candidateLength = 8;

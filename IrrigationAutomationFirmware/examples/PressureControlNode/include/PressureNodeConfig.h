@@ -154,6 +154,17 @@ inline constexpr int8_t DE_RE = -1;
 inline constexpr bool DE_RE_ACTIVE_HIGH_TX = true;
 }  // namespace flow_meter
 
+namespace epever {
+// Valve_1 is powered from the controller LOAD output. EPEVER and TUF-2000M
+// share the automatic-direction RS-485 bus but use different baud rates.
+// Firmware reads telemetry only; it never changes the battery profile.
+inline constexpr bool ENABLED = true;
+inline constexpr uint8_t SLAVE_ADDRESS = 0x60;
+inline constexpr uint32_t BAUD = 115200;
+inline constexpr uint16_t RESPONSE_TIMEOUT_MS = 400;
+inline constexpr bool DEBUG_RS485 = true;
+}  // namespace epever
+
 inline constexpr uint32_t DEBUG_BAUD = 115200;
 
 static_assert(pcv::OPEN_IN1_HIGH != pcv::OPEN_IN2_HIGH,

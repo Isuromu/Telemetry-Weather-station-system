@@ -68,6 +68,13 @@ baseline and reports later water use relative to it; it never erases the
 meter's own accumulators. Both ChirpStack codecs use protocol v2 and expose the
 local total in litres/m3. See `docs/FLOW_TOTALIZER.md`.
 
+Valve_1 also reads the EPEVER LS1024B once at each boot/wake and prints its
+battery voltage, LOAD current, battery status, and battery temperature. The
+controller and TUF-2000M share UART2 GPIO16/GPIO17 through the existing
+automatic-direction RS-485 bus; firmware switches baud rates and restores the
+TUF-2000M 9600 baud setting after the EPEVER read. EPEVER access is read-only:
+firmware does not write or alter its battery profile.
+
 ## Node-RED Dashboard 2.0
 
 Import `include/pressure_node_dashboard_flow.json` for valve_1. It follows
