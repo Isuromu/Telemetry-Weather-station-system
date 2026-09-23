@@ -154,6 +154,70 @@ inline constexpr int8_t DE_RE = -1;
 inline constexpr bool DE_RE_ACTIVE_HIGH_TX = true;
 }  // namespace flow_meter
 
+// EPEVER LandStar LS1024B solar charge controller. Commissioned as Modbus RTU
+// slave 0x60 at 115200 8N1; the controller is powered directly from the battery,
+// so the firmware only owns the RS-485 path. Register provenance, including what
+// has and has not been confirmed on the installed controller, is in
+// docs/EPEVER_LS1024B.md.
+// The solar test build is a bench-only target: it hands the RS-485 branch to the
+// LS1024B and compiles the TUF-2000M out. Every other target leaves this 0.
+#ifndef PCV_SOLAR_TEST
+#define PCV_SOLAR_TEST 0
+#endif
+
+#ifndef SOLAR_CONTROLLER_WRITES_ENABLED
+#define SOLAR_CONTROLLER_WRITES_ENABLED 0
+#endif
+
+namespace solar_controller {
+inline constexpr uint8_t SLAVE_ADDRESS = 0x60;
+inline constexpr uint32_t BAUD = 115200;
+inline constexpr uint16_t RESPONSE_TIMEOUT_MS = 300;
+
+// GPIO16/17 is the node's single RS-485 branch, so only one device may own it in
+// a given build: the TUF-2000M at 9600 or the LS1024B at 115200. The solar test
+// build compiles the flow meter out instead of re-bauding the trunk.
+inline constexpr int8_t UART_RX = pins::RS485_RX;
+inline constexpr int8_t UART_TX = pins::RS485_TX;
+inline constexpr bool AUTOMATIC_DIRECTION = true;
+inline constexpr int8_t DE_RE = -1;
+inline constexpr bool DE_RE_ACTIVE_HIGH_TX = true;
+
+// Charge-setting writes are compiled out unless the build opts in, and the
+// serial command must still end in CONFIRM. See docs/SERIAL_COMMANDS.md.
+inline constexpr bool WRITES_ENABLED = SOLAR_CONTROLLER_WRITES_ENABLED != 0;
+
+// Preconditions for applying the charge profile. The twelve setpoints below are
+// user-defined-battery setpoints, so the controller must already be configured
+// as a User battery on a 12 V system; anything else aborts before a write.
+inline constexpr uint16_t EXPECTED_BATTERY_TYPE = 0x0000;  // User
+inline constexpr uint16_t EXPECTED_RATED_VOLTAGE_LEVEL = 0x0001;  // 12 V
+
+// Single 12 V 9 Ah VRLA battery, 25 W PV. These are the setpoints of the current
+// LS1024B configuration sketch and they deliberately replace the older profile
+// that treated two 12 V 9 Ah batteries in parallel as one 18 Ah bank.
+//
+// They are written as one 0x9003..0x900E block and must stay mutually ordered;
+// the ordering rule is the library's and is asserted next to the profile in
+// main.cpp. Battery type, capacity, temperature compensation, rated voltage, and
+// maximum charging current are NOT written by this firmware: the controller is
+// expected to already hold the correct values for them.
+inline constexpr float PROFILE_OVER_VOLTAGE_DISCONNECT_V = 14.80F;
+inline constexpr float PROFILE_CHARGING_LIMIT_V = 14.40F;
+inline constexpr float PROFILE_OVER_VOLTAGE_RECONNECT_V = 14.60F;
+inline constexpr float PROFILE_EQUALIZE_V = 14.40F;
+inline constexpr float PROFILE_BOOST_V = 14.40F;
+inline constexpr float PROFILE_FLOAT_V = 13.70F;
+inline constexpr float PROFILE_BOOST_RECONNECT_V = 13.20F;
+inline constexpr float PROFILE_LOW_VOLTAGE_RECONNECT_V = 12.50F;
+inline constexpr float PROFILE_UNDER_VOLTAGE_RECOVER_V = 12.20F;
+inline constexpr float PROFILE_UNDER_VOLTAGE_WARNING_V = 12.00F;
+inline constexpr float PROFILE_LOW_VOLTAGE_DISCONNECT_V = 11.80F;
+inline constexpr float PROFILE_DISCHARGING_LIMIT_V = 10.60F;
+// For reference only, not written by this firmware: 9 Ah, about 2 A maximum
+// charge current, and equalization duration zero for a VRLA battery.
+}  // namespace solar_controller
+
 inline constexpr uint32_t DEBUG_BAUD = 115200;
 
 static_assert(pcv::OPEN_IN1_HIGH != pcv::OPEN_IN2_HIGH,
@@ -178,4 +242,9 @@ static_assert(lorawan::DEFAULT_REPORT_INTERVAL_SECONDS >=
                   lorawan::DEFAULT_REPORT_INTERVAL_SECONDS <=
                       lorawan::MAX_REPORT_INTERVAL_SECONDS,
               "Default LoRaWAN report interval is out of range.");
+static_assert(solar_controller::UART_RX != solar_controller::UART_TX,
+              "The solar-controller RS-485 UART needs distinct pins.");
+// The charge-setpoint ordering rule lives with the device protocol
+// (voltageBlockOrdered) and is asserted against the assembled profile in
+// examples/PressureControlNode/src/main.cpp, so there is one rule, not two.
 }  // namespace irrigation::pressure_node::valve_1

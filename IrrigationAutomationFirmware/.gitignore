@@ -6,3 +6,5 @@ config/PumpControlLoRaSecrets.h
 /config/PressureNode2LoRaSecrets.h
 /.vscode/
 /.idea/
+# PlatformIO build artifact for editor IntelliSense; regenerated on every build.
+/compile_commands.json

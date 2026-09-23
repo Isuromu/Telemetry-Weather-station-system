@@ -191,14 +191,25 @@ bool RS485Bus::selectResponseFrame(uint8_t expectedAddress,
       candidateLength = 5;
     } else if (function != expectedFunction) {
       continue;
-    } else if (expectedFunction == 0x03) {
-      if (offset + 8 <= rxLength_ && rxBuffer_[offset + 2] == 0xFF &&
-          rxBuffer_[offset + 3] == 0x01) {
+    } else if (expectedFunction == 0x03 || expectedFunction == 0x04) {
+      // FC03 and FC04 both answer with a byte count followed by that many data
+      // bytes. The FF01 vendor-error shape belongs to CDI-E holding-register
+      // replies only, so it must not be applied to an FC04 byte count.
+      if (expectedFunction == 0x03 && offset + 8 <= rxLength_ &&
+          rxBuffer_[offset + 2] == 0xFF && rxBuffer_[offset + 3] == 0x01) {
         candidateLength = 8;
       } else {
         candidateLength = static_cast<size_t>(rxBuffer_[offset + 2]) + 5U;
       }
-    } else if (expectedFunction == 0x06) {
+    } else if (expectedFunction == 0x06 || expectedFunction == 0x10) {
+      // Both write functions answer with a fixed eight-byte echo: slave address,
+      // function, first register (2), register count (2), CRC (2). For 0x06 that
+      // echo is the request returned verbatim; for 0x10 the reply carries no data
+      // and no byte count, only the starting address and quantity written.
+      // Source: MODBUS Application Protocol Specification V1.1b3, function 0x10
+      // "Write Multiple Registers" response definition, which lists exactly the
+      // function code, starting address, and quantity of registers. This is the
+      // standard's shape, not a device observation.
       candidateLength = 8;
     }
 

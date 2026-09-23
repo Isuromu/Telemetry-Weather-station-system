@@ -19,6 +19,22 @@ hardware validation checklist are in `docs/PRESSURE_CONTROL_NODE.md`.
 The confirmed flow-meter model and manual-derived facts are in
 `docs/TUF_2000M_TS2.md`.
 
+The EPEVER LandStar LS1024B solar charge controller driver is
+`lib/SolarController_EP_LS1024B/`, with its device facts, register provenance and
+open items in `docs/EPEVER_LS1024B.md`. The real-time input registers and the
+proprietary 0x45 address-change command are source-derived; the setting register
+map is not confirmed against an LS1024B document, so every write is read back and
+the `pcv_solar_test` bench target is the experiment that settles it. Do not
+present those registers as verified, and do not move the address change onto
+normal Modbus function codes.
+
+The twelve mutually constrained charge setpoints at 0x9003..0x900E are written
+as one FC10 block request, gated on a local ordering rule plus the controller
+already reporting a user-defined battery type and a 12 V rated voltage. Do not
+regress that to FC06 single-register writes, and do not add writes for battery
+type, capacity, temperature compensation, rated voltage level, or maximum
+charging current: this firmware reads those, it does not set them.
+
 Preliminary production-PCB decisions for the solar soil-monitoring end node
 are in `docs/SOIL_NODE_PCB_PRELIMINARY_SPEC.md`. The two supplied hardware
 requirements PDFs are preserved under `docs/references/hardware_requirements/`.

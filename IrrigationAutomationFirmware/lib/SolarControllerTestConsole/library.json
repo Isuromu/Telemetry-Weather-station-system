@@ -1,0 +1,16 @@
+{
+  "name": "SolarControllerTestConsole",
+  "version": "0.1.0",
+  "description": "Bench serial console for the EPEVER LS1024B: measurements, settings, verified writes, and the service-command address change",
+  "keywords": ["epever", "ls1024b", "solar", "console", "bench"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": {
+    "SolarController_EP_LS1024B": "*",
+    "PressureNodeCommandProcessor": "*",
+    "PrintController": "*"
+  },
+  "build": { "srcDir": "src" }
+}

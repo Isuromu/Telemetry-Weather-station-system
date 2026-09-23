@@ -68,6 +68,45 @@ baseline and reports later water use relative to it; it never erases the
 meter's own accumulators. Both ChirpStack codecs use protocol v2 and expose the
 local total in litres/m3. See `docs/FLOW_TOTALIZER.md`.
 
+## `pcv_solar_test` (bench only)
+
+```text
+pio run -e pcv_solar_test -t upload
+```
+
+Bench build for the new EPEVER LandStar LS1024B solar charge controller. It is
+not a deployment target.
+
+The LS1024B is commissioned at 115200 8N1, which UART2/GPIO16-17 cannot share
+with the 9600-baud TUF-2000M, so this target compiles the flow meter out
+(`PCV_NO_FLOW_METER`) and gives the RS-485 branch to the solar controller. The
+valve, both pressure sensors, the battery monitor, and the LoRaWAN protocol are
+unchanged. Serial Monitor at 115200 baud.
+
+```text
+solar                  live PV/battery/load/temperature/SOC
+solar settings         read the settings area (no writes)
+solar profile          the 12 setpoints and the ordering verdict
+solar write confirm    FC10 block write of 0x9003..0x900E, then read it back
+solar settings         confirm the result independently
+solar find             raw response of the proprietary find-ID frame
+solar address 0x4E confirm
+solar reg <hex>        raw FC04 input register
+solar hreg <hex>       raw FC03 holding register
+```
+
+All normal valve-node commands still work; `help` lists both command sets.
+
+Charge-setting writes are compiled in only for this target and
+`pcv_solar_test_readonly` is the same firmware with them compiled out, used to
+verify that `solar write confirm` answers `WRITES_DISABLED` and sends nothing.
+
+Read `docs/EPEVER_LS1024B.md` before writing anything: the 0x9000 settings map is
+taken from the EPEVER Tracer-AN G3 protocol and captured PC-tool frames, not from
+an LS1024B document, and the bench session's read-back against the controller
+display is what confirms or refutes it. After a confirmed address change, update
+`SLAVE_ADDRESS` in `include/PressureNodeConfig.h` and rebuild.
+
 ## Node-RED Dashboard 2.0
 
 Import `include/pressure_node_dashboard_flow.json` for valve_1. It follows

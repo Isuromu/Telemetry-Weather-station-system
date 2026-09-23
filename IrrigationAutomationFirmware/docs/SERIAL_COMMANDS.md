@@ -46,17 +46,6 @@ is refused while the VFD reports a running state.
 
 There is no unrestricted `vfd param write` command.
 
-## Modbus debug
-
-```text
-modbus debug on
-modbus debug off
-```
-
-Debug output includes TX/RX frames, CRC result, response size, address, timeout,
-exception, and CDI-E device error information. Compile-time default is
-controlled by `DEBUG_MODBUS` in `platformio.ini`.
-
 ## Raw diagnostics
 
 The convenient form appends CRC automatically:
@@ -123,3 +112,57 @@ Before the first reset, the raw meter totals are still available and the
 since-reset value is `NOT_SET`. `flow total reset` reads the current positive
 accumulator and stores it as the local zero point in NVS. It does not erase the
 TUF-2000M internal accumulators. `flow reset` is accepted as a short alias.
+
+## Solar controller (bench build)
+
+The `pcv_solar_test` target adds EPEVER LandStar LS1024B commands. It is a bench
+target: the TUF-2000M flow meter is compiled out because the LS1024B needs the
+same UART2/GPIO16-17 branch at 115200 baud. See `docs/EPEVER_LS1024B.md`.
+
+```text
+solar
+solar read
+solar settings
+solar profile
+solar write confirm
+solar find
+solar address <1..247> confirm
+solar reg <hex>
+solar hreg <hex>
+```
+
+Every other valve-node command keeps working; anything that is not a `solar`
+command is passed to the normal command processor.
+
+`solar` prints live PV, battery, load, temperature, SOC, and raw status words.
+`solar settings` is read-only and prints the settings area;
+`solar reg` and `solar hreg` print any single register as a raw word. That raw
+word is the honest check when a scaled value looks wrong.
+
+`solar profile` prints the twelve configured `0x9003..0x900E` setpoints and the
+verdict of the ordering rule the controller enforces.
+
+`solar write confirm` sends those twelve setpoints as **one FC10 block write**.
+It first checks the local ordering rule and reads the controller's battery type
+and rated voltage, aborting with `SETPOINTS_INVALID` or `PRECONDITION_FAILED`
+before anything is sent; the profile is a user-defined 12 V battery profile, so a
+different battery type or system voltage is refused. After the write it reads the
+whole block back and reports `APPLIED` only when all twelve match, otherwise
+`VERIFICATION_MISMATCH` or `BLOCK_WRITE_REJECTED`. If the block already matches,
+nothing is written at all.
+
+It refuses to run without the `confirm` token, and it refuses entirely in a build
+compiled without `SOLAR_CONTROLLER_WRITES_ENABLED=1`, where it reports
+`WRITES_DISABLED` and sends nothing.
+
+Battery type, capacity, temperature compensation, rated voltage level, and
+maximum charging current are not written by this firmware; set them on the
+controller.
+
+`solar address <n> confirm` sends the proprietary EPEVER service command `0x45`.
+It is not Modbus, it is a broadcast (so exactly one controller may be on the
+trunk), and its response is printed, never parsed. The command reports success
+only when the new address answers a battery-voltage read and the previous address
+stops answering. Update `SLAVE_ADDRESS` in
+`examples/PressureControlNode/include/PressureNodeConfig.h` after a confirmed
+change.

@@ -12,12 +12,17 @@
 #include <RS485ModBus.h>
 #include <RadioLib.h>
 #include <SPI.h>
+#include <SolarControllerEpLs1024B.h>
 #include <Tuf2000mFlowMeter.h>
 #include <Wire.h>
 #include <esp_sleep.h>
 
 #include <math.h>
 #include <string.h>
+
+#if PCV_SOLAR_TEST
+#include "SolarTestConsole.h"
+#endif
 
 #if __has_include("PressureNodeLoRaSecrets.h")
 #include "PressureNodeLoRaSecrets.h"
@@ -75,6 +80,60 @@ PressureControlValve pressureControlValve({
     {config::pcv::CLOSE_IN1_HIGH, config::pcv::CLOSE_IN2_HIGH},
 });
 
+#if PCV_SOLAR_TEST
+// The solar test build hands the node's single RS-485 branch to the LS1024B,
+// which is commissioned at 115200. The TUF-2000M runs at 9600 and cannot share
+// the trunk, so it is compiled out rather than re-bauding between devices.
+UnavailableFlowMeter flowMeter;
+RS485Bus solarTransport;
+bool solarTransportStarted = false;
+const SolarControllerConfiguration solarControllerConfiguration{
+    config::solar_controller::SLAVE_ADDRESS,
+    config::solar_controller::RESPONSE_TIMEOUT_MS,
+    false,
+    config::solar_controller::EXPECTED_BATTERY_TYPE,
+    config::solar_controller::EXPECTED_RATED_VOLTAGE_LEVEL,
+};
+SolarControllerEpLs1024B solarController(solarTransport,
+                                        solarControllerConfiguration);
+
+// The charge setpoints are installation values, so they are assembled here from
+// this node's configuration rather than baked into a shared library. The order
+// must follow SolarController_EP_LS1024B's VOLTAGE_BLOCK_FIELDS table, which is
+// asserted to map 0x9003..0x900E in index order.
+namespace solar_protocol = irrigation::pressure_node::epever_ls1024b::protocol;
+
+constexpr solar_protocol::SolarVoltageBlockProfile single12V9AhVrlaProfile{{
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_OVER_VOLTAGE_DISCONNECT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_CHARGING_LIMIT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_OVER_VOLTAGE_RECONNECT_V),
+    solar_protocol::voltsToRaw(config::solar_controller::PROFILE_EQUALIZE_V),
+    solar_protocol::voltsToRaw(config::solar_controller::PROFILE_BOOST_V),
+    solar_protocol::voltsToRaw(config::solar_controller::PROFILE_FLOAT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_BOOST_RECONNECT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_LOW_VOLTAGE_RECONNECT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_UNDER_VOLTAGE_RECOVER_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_UNDER_VOLTAGE_WARNING_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_LOW_VOLTAGE_DISCONNECT_V),
+    solar_protocol::voltsToRaw(
+        config::solar_controller::PROFILE_DISCHARGING_LIMIT_V),
+}};
+
+// The controller refuses mutually inconsistent setpoints. Checked here as well as
+// in the driver so an edit to the thresholds above cannot reach the bench.
+static_assert(solar_protocol::voltageBlockOrdered(
+                  single12V9AhVrlaProfile.values),
+              "The configured charge setpoints are not ordered the way the "
+              "controller requires; see voltageBlockOrdered().");
+#else
 RS485Bus flowTransport;
 bool flowTransportStarted = false;
 const Tuf2000mConfiguration tuf2000mConfiguration{
@@ -88,6 +147,7 @@ const Tuf2000mConfiguration tuf2000mConfiguration{
     false,
 };
 Tuf2000mFlowMeter flowMeter(flowTransport, tuf2000mConfiguration);
+#endif
 
 PressureControlNode pressureNode(
     battery, upstreamPressure, downstreamPressure, pressureControlValve,
@@ -101,7 +161,12 @@ PressureControlNode pressureNode(
 
 PrintController logger(Serial, true);
 PressureNodeCommandProcessor commands(pressureNode, logger);
+#if PCV_SOLAR_TEST
+SolarTestConsole serialCommands(commands, solarController, logger,
+                                single12V9AhVrlaProfile);
+#else
 SerialPressureNodeCommandSource serialCommands(commands, logger);
+#endif
 
 const LoRaWANBand_t loraWanRegion = EU868;
 SPISettings loraSpiSettings(500000, MSBFIRST, SPI_MODE0);
@@ -288,6 +353,29 @@ void printHexFrame(const char *label, const uint8_t *data, size_t length) {
   Serial.println();
 }
 
+#if PCV_SOLAR_TEST
+void initializeSolarTransportIfConfigured() {
+  if (config::solar_controller::UART_RX < 0 ||
+      config::solar_controller::UART_TX < 0 ||
+      config::solar_controller::SLAVE_ADDRESS < 1 ||
+      config::solar_controller::SLAVE_ADDRESS > 247 ||
+      (!config::solar_controller::AUTOMATIC_DIRECTION &&
+       config::solar_controller::DE_RE < 0))
+    return;
+
+  if (config::solar_controller::AUTOMATIC_DIRECTION) {
+    solarTransport.setDirectionMode(Rs485DirectionMode::Automatic);
+  } else {
+    solarTransport.setDirectionMode(
+        Rs485DirectionMode::Manual, config::solar_controller::DE_RE,
+        config::solar_controller::DE_RE_ACTIVE_HIGH_TX);
+  }
+  solarTransport.begin(Serial2, config::solar_controller::BAUD,
+                       config::solar_controller::UART_RX,
+                       config::solar_controller::UART_TX, SERIAL_8N1);
+  solarTransportStarted = true;
+}
+#else
 void initializeFlowTransportIfConfigured() {
   if (!config::flow_meter::CURRENT_RS485_PINS_AVAILABLE ||
       config::flow_meter::UART_RX < 0 || config::flow_meter::UART_TX < 0 ||
@@ -309,6 +397,7 @@ void initializeFlowTransportIfConfigured() {
                       config::flow_meter::UART_TX, SERIAL_8N1);
   flowTransportStarted = true;
 }
+#endif
 
 void printBootStatus(bool essentialHardwareReady) {
   logger.println(F("[SYSTEM] Latching-valve monitoring end node, Rev A"),
@@ -320,6 +409,32 @@ void printBootStatus(bool essentialHardwareReady) {
   logger.println(
       F("[SYSTEM] Dual I2C pressure sensors remain enabled for Rev A."),
       true);
+#if PCV_SOLAR_TEST
+  logger.println(
+      F("[SYSTEM] Solar test build: the TUF-2000M flow meter is compiled out "
+        "and the RS-485 branch belongs to the LS1024B."),
+      true);
+  if (solarController.available()) {
+    logger.print(F("[SYSTEM] EPEVER LS1024B RS-485 ID=0x"), true);
+    logger.print(config::solar_controller::SLAVE_ADDRESS, true, "", HEX);
+    logger.print(F(" at "), true);
+    logger.print(static_cast<unsigned long>(config::solar_controller::BAUD), true);
+    logger.println(F(" 8N1 is ready."), true);
+  } else if (solarTransportStarted) {
+    logger.println(
+        F("[SYSTEM] LS1024B RS-485 transport is up; the driver rejected the "
+          "configured address or timeout."),
+        true);
+  } else {
+    logger.println(
+        F("[SYSTEM] LS1024B RS-485 transport configuration is incomplete."),
+        true);
+  }
+  logger.println(SolarControllerEpLs1024B::writesCompiledIn()
+                     ? F("[SOLAR] Charge-setting writes are compiled in.")
+                     : F("[SOLAR] Charge-setting writes are DISABLED in this build."),
+                 true);
+#else
   if (flowMeter.available()) {
     logger.println(F("[SYSTEM] TUF-2000M on-demand RS-485 is ready."), true);
   } else if (flowTransportStarted) {
@@ -333,6 +448,7 @@ void printBootStatus(bool essentialHardwareReady) {
         F("[SYSTEM] TUF RS-485 transport configuration is incomplete."),
         true);
   }
+#endif
   if (runtime::ACTIVE_MODE == runtime::Mode::SerialOnly) {
     logger.println(F("[CONTROL] Serial commands only; LoRaWAN is disabled."),
                    true);
@@ -678,7 +794,11 @@ void enterDeepSleep() {
   }
 
   sleepRadio();
+#if PCV_SOLAR_TEST
+  if (solarTransportStarted) Serial2.end();
+#else
   if (flowTransportStarted) Serial2.end();
+#endif
   upstreamI2c.end();
   downstreamI2c.end();
   SPI.end();
@@ -806,8 +926,14 @@ void setup() {
                       config::pins::I2C_DOWNSTREAM_SCL,
                       config::pressure_sensor::I2C_FREQUENCY_HZ);
 
+#if PCV_SOLAR_TEST
+  initializeSolarTransportIfConfigured();
+  const bool solarReady = solarController.begin();
+  const bool essentialHardwareReady = pressureNode.begin() && solarReady;
+#else
   initializeFlowTransportIfConfigured();
   const bool essentialHardwareReady = pressureNode.begin();
+#endif
   const auto retainedValveState = static_cast<PressureControlValveState>(
       retainedNodeState.lastValveState);
   if (retainedValveState != PressureControlValveState::Unknown)

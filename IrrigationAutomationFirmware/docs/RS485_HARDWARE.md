@@ -47,6 +47,14 @@ the cable away from VFD input/output conductors. For production, use a
 galvanically isolated RS-485 transceiver and installation-grade surge/EMC
 protection selected for the site.
 
+## One device per branch
+
+GPIO16/GPIO17 is the prototype's single RS-485 branch, so only one device baud
+rate can own it in a given build. The valve node therefore compiles the
+TUF-2000M out when the EPEVER LS1024B solar controller is being tested on the
+same branch at 115200 baud (`pcv_solar_test`, see `docs/EPEVER_LS1024B.md`)
+instead of re-bauding the UART between devices.
+
 ## TUF-2000M valve-node integration
 
 The repository contains a `FlowMeter` interface and a `Tuf2000mFlowMeter`

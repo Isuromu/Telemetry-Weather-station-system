@@ -1,0 +1,15 @@
+{
+  "name": "SolarController_EP_LS1024B",
+  "version": "0.1.0",
+  "description": "EPEVER LandStar LS1024B solar charge controller: Modbus RTU measurements, verified charge-settings writes, and the proprietary service-command address change",
+  "keywords": ["epever", "ls1024b", "solar", "rs485", "modbus"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "PressureNodeCore": "*"
+  },
+  "build": { "srcDir": "src" }
+}
