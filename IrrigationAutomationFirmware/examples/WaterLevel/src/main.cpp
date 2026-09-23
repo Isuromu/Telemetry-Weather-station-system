@@ -11,7 +11,7 @@
 #if __has_include("WaterLevelLoRaSecrets.h")
 #include "WaterLevelLoRaSecrets.h"
 #else
-#include "WaterLevelLoRaSecretsDefault.h"
+#include "WaterLevelLoRaSecrets.example.h"
 #endif
 
 namespace {

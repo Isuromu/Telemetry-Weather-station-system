@@ -20,8 +20,6 @@ historical `valve_lora` NVS namespace for OTAA nonce continuity. Its
 application state uses the distinct `node_state` key. A missing prior nonce
 buffer blocks OTAA; do not erase NVS during migration.
 
-The Class A source is selected explicitly in `platformio.ini`.
-
 ## Build and upload
 
 ```text

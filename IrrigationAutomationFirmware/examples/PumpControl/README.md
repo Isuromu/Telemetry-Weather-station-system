@@ -64,6 +64,62 @@ as named fields. A status uplink is sent after a remote command and every
 The build verifies firmware compilation; OTAA join, Class C reception,
 RS485 behavior, and pump operation require validation on the assembled node.
 
+## Manual downlink commands
+
+The Node-RED controls are the normal path. For a manual test, queue the same
+commands as JSON in the ChirpStack device page, or through the codec's
+`encodeDownlink`. The installed codec turns each of these into the FPort 50
+bytes. Arm the frequency first, because start stays refused until a frequency
+has been commanded since boot:
+
+```json
+{"command":"set_frequency","frequency_hz":35,"command_id":1000}
+```
+
+```json
+{"command":"start","command_id":1001}
+```
+
+```json
+{"command":"stop","command_id":1002}
+```
+
+```json
+{"command":"estop","command_id":1003}
+```
+
+`command` is `stop`, `estop`, `set_frequency`, or `start`. `frequency_hz` is
+used only by `set_frequency` and must be a number from 10 to 50; it is required
+there and rejected elsewhere. `command_id` must be an integer from 0 to 65534,
+and every new command needs a new ID, since a repeated ID is a duplicate and an
+older ID is rejected. `stop` here is the same deceleration stop as the local
+`pump stop`; `estop` is the software free-stop, which is not a physical
+emergency-stop circuit.
+
+The same commands can be published directly to the broker the dashboard uses,
+on the ChirpStack v4 command topic:
+
+```json
+{"devEui":"<devEui>","confirmed":false,"fPort":50,"data":"AQMD6A2s"}
+```
+
+The topic is `application/<application-id>/device/<devEui>/command/down`, and
+`data` is the six downlink bytes base64-encoded. The table below gives the
+bytes and that encoding for the four commands above.
+
+| JSON command | FPort 50 bytes | `data` |
+| --- | --- | --- |
+| `set_frequency` 35 Hz, ID 1000 | `01 03 03 e8 0d ac` | `AQMD6A2s` |
+| `start`, ID 1001 | `01 04 03 e9 00 00` | `AQQD6QAA` |
+| `stop`, ID 1002 | `01 01 03 ea 00 00` | `AQED6gAA` |
+| `estop`, ID 1003 | `01 02 03 eb 00 00` | `AQID6wAA` |
+
+A manual command that uses an ID the dashboard is about to use will make the
+dashboard's queued command look like a duplicate; leave the controls idle while
+testing by hand, and wait for a fresh FPort 51 status before using them again.
+The result of a manual command is only visible in that status uplink, since the
+dashboard tracks the commands it queued itself.
+
 ## Node-RED Dashboard 2.0
 
 Import `include/pump_control_dashboard2_flow.json` into Node-RED. It replaces

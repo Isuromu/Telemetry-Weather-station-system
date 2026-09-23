@@ -5,7 +5,11 @@
 #include <RadioLib.h>
 #include <SPI.h>
 
+#if __has_include("PumpControlLoRaSecrets.h")
 #include "PumpControlLoRaSecrets.h"
+#else
+#include "PumpControlLoRaSecrets.example.h"
+#endif
 
 namespace {
 

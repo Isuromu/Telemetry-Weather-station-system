@@ -38,7 +38,11 @@
 
 #include "MainValveConfig.h"
 
+#if __has_include("MainValveLoRaSecrets.h")
 #include "MainValveLoRaSecrets.h"
+#else
+#include "MainValveLoRaSecrets.example.h"
+#endif
 
 namespace config = irrigation::main_valve::config;
 namespace secrets = irrigation::main_valve::lorawan_secrets;

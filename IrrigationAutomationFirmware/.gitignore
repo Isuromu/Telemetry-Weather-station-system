@@ -6,3 +6,4 @@ config/PumpControlLoRaSecrets.h
 /config/PressureNode2LoRaSecrets.h
 /.vscode/
 /.idea/
+/compile_commands.json

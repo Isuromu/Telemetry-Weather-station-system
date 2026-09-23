@@ -11,6 +11,8 @@
 
 #if __has_include("SoilNodeLoRaSecrets.h")
 #include "SoilNodeLoRaSecrets.h"
+#else
+#include "SoilNodeLoRaSecrets.example.h"
 #endif
 
 namespace {

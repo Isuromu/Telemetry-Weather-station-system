@@ -26,7 +26,7 @@
 #if __has_include("PressureNode2LoRaSecrets.h")
 #include "PressureNode2LoRaSecrets.h"
 #else
-#include <PressureNode2LoRaSecretsDefault.h>
+#include "PressureNode2LoRaSecrets.example.h"
 #endif
 
 namespace {
