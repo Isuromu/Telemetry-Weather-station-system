@@ -6,7 +6,7 @@ Grandfar 2CP50/160B pump and DELIXI CDI-E100 VFD.
 Build it with:
 
 ```text
-pio run -e pump_control_example
+pio run -e pump_control
 ```
 
 The example initializes Serial at 115200 baud and RS-485 at the CDI-E factory
@@ -32,7 +32,10 @@ The user confirmed the Pump radio pinout: NSS 5, DIO1 26, RESET 14, BUSY 25,
 SCK 18, MISO 19, MOSI 23, TXEN 32, RXEN 33. It matches MainValve. RS485
 remains RX 16 / TX 17.
 
-RadioLib error `-1116` means the node did not receive a JoinAccept. If the
+RadioLib error `-1116` means the node did not receive a JoinAccept. The example
+prints a readable meaning for common RadioLib errors, the join-attempt number,
+and the scheduled retry delay. Retries start near 60 seconds and use randomized
+exponential backoff capped at 15 minutes. If the
 gateway's LoRaWAN Frames tab shows no JoinRequest, first confirm the Pump
 radio wiring (especially TXEN and antenna), supply, and EU868 channel plan.
 The JoinEUI and AppKey cannot explain a gateway receiving no RF frame. If the
@@ -51,15 +54,26 @@ Start requires an explicit frequency command since boot and a valid VFD
 configuration, and the pump driver checks fault and run state before starting.
 The software free-stop is not a physical emergency-stop circuit.
 
+Remote Start and Stop have two reports. The first reports `in_progress` after
+the VFD accepts the command. Start reports final `accepted` only when the VFD
+is in Forward state and measured output frequency is within 0.25 Hz of the
+requested frequency. Stop reports final `accepted` only when the VFD reports
+Stopped and measured output frequency is at most 0.25 Hz. If either condition
+is not reached within 120 seconds, the final result is `failed`.
+
 Use a new command ID for each operation. ID 65535 is reserved. The last ID and
 command are stored in NVS before issuing a VFD command. A repeated ID with
 the same operation and argument is ignored; an older ID or reuse with a
 different command is rejected. IDs can wrap from 65534 to 0. Uplink FPort 51
-is a 17-byte status containing communication/configuration/running flags,
+uses a 22-byte protocol-v2 status containing communication/configuration/running flags,
 command result and ID, commanded/actual frequency, current, VFD fault,
-output voltage, run state, and communication error. The codec exposes these
-as named fields. A status uplink is sent after a remote command and every
-60 seconds. Local Serial commands continue to work.
+output voltage, run state, communication error, previous join error, join
+attempt count, and previous retry delay. The codec also accepts the older
+17-byte protocol-v1 status. A two-byte FPort 50 payload `01 05` requests status
+without consuming a pump command ID or operating the VFD. Status is sent every
+15 seconds while running, every 60 seconds while stopped, and promptly after a
+command, refresh request, or important state change. Local Serial commands
+continue to work.
 
 The build verifies firmware compilation; OTAA join, Class C reception,
 RS485 behavior, and pump operation require validation on the assembled node.
@@ -135,11 +149,14 @@ The flow is configured for the Pump application ID and DevEUI from the supplied
 dashboard. These values appear in the MQTT input topic and two Function nodes;
 update all three if the ChirpStack registration changes. No AppKey is stored
 in the flow. Install `pump_control_class_c_codec.js` in the ChirpStack device
-profile for named uplink fields. The flow also decodes the raw 17-byte status
-payload if ChirpStack does not include an `object`.
+profile for named uplink fields. The flow decodes the raw protocol-v2 payload
+if ChirpStack does not include an `object`, while retaining protocol-v1 support.
 
 The dashboard shows pump state, frequency, current, fault, radio connection,
-and last uplink. Commands use binary FPort 50 downlinks and one pending command
+and last uplink. A compact colored LoRaWAN state and icon-only refresh control
+sit below the Pump subtitle. Refresh sends the non-actuating `01 05` request,
+uses a loading spinner, and is protected by a 10-second UI and Node-RED rate
+limit. Commands use binary FPort 50 downlinks and one pending command
 ID. The ID is synchronized from the first FPort 51 status after Node-RED starts;
 wait for that status before using the controls. A matching status changes
 `Queued` to the device-reported result. An unmatched command times out after
@@ -149,6 +166,24 @@ still be waiting in ChirpStack. Network Stop is not a physical emergency stop.
 Node-RED flow context is in memory unless persistent context storage is
 configured in Node-RED. After a restart, wait for a fresh device uplink to
 resynchronize command IDs.
+
+A node that has not joined cannot transmit its local join error or exact retry
+deadline through LoRaWAN. While status is missing, the dashboard therefore
+shows `Join not confirmed / node offline`, explains the automatic retry policy,
+and explicitly marks the exact next attempt as unavailable. After a successful
+join, the first status reports the attempt count, previous RadioLib error, and
+the retry delay preceding that join. An exact live countdown during a failed
+join would require an out-of-band channel such as USB Serial or gateway-level
+JoinRequest monitoring.
+
+Last uplink timestamps are rendered in Uzbekistan time instead of exposing the
+raw ChirpStack timestamp.
+
+The dashboard marks telemetry offline after 45 seconds when the last report
+said the pump was running, or after 75 seconds when it said the pump was
+stopped. Once offline, cached Class C, VFD communication, and VFD fault values
+are shown as unavailable. Dashboard commands other than Stop are blocked until
+a fresh status arrives; Stop remains available as a safety action.
 
 ## Deferred commissioning issue: USB disconnect when the motor starts
 

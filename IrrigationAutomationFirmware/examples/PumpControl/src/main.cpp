@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <cmath>
 #include <CommandProcessor.h>
 #include <ProjectConfig.h>
 #include <Preferences.h>
@@ -33,8 +34,20 @@ constexpr int LORA_TXEN_PIN = 32;
 constexpr int LORA_RXEN_PIN = 33;
 constexpr uint8_t COMMAND_FPORT = 50;
 constexpr uint8_t STATUS_FPORT = 51;
-constexpr uint32_t STATUS_INTERVAL_MS = 60000;
-constexpr uint32_t JOIN_RETRY_MS = 60000;
+constexpr uint32_t STATUS_INTERVAL_STOPPED_MS = 60 * 1000;
+constexpr uint32_t STATUS_INTERVAL_RUNNING_MS = 15 * 1000;
+constexpr uint32_t STATUS_RESPONSE_MIN_GAP_MS = 5 * 1000;
+constexpr uint32_t JOIN_RETRY_INITIAL_MS = 60 * 1000;
+constexpr uint32_t JOIN_RETRY_MAX_MS = 15 * 60 * 1000;
+constexpr uint32_t REMOTE_COMPLETION_TIMEOUT_MS = 120 * 1000;
+constexpr float RUN_FREQUENCY_TOLERANCE_HZ = 0.25f;
+constexpr float STOP_FREQUENCY_TOLERANCE_HZ = 0.25f;
+
+enum class PendingRemoteCompletion : uint8_t {
+  None,
+  StartAtFrequency,
+  StoppedAtZero
+};
 
 SPISettings loraSpiSettings(500000, MSBFIRST, SPI_MODE0);
 SX1262 radio = new Module(LORA_NSS_PIN, LORA_DIO1_PIN,
@@ -45,11 +58,19 @@ bool lorawanActive = false;
 bool classCActive = false;
 bool statusPending = false;
 uint32_t lastStatusMs = 0;
-uint32_t lastJoinAttemptMs = 0;
+uint32_t nextJoinAttemptMs = 0;
+uint32_t lastStatusSignature = 0;
+bool hasLastStatusSignature = false;
+uint8_t joinAttemptCount = 0;
+int16_t previousJoinError = RADIOLIB_ERR_NONE;
+uint16_t lastJoinRetrySeconds = 0;
 uint16_t lastCommandId = 0xFFFF;
 uint8_t lastCommandOp = 0;
 uint16_t lastCommandArg = 0;
 uint8_t lastCommandResult = 0;
+PendingRemoteCompletion pendingRemoteCompletion =
+    PendingRemoteCompletion::None;
+uint32_t remoteCompletionStartedMs = 0;
 
 void put16(uint8_t *destination, uint16_t value) {
   destination[0] = static_cast<uint8_t>(value >> 8);
@@ -58,6 +79,54 @@ void put16(uint8_t *destination, uint16_t value) {
 
 uint16_t get16(const uint8_t *source) {
   return (static_cast<uint16_t>(source[0]) << 8) | source[1];
+}
+
+const char *radioErrorMeaning(int16_t state) {
+  switch (state) {
+    case RADIOLIB_ERR_NONE: return "no error";
+    case RADIOLIB_ERR_CHIP_NOT_FOUND: return "radio chip not found";
+    case RADIOLIB_ERR_TX_TIMEOUT: return "radio transmit timeout";
+    case RADIOLIB_ERR_RX_TIMEOUT: return "radio receive timeout";
+    case RADIOLIB_ERR_INVALID_FREQUENCY: return "invalid radio frequency";
+    case RADIOLIB_ERR_SPI_WRITE_FAILED: return "radio SPI write failed";
+    case RADIOLIB_ERR_NETWORK_NOT_JOINED: return "LoRaWAN network not joined";
+    case RADIOLIB_ERR_NO_JOIN_ACCEPT:
+      return "no OTAA JoinAccept received in RX1/RX2";
+    default: return "unclassified RadioLib error";
+  }
+}
+
+uint32_t statusSignature() {
+  const PumpStatus &s = pump.status();
+  uint32_t signature = s.communicationOk ? 1U : 0U;
+  signature |= s.configurationValid ? (1U << 1) : 0U;
+  signature |= s.running ? (1U << 2) : 0U;
+  signature |= s.frequencyArmed ? (1U << 3) : 0U;
+  signature |= static_cast<uint32_t>(s.runState) << 4;
+  signature |= static_cast<uint32_t>(s.lastCommunicationError) << 8;
+  signature |= static_cast<uint32_t>(s.vfdFaultCode) << 16;
+  return signature;
+}
+
+uint32_t currentStatusIntervalMs() {
+  return pump.status().running ? STATUS_INTERVAL_RUNNING_MS
+                               : STATUS_INTERVAL_STOPPED_MS;
+}
+
+void scheduleJoinRetry(int16_t state) {
+  previousJoinError = state;
+  const uint8_t exponent = joinAttemptCount > 4 ? 4 : joinAttemptCount - 1;
+  uint32_t baseMs = JOIN_RETRY_INITIAL_MS << exponent;
+  if (baseMs > JOIN_RETRY_MAX_MS) baseMs = JOIN_RETRY_MAX_MS;
+  const uint32_t jitterMs = baseMs / 5;
+  const uint32_t retryMs = baseMs - jitterMs +
+      (esp_random() % (2 * jitterMs + 1));
+  nextJoinAttemptMs = millis() + retryMs;
+  lastJoinRetrySeconds = static_cast<uint16_t>((retryMs + 999) / 1000);
+  Serial.printf(
+      "Pump LoRaWAN join attempt %u failed: %s (%d); next attempt in %u s.\n",
+      joinAttemptCount, radioErrorMeaning(state), state,
+      lastJoinRetrySeconds);
 }
 
 bool loadNonces() {
@@ -106,7 +175,48 @@ bool saveLastCommand() {
   return ok;
 }
 
-void buildStatus(uint8_t (&payload)[17]) {
+void beginRemoteCompletion(PendingRemoteCompletion completion) {
+  pendingRemoteCompletion = completion;
+  remoteCompletionStartedMs = millis();
+  lastCommandResult = 6;  // Accepted by the VFD; final condition pending.
+  (void)saveLastCommand();
+}
+
+void finishRemoteCompletion(bool completed, const char *message) {
+  lastCommandResult = completed ? 1 : 2;
+  pendingRemoteCompletion = PendingRemoteCompletion::None;
+  (void)saveLastCommand();
+  statusPending = true;
+  Serial.println(message);
+}
+
+void updateRemoteCompletion() {
+  if (pendingRemoteCompletion == PendingRemoteCompletion::None) return;
+  const PumpStatus &s = pump.status();
+  if (s.communicationOk) {
+    if (pendingRemoteCompletion == PendingRemoteCompletion::StartAtFrequency &&
+        s.runState == DelixiRunState::Forward &&
+        std::fabs(s.actualFrequencyHz - s.commandedFrequencyHz) <=
+            RUN_FREQUENCY_TOLERANCE_HZ) {
+      finishRemoteCompletion(
+          true, "Pump Start complete: requested frequency reached.");
+      return;
+    }
+    if (pendingRemoteCompletion == PendingRemoteCompletion::StoppedAtZero &&
+        s.runState == DelixiRunState::Stopped &&
+        s.actualFrequencyHz <= STOP_FREQUENCY_TOLERANCE_HZ) {
+      finishRemoteCompletion(
+          true, "Pump Stop complete: VFD stopped at approximately 0 Hz.");
+      return;
+    }
+  }
+  if (millis() - remoteCompletionStartedMs >= REMOTE_COMPLETION_TIMEOUT_MS) {
+    finishRemoteCompletion(
+        false, "Pump command completion timed out before the final VFD condition.");
+  }
+}
+
+void buildStatus(uint8_t (&payload)[22]) {
   const PumpStatus &s = pump.status();
   uint8_t flags = 0;
   if (s.communicationOk) flags |= 0x01;
@@ -115,7 +225,7 @@ void buildStatus(uint8_t (&payload)[17]) {
   if (s.frequencyArmed) flags |= 0x08;
   if (lorawanActive) flags |= 0x10;
   if (classCActive) flags |= 0x20;
-  payload[0] = 1;
+  payload[0] = 2;
   payload[1] = flags;
   payload[2] = lastCommandResult;
   put16(payload + 3, lastCommandId);
@@ -126,15 +236,28 @@ void buildStatus(uint8_t (&payload)[17]) {
   put16(payload + 13, static_cast<uint16_t>(s.outputVoltageV * 10.0f + 0.5f));
   payload[15] = static_cast<uint8_t>(s.runState);
   payload[16] = static_cast<uint8_t>(s.lastCommunicationError);
+  put16(payload + 17, static_cast<uint16_t>(previousJoinError));
+  payload[19] = joinAttemptCount;
+  put16(payload + 20, lastJoinRetrySeconds);
 }
 
 bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
-  if (fPort != COMMAND_FPORT || length != 6 || data[0] != 1) {
+  if (fPort != COMMAND_FPORT || length < 2 || data[0] != 1) {
     lastCommandResult = 4;
     statusPending = true;
     return false;
   }
   const uint8_t op = data[1];
+  if (op == 5 && length == 2) {
+    Serial.println("Pump status refresh requested by dashboard.");
+    statusPending = true;
+    return true;
+  }
+  if (length != 6) {
+    lastCommandResult = 4;
+    statusPending = true;
+    return false;
+  }
   const uint16_t id = get16(data + 2);
   const uint16_t arg = get16(data + 4);
   if (id == 0xFFFF || op < 1 || op > 4 ||
@@ -179,6 +302,13 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
     case 4: accepted = pump.start(); break;
   }
   lastCommandResult = accepted ? 1 : 2;
+  if (accepted && op == 4) {
+    beginRemoteCompletion(PendingRemoteCompletion::StartAtFrequency);
+  } else if (accepted && op == 1) {
+    beginRemoteCompletion(PendingRemoteCompletion::StoppedAtZero);
+  } else {
+    pendingRemoteCompletion = PendingRemoteCompletion::None;
+  }
   (void)saveLastCommand();
   (void)pump.poll(true);
   statusPending = true;
@@ -188,7 +318,7 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
 bool sendStatus(bool confirmed) {
   if (!lorawanActive) return false;
   (void)pump.poll(true);
-  uint8_t payload[17] = {};
+  uint8_t payload[22] = {};
   buildStatus(payload);
   uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
   size_t downlinkLength = 0;
@@ -198,9 +328,12 @@ bool sendStatus(bool confirmed) {
   lastStatusMs = millis();
   statusPending = false;
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("LoRaWAN status uplink failed: %d\n", state);
+    Serial.printf("LoRaWAN status uplink failed: %s (%d)\n",
+                  radioErrorMeaning(state), state);
     return false;
   }
+  lastStatusSignature = statusSignature();
+  hasLastStatusSignature = true;
   if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
     processRemoteCommand(downlink, downlinkLength, event.fPort);
   }
@@ -208,23 +341,24 @@ bool sendStatus(bool confirmed) {
 }
 
 bool setupLoRaWAN() {
-  lastJoinAttemptMs = millis();
   if (!secrets::CONFIGURED) {
     Serial.println("Pump LoRaWAN credentials are not configured.");
     return false;
   }
+  if (joinAttemptCount < UINT8_MAX) ++joinAttemptCount;
+  Serial.printf("Pump LoRaWAN OTAA join attempt %u.\n", joinAttemptCount);
   SPI.begin(LORA_SCK_PIN, LORA_MISO_PIN, LORA_MOSI_PIN, LORA_NSS_PIN);
   int16_t state = radio.begin(868.0, 125.0, 9, 7,
       RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 0.0, false);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("SX1262 initialization failed: %d\n", state);
+    scheduleJoinRetry(state);
     return false;
   }
   radio.setRfSwitchPins(LORA_RXEN_PIN, LORA_TXEN_PIN);
   state = lorawan.beginOTAA(secrets::JOIN_EUI, secrets::DEV_EUI,
                             nullptr, secrets::APP_KEY);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("LoRaWAN beginOTAA failed: %d\n", state);
+    scheduleJoinRetry(state);
     return false;
   }
   lorawan.setADR(true);
@@ -233,12 +367,14 @@ bool setupLoRaWAN() {
   if (state != RADIOLIB_LORAWAN_NEW_SESSION &&
       state != RADIOLIB_LORAWAN_SESSION_RESTORED) {
     (void)saveNonces();
-    Serial.printf("Pump OTAA activation failed: %d\n", state);
+    scheduleJoinRetry(state);
     return false;
   }
   if (!saveNonces()) Serial.println("Warning: LoRaWAN nonces were not saved.");
   lorawanActive = true;
-  Serial.println("Pump LoRaWAN session active.");
+  nextJoinAttemptMs = 0;
+  Serial.printf("Pump LoRaWAN session active after %u attempt(s).\n",
+                joinAttemptCount);
   state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_C);
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("Class C unavailable (%d); using Class A windows.\n", state);
@@ -247,6 +383,7 @@ bool setupLoRaWAN() {
   for (uint8_t attempt = 0; attempt < 3; ++attempt) {
     if (sendStatus(true)) {
       classCActive = true;
+      statusPending = true;
       Serial.println("Pump LoRaWAN Class C active.");
       return true;
     }
@@ -330,6 +467,12 @@ void setup() {
                  true);
   logger.println(F("[SYSTEM] Type: help"), true);
   loadLastCommand();
+  if (lastCommandResult == 6) {
+    // A reset interrupted completion tracking. Do not report the old command
+    // as still progressing when no in-memory target tracker exists.
+    lastCommandResult = 2;
+    (void)saveLastCommand();
+  }
   (void)setupLoRaWAN();
   statusPending = lorawanActive;
 }
@@ -337,6 +480,11 @@ void setup() {
 void loop() {
   serialCommands.poll(Serial);
   pump.poll();
+  updateRemoteCompletion();
+  if (lorawanActive && hasLastStatusSignature &&
+      statusSignature() != lastStatusSignature) {
+    statusPending = true;
+  }
   if (classCActive) {
     uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
     size_t downlinkLength = 0;
@@ -351,12 +499,13 @@ void loop() {
   }
   const uint32_t now = millis();
   if (lorawanActive &&
-      ((statusPending && now - lastStatusMs >= 5000) ||
-       now - lastStatusMs >= STATUS_INTERVAL_MS)) {
+      ((statusPending && now - lastStatusMs >= STATUS_RESPONSE_MIN_GAP_MS) ||
+       now - lastStatusMs >= currentStatusIntervalMs())) {
     (void)sendStatus(false);
   }
   if (!lorawanActive && secrets::CONFIGURED &&
-      now - lastJoinAttemptMs >= JOIN_RETRY_MS) {
+      nextJoinAttemptMs != 0 &&
+      static_cast<int32_t>(now - nextJoinAttemptMs) >= 0) {
     (void)setupLoRaWAN();
   }
   delay(5);

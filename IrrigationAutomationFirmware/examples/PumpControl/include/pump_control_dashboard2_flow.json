@@ -19,7 +19,14 @@
       "a364a787aba4f9ec",
       "80e63cf073fc18b1",
       "46d6e76c07878f6f",
-      "71efb750b43caf3c"
+      "71efb750b43caf3c",
+      "5a8b1ec7314062da",
+      "942aecf69be25b17",
+      "be54f6728d1c309a",
+      "cf8f9427e5b31d06",
+      "d041bc872e9a563f",
+      "38ea9c7204fd65b1",
+      "61bd409ef783a2c4"
     ],
     "x": 54,
     "y": 239,
@@ -44,7 +51,7 @@
     "y": 280,
     "wires": [
       [
-        "d252c62c590f32f5"
+        "5a8b1ec7314062da"
       ]
     ]
   },
@@ -65,7 +72,7 @@
     "y": 280,
     "wires": [
       [
-        "80e63cf073fc18b1"
+        "61bd409ef783a2c4"
       ]
     ]
   },
@@ -112,9 +119,43 @@
     "y": 420,
     "wires": [
       [
-        "80e63cf073fc18b1"
+        "be54f6728d1c309a"
       ]
     ]
+  },
+  {
+    "id": "be54f6728d1c309a",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Present Pump status",
+    "func": "const source=(msg.payload&&msg.payload.state)||{};\nconst s=Object.assign({},source);\nfunction readableTime(value){\n  if(!value)return value;\n  const normalized=String(value).replace(/(\\.\\d{3})\\d+/,\"$1\");\n  const date=new Date(normalized);\n  if(Number.isNaN(date.getTime()))return value;\n  const parts=new Intl.DateTimeFormat(\"en-GB\",{timeZone:\"Asia/Tashkent\",year:\"numeric\",month:\"2-digit\",day:\"2-digit\",hour:\"2-digit\",minute:\"2-digit\",second:\"2-digit\",hour12:false}).formatToParts(date);\n  const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));\n  return p.day+\"/\"+p.month+\"/\"+p.year+\" \"+p.hour+\":\"+p.minute+\":\"+p.second;\n}\ns.last_seen=readableTime(s.last_seen);\nif(s.pending)s.pending=Object.assign({},s.pending,{queued_at:readableTime(s.pending.queued_at)});\nif(s.last_command)s.last_command=Object.assign({},s.last_command,{queued_at:readableTime(s.last_command.queued_at)});\nmsg.payload={kind:\"state\",state:s};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 690,
+    "y": 400,
+    "wires": [["d041bc872e9a563f"]]
+  },
+  {
+    "id": "d041bc872e9a563f",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Apply Pump offline state",
+    "func": "const source=(msg.payload&&msg.payload.state)||{};\nconst s=Object.assign({},source);\nconst offlineAfterMs=source.running?45000:75000;\ns.offline_after_seconds=offlineAfterMs/1000;\ns.stale=!s.last_seen_ms||Date.now()-s.last_seen_ms>offlineAfterMs;\nif(s.stale){\n  s.class_c_active=false;\n  s.lorawan_active=false;\n  s.communication_ok=null;\n  s.vfd_fault_code=null;\n}\nmsg.payload={kind:\"state\",state:s};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 890,
+    "y": 420,
+    "wires": [["80e63cf073fc18b1"]]
   },
   {
     "id": "80e63cf073fc18b1",
@@ -129,7 +170,7 @@
     "width": "12",
     "height": "11",
     "head": "",
-    "format": "<template>\n<div class=\"pump\">\n  <div class=\"pump-head\">\n    <div><strong>Pump Control</strong><small>Grandfar pump / DELIXI VFD</small></div>\n    <span class=\"pump-pill\" :class=\"state.stale ? 'stale' : state.running ? 'running' : 'stopped'\">{{ state.stale ? 'No recent status' : state.run_state === 'unknown' ? 'Unknown' : state.running ? 'Running' : 'Stopped' }}</span>\n  </div>\n  <div class=\"pump-grid\">\n    <div><small>Actual frequency</small><b>{{ show(state.actual_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Commanded frequency</small><b>{{ show(state.commanded_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Motor current</small><b>{{ show(state.motor_current_a, ' A') }}</b></div>\n    <div><small>VFD communication</small><b>{{ state.stale ? 'Unknown' : state.communication_ok ? 'OK' : 'Error' }}</b></div>\n    <div><small>VFD fault</small><b>{{ show(state.vfd_fault_code) }}</b></div>\n    <div><small>LoRaWAN</small><b>{{ state.stale ? 'Unknown' : state.class_c_active ? 'Class C' : state.lorawan_active ? 'Class A' : 'Unknown' }}</b></div>\n  </div>\n  <div class=\"pump-alert\" v-if=\"!state.stale && (state.vfd_fault_code || state.communication_ok === false)\">VFD fault or communication problem. Check the pump before starting.</div>\n  <div class=\"pump-controls\">\n    <h3>Controls</h3>\n    <div class=\"pump-frequency\"><v-text-field v-model.number=\"frequency\" type=\"number\" min=\"10\" max=\"50\" step=\"0.1\" label=\"Frequency (Hz)\" density=\"compact\" hide-details></v-text-field><v-btn color=\"primary\" @click=\"issue('set_frequency')\">Set frequency</v-btn></div>\n    <div class=\"pump-buttons\"><v-btn color=\"success\" @click=\"issue('start')\">Start</v-btn><v-btn color=\"error\" @click=\"issue('stop')\">Stop</v-btn></div>\n    <small>Start requires a valid VFD configuration and an explicit frequency command after boot.</small>\n  </div>\n  <div class=\"pump-feedback\">\n    <h3>Command feedback</h3>\n    <div v-if=\"state.pending\">ID {{ state.pending.id }} · {{ label(state.pending.command) }} · Queued {{ state.pending.queued_at }}</div>\n    <div v-else-if=\"state.last_command\">ID {{ state.last_command.id }} · {{ label(state.last_command.command) }} · {{ state.command_state || 'Unknown' }}</div>\n    <div v-else>No command sent from this dashboard.</div>\n    <small>Queued means sent to ChirpStack. Device status confirms the result.</small>\n  </div>\n  <div class=\"pump-footer\"><span>Last uplink: {{ state.last_seen || 'waiting' }}</span><span>Configuration: {{ state.stale ? 'unknown' : state.configuration_valid ? 'valid' : 'blocked' }} · Frequency armed: {{ state.stale ? 'unknown' : state.frequency_armed ? 'yes' : 'no' }}</span><span>Signal: {{ show(state.rssi, ' dBm') }} / {{ show(state.snr, ' dB') }}</span></div>\n  <div class=\"pump-alert\" v-if=\"state.ui_error\">{{ state.ui_error }}</div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{stale:true}, frequency:25} },\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix },\n    label(v) { return ({set_frequency:'Set frequency',start:'Start',stop:'Stop'})[v] || v },\n    issue(command) {\n      if (command === 'start' && !window.confirm('Start the pump?')) return;\n      this.send({payload:{kind:'command',command:command,frequency_hz:command === 'set_frequency' ? Number(this.frequency) : undefined}});\n    }\n  }\n}\n</script>\n<style>\n.pump{padding:8px}.pump-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:1.15rem}.pump-head small{display:block;color:#667;font-size:.8rem}.pump-pill{padding:6px 12px;border-radius:20px;background:#e5e7eb;font-size:.85rem}.pump-pill.running{background:#dcfce7;color:#166534}.pump-pill.stopped{background:#e6f0f5;color:#244b61}.pump-pill.stale{background:#fef3c7;color:#92400e}.pump-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:16px 0}.pump-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}.pump-grid small{display:block;color:#566}.pump-grid b{font-size:1.3rem}.pump-controls,.pump-feedback,.pump-footer{border-top:1px solid #ccd7df;padding-top:12px;margin-top:12px}.pump-controls h3,.pump-feedback h3{margin:0 0 10px}.pump-frequency{display:flex;align-items:center;gap:10px;max-width:440px}.pump-frequency .v-input{flex:1}.pump-buttons{display:flex;gap:8px;margin:12px 0}.pump-controls small,.pump-feedback small,.pump-footer{color:#566;font-size:.82rem}.pump-footer{display:flex;flex-wrap:wrap;gap:8px 20px}.pump-alert{background:#b3261e;color:white;border-radius:5px;padding:8px;margin:8px 0}\n</style>",
+    "format": "<template>\n<div class=\"pump\">\n  <div class=\"pump-head\">\n    <div class=\"pump-title\"><strong>Pump Control</strong><small>Grandfar pump / DELIXI VFD</small><div class=\"pump-radio-inline\"><span :class=\"radioClass\">{{ radioText }}</span><v-btn icon=\"mdi-refresh\" size=\"x-small\" variant=\"text\" :loading=\"refreshing\" :disabled=\"refreshing || cooldown > 0\" :title=\"refreshTitle\" @click=\"requestStatus\"></v-btn></div></div>\n    <span class=\"pump-pill\" :class=\"state.stale ? 'stale' : state.running ? 'running' : 'stopped'\">{{ state.stale ? 'No recent status' : state.run_state === 'unknown' ? 'Unknown' : state.running ? 'Running' : 'Stopped' }}</span>\n  </div>\n  <div class=\"pump-grid\">\n    <div><small>Actual frequency</small><b>{{ show(state.actual_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Commanded frequency</small><b>{{ show(state.commanded_frequency_hz, ' Hz') }}</b></div>\n    <div><small>Motor current</small><b>{{ show(state.motor_current_a, ' A') }}</b></div>\n    <div><small>VFD communication</small><b>{{ state.stale ? 'Unknown' : state.communication_ok ? 'OK' : 'Error' }}</b></div>\n    <div><small>VFD fault</small><b>{{ show(state.vfd_fault_code) }}</b></div>\n  </div>\n  <div class=\"pump-alert\" v-if=\"!state.stale && (state.vfd_fault_code || state.communication_ok === false)\">VFD fault or communication problem. Check the pump before starting.</div>\n  <div class=\"pump-controls\">\n    <h3>Controls</h3>\n    <div class=\"pump-frequency\"><v-text-field v-model.number=\"frequency\" type=\"number\" min=\"10\" max=\"50\" step=\"0.1\" label=\"Frequency (Hz)\" density=\"compact\" hide-details></v-text-field><v-btn color=\"primary\" @click=\"issue('set_frequency')\">Set frequency</v-btn></div>\n    <div class=\"pump-buttons\"><v-btn color=\"success\" @click=\"issue('start')\">Start</v-btn><v-btn color=\"error\" @click=\"issue('stop')\">Stop</v-btn></div>\n    <small>Start requires a valid VFD configuration and an explicit frequency command after boot.</small>\n  </div>\n  <div class=\"pump-feedback\">\n    <h3>Command feedback</h3>\n    <div v-if=\"state.pending\">ID {{ state.pending.id }} · {{ label(state.pending.command) }} · Queued {{ state.pending.queued_at }}</div>\n    <div v-else-if=\"state.last_command\">ID {{ state.last_command.id }} · {{ label(state.last_command.command) }} · {{ state.command_state || 'Unknown' }}</div>\n    <div v-else>No command sent from this dashboard.</div>\n    <small>Queued means sent to ChirpStack. Device status confirms the result.</small>\n  </div>\n  <div class=\"pump-footer\"><span>Last uplink: {{ state.last_seen || 'waiting' }}</span><span>Configuration: {{ state.stale ? 'unknown' : state.configuration_valid ? 'valid' : 'blocked' }} · Frequency armed: {{ state.stale ? 'unknown' : state.frequency_armed ? 'yes' : 'no' }}</span><span>Signal: {{ show(state.rssi, ' dBm') }} / {{ show(state.snr, ' dB') }}</span></div>\n  <div class=\"pump-alert\" v-if=\"state.ui_error\">{{ state.ui_error }}</div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{stale:true}, frequency:25, now:Date.now(), refreshReadyAt:0, timer:null} },\n  computed: {\n    cooldown() { return Math.max(0,Math.ceil((this.refreshReadyAt-this.now)/1000)) },\n    refreshing() { return !!this.state.refresh_pending && this.now-Number(this.state.refresh_requested_at_ms||0)<30000 },\n    refreshTitle() { return this.refreshing ? 'Requesting status' : this.cooldown ? 'Refresh available in '+this.cooldown+' s' : 'Refresh status' },\n    radioText() { return this.state.stale ? 'No recent status' : this.state.class_c_active ? 'Class C active' : this.state.lorawan_active ? 'LoRaWAN active · Class A fallback' : 'Join not confirmed' },\n    radioClass() { return this.state.stale ? 'pump-radio-state offline' : this.state.class_c_active ? 'pump-radio-state online' : 'pump-radio-state fallback' }\n  },\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  mounted() { this.timer=setInterval(()=>{this.now=Date.now();},500); },\n  beforeUnmount() { if(this.timer) clearInterval(this.timer); },\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix },\n    label(v) { return ({set_frequency:'Set frequency',start:'Start',stop:'Stop'})[v] || v },\n    issue(command) {\n      if (command === 'start' && !window.confirm('Start the pump?')) return;\n      this.send({payload:{kind:'command',command:command,frequency_hz:command === 'set_frequency' ? Number(this.frequency) : undefined}});\n    },\n    requestStatus() { if(this.refreshing||this.cooldown)return;this.refreshReadyAt=Date.now()+10000;this.send({payload:{kind:'refresh'}}); }\n  }\n}\n</script>\n<style>\n.pump{padding:8px}.pump-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;font-size:1.15rem}.pump-title>small{display:block;color:#667;font-size:.8rem}.pump-radio-inline{display:flex;align-items:center;gap:2px;margin-top:2px;min-height:24px}.pump-radio-state{font-size:.75rem;font-weight:600}.pump-radio-state.online{color:#166534}.pump-radio-state.offline{color:#b3261e}.pump-radio-state.fallback{color:#92400e}.pump-pill{padding:6px 12px;border-radius:20px;background:#e5e7eb;font-size:.85rem}.pump-pill.running{background:#dcfce7;color:#166534}.pump-pill.stopped{background:#e6f0f5;color:#244b61}.pump-pill.stale{background:#fef3c7;color:#92400e}.pump-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:16px 0}.pump-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}.pump-grid small{display:block;color:#566}.pump-grid b{font-size:1.3rem}.pump-controls,.pump-feedback,.pump-footer{border-top:1px solid #ccd7df;padding-top:12px;margin-top:12px}.pump-controls h3,.pump-feedback h3{margin:0 0 10px}.pump-frequency{display:flex;align-items:center;gap:10px;max-width:440px}.pump-frequency .v-input{flex:1}.pump-buttons{display:flex;gap:8px;margin:12px 0}.pump-controls small,.pump-feedback small,.pump-footer{color:#566;font-size:.82rem}.pump-footer{display:flex;flex-wrap:wrap;gap:8px 20px}.pump-alert{background:#b3261e;color:white;border-radius:5px;padding:8px;margin:8px 0}\n</style>",
     "storeOutMessages": false,
     "passthru": false,
     "resendOnRefresh": true,
@@ -139,9 +180,26 @@
     "y": 340,
     "wires": [
       [
-        "46d6e76c07878f6f"
+        "cf8f9427e5b31d06"
       ]
     ]
+  },
+  {
+    "id": "cf8f9427e5b31d06",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Require fresh Pump status",
+    "func": "const action=msg.payload||{};\nif(action.kind===\"refresh\")return[null,msg,null];\nconst s=flow.get(\"pump_state\")||{};\nconst offlineAfterMs=s.running?45000:75000;\nif(action.kind===\"command\"&&action.command!==\"stop\"&&(!s.last_seen_ms||Date.now()-s.last_seen_ms>offlineAfterMs)){\n  s.ui_error=\"Pump status is offline. Wait for a fresh uplink. Stop remains available.\";\n  flow.set(\"pump_state\",s);\n  return[null,null,{payload:{kind:\"state\",state:s}}];\n}\nreturn[msg,null,null];",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 970,
+    "y": 380,
+    "wires": [["46d6e76c07878f6f"],["942aecf69be25b17"],["be54f6728d1c309a"]]
   },
   {
     "id": "46d6e76c07878f6f",
@@ -163,7 +221,7 @@
         "71efb750b43caf3c"
       ],
       [
-        "80e63cf073fc18b1"
+        "be54f6728d1c309a"
       ]
     ]
   },
@@ -185,6 +243,98 @@
     "x": 1230,
     "y": 320,
     "wires": []
+  },
+  {
+    "id": "5a8b1ec7314062da",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Pump protocol v2 compatibility",
+    "func": "let event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (_) { return msg; }\nif (!event || event.fPort !== 51) return msg;\nif (!event.object || typeof event.object !== \"object\" || event.object.command_result === undefined) {\n  let b;\n  try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { return msg; }\n  if (b.length === 22 && b[0] === 2) {\n    const u16 = i => (b[i] << 8) | b[i + 1];\n    const s16 = i => { const v = u16(i); return v >= 32768 ? v - 65536 : v; };\n    const results = [\"none\",\"accepted\",\"failed\",\"duplicate\",\"invalid\",\"storage_error\"];\n    const states = [\"unknown\",\"forward\",\"reverse\",\"stopped\"];\n    const joinError = s16(17);\n    event.object = {communication_ok:!!(b[1]&1),configuration_valid:!!(b[1]&2),running:!!(b[1]&4),frequency_armed:!!(b[1]&8),lorawan_active:!!(b[1]&16),class_c_active:!!(b[1]&32),command_result:results[b[2]]||\"unknown\",last_command_id:u16(3)===65535?null:u16(3),commanded_frequency_hz:u16(5)/100,actual_frequency_hz:u16(7)/100,motor_current_a:u16(9)/100,vfd_fault_code:u16(11),output_voltage_v:u16(13)/10,run_state:states[b[15]]||\"unknown\",communication_error_code:b[16],previous_join_error_code:joinError,previous_join_error:joinError===-1116?\"No OTAA JoinAccept received in RX1/RX2\":joinError===0?\"None\":\"RadioLib error \"+joinError,join_attempt_count:b[19],previous_join_retry_seconds:u16(20)};\n    msg.payload = event;\n  }\n}\nconst s = flow.get(\"pump_state\") || {};\nif (s.refresh_pending) {\n  s.refresh_pending = false;\n  s.refresh_result = \"Status received\";\n  s.refresh_completed_at = new Date().toISOString();\n  flow.set(\"pump_state\", s);\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 240,
+    "wires": [["38ea9c7204fd65b1"]]
+  },
+  {
+    "id": "38ea9c7204fd65b1",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Normalize Pump command progress",
+    "func": "const event=msg.payload;\nif(event&&event.fPort===51&&event.object&&event.object.command_result===\"unknown\"){\n  try{const b=Buffer.from(event.data||\"\",\"base64\");if(b.length>=3&&b[2]===6)event.object.command_result=\"in_progress\";}catch(_){}\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 240,
+    "wires": [["d252c62c590f32f5"]]
+  },
+  {
+    "id": "61bd409ef783a2c4",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Track Pump command completion",
+    "func": "const s=(msg.payload&&msg.payload.state)||{};\nif(s.command_result===\"in_progress\"&&s.last_command){\n  s.command_state=\"in progress: waiting for final VFD condition\";\n  s.pending=s.last_command;\n  flow.set(\"pump_pending\",s.last_command);\n  flow.set(\"pump_state\",s);\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 670,
+    "y": 300,
+    "wires": [["be54f6728d1c309a"]]
+  },
+  {
+    "id": "7c149d6f42e0ab85",
+    "type": "ui-template",
+    "d": true,
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "group": "c6dc5eedbdc49f18",
+    "page": "",
+    "ui": "",
+    "name": "Pump LoRaWAN and refresh",
+    "order": 2,
+    "width": "12",
+    "height": "4",
+    "head": "",
+    "format": "<template>\n<div class=\"pump-radio\">\n  <div class=\"pump-radio-head\"><div><small>LoRaWAN link</small><strong class=\"pump-link-state\" :class=\"state.stale ? 'offline' : state.class_c_active ? 'online' : 'fallback'\">{{ linkText }}</strong></div><v-btn color=\"primary\" prepend-icon=\"mdi-refresh\" :loading=\"refreshing\" :disabled=\"refreshing || cooldown > 0\" @click=\"requestStatus\">{{ refreshLabel }}</v-btn></div>\n  <div v-if=\"state.stale\" class=\"pump-radio-warn\"><b>No recent Pump status.</b> The dashboard is showing the last received report. Join retry timing is available on Serial until LoRaWAN reconnects.</div>\n  <div v-else-if=\"state.previous_join_error_code\" class=\"pump-radio-diag\"><small>Join diagnostics: connected after {{ state.join_attempt_count }} attempts; previous error {{ state.previous_join_error_code }}, retry {{ state.previous_join_retry_seconds }} s.</small></div>\n  <small>{{ state.refresh_result || 'Refresh requests an immediate status uplink and is limited to once per 10 seconds.' }}</small>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{stale:true}, now:Date.now(), refreshReadyAt:0, timer:null} },\n  computed: {\n    cooldown() { return Math.max(0,Math.ceil((this.refreshReadyAt-this.now)/1000)) },\n    refreshing() { return !!this.state.refresh_pending && this.now-Number(this.state.refresh_requested_at_ms||0)<30000 },\n    refreshLabel() { return this.refreshing ? 'Requesting…' : this.cooldown ? 'Refresh in '+this.cooldown+' s' : 'Refresh status' },\n    linkText() { return this.state.stale ? 'No recent status' : this.state.class_c_active ? 'Class C active' : this.state.lorawan_active ? 'LoRaWAN active · Class A fallback' : 'Join not confirmed' }\n  },\n  watch: {msg:{handler(m){if(m&&m.payload&&m.payload.kind==='state')this.state=m.payload.state||{};},immediate:true}},\n  mounted(){this.timer=setInterval(()=>{this.now=Date.now();},500);},\n  beforeUnmount(){if(this.timer)clearInterval(this.timer);},\n  methods:{requestStatus(){if(this.refreshing||this.cooldown)return;this.refreshReadyAt=Date.now()+10000;this.send({payload:{kind:'refresh'}});}}\n}\n</script>\n<style>\n.pump-radio{padding:8px}.pump-radio-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.pump-radio-head small{display:block;color:#566}.pump-link-state{display:block;font-size:1.35rem}.pump-link-state.online{color:#166534}.pump-link-state.offline{color:#b3261e}.pump-link-state.fallback{color:#92400e}.pump-radio-warn{margin:10px 0;padding:9px;border-radius:6px;background:#fef3c7;color:#92400e}.pump-radio-diag{margin:14px 0 6px;padding-top:8px;border-top:1px solid #dde5e8;color:#667}.pump-radio>small{color:#566}\n</style>",
+    "storeOutMessages": false,
+    "passthru": false,
+    "resendOnRefresh": true,
+    "templateScope": "local",
+    "className": "",
+    "x": 760,
+    "y": 460,
+    "wires": [["942aecf69be25b17"]]
+  },
+  {
+    "id": "942aecf69be25b17",
+    "type": "function",
+    "z": "e036313ddf417d8b",
+    "g": "ce6528cb089fcb74",
+    "name": "Request Pump status",
+    "func": "const app=\"f21e23b5-408b-455b-8ac1-7c755870970e\";\nconst eui=\"025fcb86b98f2c48\";\nconst action=msg.payload||{};\nif(action.kind!==\"refresh\")return null;\nconst now=Date.now();\nconst last=Number(flow.get(\"pump_last_refresh_ms\")||0);\nconst s=flow.get(\"pump_state\")||{};\nif(now-last<10000){s.refresh_result=\"Refresh rate limit: try again in \"+Math.ceil((10000-(now-last))/1000)+\" s\";flow.set(\"pump_state\",s);return[null,{payload:{kind:\"state\",state:s}}];}\nif(s.refresh_pending&&now-Number(s.refresh_requested_at_ms||0)<30000){s.refresh_result=\"A status request is already pending.\";flow.set(\"pump_state\",s);return[null,{payload:{kind:\"state\",state:s}}];}\nflow.set(\"pump_last_refresh_ms\",now);\ns.refresh_pending=true;s.refresh_requested_at_ms=now;s.refresh_requested_at=new Date(now).toISOString();s.refresh_result=\"Requesting…\";flow.set(\"pump_state\",s);\nreturn[{topic:\"application/\"+app+\"/device/\"+eui+\"/command/down\",payload:JSON.stringify({devEui:eui,confirmed:false,fPort:50,data:Buffer.from([1,5]).toString(\"base64\")}),qos:\"0\",retain:false},{payload:{kind:\"state\",state:s}}];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1010,
+    "y": 460,
+    "wires": [["71efb750b43caf3c"],["be54f6728d1c309a"]]
   },
   {
     "id": "ae0178f3742ff530",
