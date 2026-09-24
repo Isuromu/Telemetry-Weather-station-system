@@ -1,0 +1,15 @@
+{
+  "name": "InvtGD200A",
+  "version": "0.1.0",
+  "description": "Staging definitions for the INVT GD200A Modbus RTU driver",
+  "keywords": ["invt", "gd200a", "vfd", "modbus"],
+  "authors": [{ "name": "Project Internal" }],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": "*",
+  "dependencies": {
+    "Rs485ModBus": "*",
+    "PrintController": "*"
+  },
+  "build": { "srcDir": "src" }
+}
