@@ -24,10 +24,14 @@
       <article v-for="(d,k) in cards" :key="k" class="ir-card" :class="cardClass(k,d)">
         <div class="ir-card-top">
           <div class="ir-card-title"><span class="ir-icon" :class="'ir-icon-' + k">{{ icons[k] }}</span><b>{{ names[k] }}</b></div>
-          <span class="ir-state" :class="statusClass(k,d)">{{ statusLabel(k,d) }}</span>
+          <div class="ir-card-actions">
+            <button v-if="k === 'pump'" class="ir-refresh" :class="{'ir-refresh-spinning':pumpRefreshing}" :disabled="pumpRefreshing || pumpCooldown > 0" :title="pumpRefreshTitle" aria-label="Refresh Pump status" @click="requestPumpStatus">&#8635;</button>
+            <span class="ir-state" :class="statusClass(k,d)">{{ statusLabel(k,d) }}</span>
+          </div>
         </div>
         <div class="ir-reading">{{ cardValue(k,d) }}</div>
         <div class="ir-card-detail">{{ detail(k,d) }}</div>
+        <div v-if="k === 'pump' && pumpDiagnostic(d)" class="ir-pump-diagnostic">{{ pumpDiagnostic(d) }}</div>
         <div class="ir-card-footer"><span>{{ secondary(k,d) }}</span><time>{{ seen(d) }}</time></div>
       </article>
     </div>
@@ -65,7 +69,7 @@
 export default {
   data() {
     return {
-      state: {phase:'idle',devices:{}}, valve1:true, valve2:true,
+      state: {phase:'idle',devices:{}}, valve1:true, valve2:true, now:Date.now(), timer:null,
       names: {water:'Reservoir',soil:'Soil',main:'Main valve',valve1:'Valve 1',valve2:'Valve 2',pump:'Pump'},
       icons: {water:'💧',soil:'🌱',main:'⚙',valve1:'↔',valve2:'↔',pump:'◉'}
     }
@@ -76,9 +80,14 @@ export default {
     phaseLabel() { return String(this.state.phase || 'idle').replace(/_/g,' ').toUpperCase() },
     phaseClass() { return this.state.phase === 'running' ? 'ir-phase-running' : this.state.phase === 'fault' ? 'ir-phase-fault' : 'ir-phase-idle' },
     mqttLabel() { const t=String(this.state.mqtt_status||'').toLowerCase(); return t.includes('disconnected') ? 'disconnected' : t.includes('connected') ? 'connected' : t.includes('connecting') ? 'connecting' : 'unknown' },
-    mqttClass() { return 'ir-mqtt-' + this.mqttLabel }
+    mqttClass() { return 'ir-mqtt-' + this.mqttLabel },
+    pumpRefreshing() { return !!this.state.pumpRefresh?.pending && this.now-Number(this.state.pumpRefresh?.requestedAt||0)<30000 },
+    pumpCooldown() { return Math.max(0,Math.ceil((Number(this.state.pumpRefresh?.requestedAt||0)+10000-this.now)/1000)) },
+    pumpRefreshTitle() { return this.pumpRefreshing ? 'Requesting Pump status' : this.pumpCooldown ? `Refresh available in ${this.pumpCooldown} s` : 'Refresh Pump status' }
   },
   watch: {msg: {handler(m) { if (m?.payload?.kind === 'state') this.state = m.payload.state || {phase:'idle',devices:{}} }, immediate:true}},
+  mounted() { this.timer=setInterval(()=>{this.now=Date.now()},500) },
+  beforeUnmount() { if(this.timer)clearInterval(this.timer) },
   methods: {
     fmt(v,suffix='') { return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) + suffix : '—' },
     invalid(k,d) {
@@ -103,20 +112,33 @@ export default {
       if (k === 'water') return d.pressure_valid ? 'Level sensor valid' : 'Level sensor invalid';
       if (k === 'soil') return d.sensor_valid ? 'Moisture sensor valid' : 'Moisture sensor invalid';
       if (k === 'main') return `Actuator ${d.actuator_online === true ? 'online' : 'offline'} · ${d.valve_moving ? 'moving' : 'stopped'}`;
-      if (k === 'pump') return `VFD link ${d.communication_ok === true ? 'OK' : 'fault'} · ${this.fmt(d.actual_frequency_hz,' Hz')}`;
+      if (k === 'pump') return d.stale ? 'VFD and radio status unavailable' : `VFD link ${d.communication_ok === true ? 'OK' : 'fault'} · ${this.fmt(d.actual_frequency_hz,' Hz')}`;
       return d.pcv_position_verified ? 'Physical position verified' : 'Physical position unverified';
     },
     secondary(k,d) {
       if (!d.last_seen) return 'Awaiting telemetry';
       if (k === 'main') return `Fault: ${d.actuator_fault_code ?? '—'}`;
-      if (k === 'pump') return `Fault: ${d.vfd_fault_code ?? '—'}`;
+      if (k === 'pump') return d.stale ? 'Cached health values hidden' : `${d.class_c_active ? 'Class C active' : d.lorawan_active ? 'LoRaWAN active' : 'Join not confirmed'} · Fault: ${d.vfd_fault_code ?? '—'}`;
       if (k === 'valve1' || k === 'valve2') return `Command ID: ${d.last_command_id ?? '—'}`;
       return d.stale ? 'Reading too old for control' : 'Reading available';
     },
     seen(d) {
       if (!d.last_seen) return 'Never seen';
       const date=new Date(d.last_seen);
-      return Number.isNaN(date.getTime()) ? 'Time unknown' : date.toLocaleString();
+      if (Number.isNaN(date.getTime())) return 'Time unknown';
+      const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tashkent',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(date);
+      const p=Object.fromEntries(parts.map(x=>[x.type,x.value]));
+      return `${p.day}/${p.month}/${p.year} ${p.hour}:${p.minute}:${p.second}`;
+    },
+    pumpDiagnostic(d) {
+      if (d.stale) return this.state.pumpRefresh?.result || '';
+      if (d.command_result === 'in_progress') return `Command ${d.last_command_id ?? '—'} in progress; waiting for final VFD condition`;
+      if (typeof d.previous_join_error_code === 'number' && d.previous_join_error_code !== 0) return `Joined after ${d.join_attempt_count ?? '—'} attempts · previous error ${d.previous_join_error_code} · retry ${d.previous_join_retry_seconds ?? '—'} s`;
+      return this.state.pumpRefresh?.result || '';
+    },
+    requestPumpStatus() {
+      if (this.pumpRefreshing || this.pumpCooldown) return;
+      this.send({payload:{kind:'refresh_pump'}});
     },
     showRipple(event) {
       const button = event.currentTarget;
@@ -175,6 +197,7 @@ export default {
 .ir-card{min-height:188px;padding:17px 18px 13px;border:1px solid #dbe5ed;border-radius:13px;background:white;box-shadow:0 4px 14px rgba(24,57,80,.035);display:flex;flex-direction:column}
 .ir-card-live{border-color:#c8dfd4}.ir-card-stale,.ir-card-empty{border-color:#e6d9d1}.ir-card-fault{border-color:#e8adad}
 .ir-card-top,.ir-card-title,.ir-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ir-card-actions{display:flex;align-items:center;gap:6px}.ir-refresh{width:28px;height:28px;border:1px solid #cbdbe5;border-radius:50%;background:#f5f9fb;color:#2b6788;font-size:20px;line-height:1;cursor:pointer}.ir-refresh:disabled{cursor:not-allowed;opacity:.48}.ir-refresh-spinning{animation:ir-refresh-spin 1s linear infinite}@keyframes ir-refresh-spin{to{transform:rotate(360deg)}}
 .ir-card-title{justify-content:flex-start;font-size:16px;color:#1b3445}.ir-card-title b{font-weight:750}
 .ir-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:#e7f2f8;color:#29729b;font-size:21px;line-height:1;font-weight:900}
 .ir-icon-soil{background:#e8f4e7}.ir-icon-valve1,.ir-icon-valve2{background:#e8f0f2;font-size:23px}
@@ -184,6 +207,7 @@ export default {
 .ir-reading{font-size:31px;line-height:1.15;font-weight:800;letter-spacing:-.03em;margin:17px 0 5px;color:#162d3e;white-space:nowrap}
 .ir-card-empty .ir-reading{font-size:20px;color:#748592;letter-spacing:0}.ir-card-stale .ir-reading{color:#667884}
 .ir-card-detail{font-size:13px;color:#516a79;margin-bottom:14px}
+.ir-pump-diagnostic{font-size:11px;line-height:1.35;color:#657b89;margin:-7px 0 10px}
 .ir-card-footer{border-top:1px solid #edf1f4;padding-top:9px;margin-top:auto;color:#738592;font-size:11px;align-items:flex-start}
 .ir-card-footer time{text-align:right}
 .ir-panel{margin-top:13px;padding:17px 19px;border:1px solid #dbe5ed;border-radius:13px;background:#fff}
@@ -197,7 +221,7 @@ export default {
 .ir-button-label{position:relative;z-index:1;pointer-events:none}
 .ir-ripple{position:absolute;z-index:0;border-radius:50%;background:rgba(255,255,255,.38);pointer-events:none;transform:scale(0);animation:ir-ripple-expand 550ms ease-out forwards}
 @keyframes ir-ripple-expand{to{transform:scale(1);opacity:0}}
-@media(prefers-reduced-motion:reduce){.ir-ripple{animation:none}}
+@media(prefers-reduced-motion:reduce){.ir-ripple,.ir-refresh-spinning{animation:none}}
 .ir-start{background:#178552;color:#fff}.ir-start:disabled{background:#cde6d8;color:#719a83;cursor:not-allowed}.ir-stop{background:#d84949;color:#fff}
 .ir-sequence,.ir-footnote{font-size:11px;color:#728491;margin:13px 0 0}
 .ir-limits{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.ir-limits span{border:1px solid #dfe9ef;background:#f6f9fb;border-radius:8px;padding:9px 11px;font-size:12px;color:#5b7382}.ir-limits b{color:#1d4359}

@@ -38,10 +38,12 @@ must be in Dynamic subscription mode. Existing deployments should update that
 node by replacing the complete flow as described above.
 
 Set the MQTT broker address and credentials in the imported `ChirpStack MQTT`
-configuration node. The flow expects the corresponding ChirpStack codec's
-decoded `object` in each uplink. WaterLevel uses FPort 40, SoilNode FPort 10,
-MainValve and field valves FPort 31, and PumpControl FPort 51. Commands use
-the existing FPort 30 main/field valve formats and FPort 50 pump format.
+configuration node. The flow uses the corresponding ChirpStack codec's decoded
+`object` in each uplink. WaterLevel uses FPort 40, SoilNode FPort 10, MainValve
+and field valves FPort 31, and PumpControl FPort 51. For PumpControl, the flow
+also has a raw payload fallback for both the 17-byte protocol-v1 and 22-byte
+protocol-v2 status formats. Commands use the existing FPort 30 main/field
+valve formats and FPort 50 pump format.
 
 After importing, deploy the flow and open
 `/irrigation-dashboard/irrigation` on the Node-RED host. Six device cards
@@ -65,9 +67,10 @@ limits here` function node.** The initial values include the requested 20 cm
 start and 19 cm stop water levels, 70% soil start and 90% soil stop values,
 and 45–90° main valve open range. Suggested freshness limits are 20 minutes
 for WaterLevel and SoilNode, 20 minutes for valve_1, three minutes for
-valve_2, and 150 seconds for MainValve and PumpControl. Check actual deployed
-reporting intervals before using the flow on hardware. The tick inject node
-refreshes safety checks every five seconds.
+valve_2, and 150 seconds for MainValve. PumpControl follows its adaptive
+telemetry: it becomes stale after 45 seconds when its last report said it was
+running and after 75 seconds when its last report said it was stopped. The
+tick inject node refreshes safety checks every five seconds.
 
 The start sequence checks water, soil, device freshness, main valve online and
 fault status, and pump/VFD status; opens and verifies the main valve; opens
@@ -76,6 +79,16 @@ frequency; rechecks conditions; and starts the pump. Stop sends pump stop,
 waits for a stopped uplink, closes selected field valves in reverse order, and
 closes MainValve last. If pump stop cannot be confirmed, it sends emergency
 stop and leaves the valves open if that too cannot be confirmed.
+
+Pump Start and Stop are two-stage operations. An `in_progress` report means
+the VFD accepted the request, but the sequencer continues waiting for the
+matching command ID's final `accepted` report and measured running/stopped
+condition. The 150-second dashboard timeout remains longer than PumpControl's
+120-second final-condition timeout. The Pump card hides stale radio and VFD
+health values, shows Class C/LoRaWAN and protocol-v2 join diagnostics, and has
+a rate-limited refresh button. Refresh sends the non-actuating FPort 50
+payload `01 05`; it does not consume a command ID or operate the VFD. Stop
+remains available even when Pump telemetry is offline.
 
 Field valve telemetry currently reports the last commanded position, not a
 verified physical position. The dashboard labels this explicitly. The flow

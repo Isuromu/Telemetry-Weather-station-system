@@ -16,6 +16,39 @@ commands or LoRaWAN commands. It never starts the pump automatically.
 
 Start with `help`, `vfd ping`, `vfd config check`, and `pump status`.
 
+## Pressure-control capability and planned direction
+
+The supplied DELIXI CDI-E manual documents a built-in PID controller in
+Section 7.1.15 (`Функции PID`, printed page 207 / PDF page 214) and a
+constant-pressure water-supply example in Section 7.2.1 (`Контроль PID подачи
+воды постоянного давления`, printed pages 215-218 / PDF pages 222-225). The
+example uses VF1 for pressure feedback and requires `P0.0.04 = 8` to select PID
+as the frequency source. Group P4.0 contains the PID setpoint, feedback,
+direction, gain, integration, derivative, filtering, feedback-loss, and stop
+parameters.
+
+This capability is recorded for later bench testing; it is not enabled by the
+current firmware. The commissioned profile deliberately expects `P0.0.04 = 9`
+and commands frequency over Modbus. Running `vfd config apply CONFIRM` with the
+current profile would therefore select communication frequency control rather
+than the inverter's internal PID source.
+
+The planned project direction is to implement constant-pressure logic using
+the electronic pressure sensor installed upstream of MainValve, between the
+pump and the valve. The supervisory controller will use that pressure value to
+request bounded PumpNode frequency changes through the existing Modbus
+frequency command. Exact pressure targets, alarm thresholds, hysteresis,
+frequency ramp limits, stale-data behavior, and restart policy remain to be
+approved and commissioned before this control is enabled.
+
+The MainValve pressure signal currently reaches the integrated controller over
+LoRaWAN/MQTT. That path can support slow pressure optimization, but it is not a
+substitute for local high-high-pressure protection: network delay or loss must
+not be allowed to defeat an independent pressure-relief device, hardwired trip,
+or other protection required by the hydraulic installation. Until the control
+policy and hardware protection are validated, PumpControl remains explicit
+fixed-frequency control and must not start automatically.
+
 ## LoRaWAN setup
 
 The pump uses its own SX1262/DX-LR30 OTAA identity and EU868 Class C session.
