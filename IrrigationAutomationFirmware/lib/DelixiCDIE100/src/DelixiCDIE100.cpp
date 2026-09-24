@@ -1,6 +1,7 @@
 #include "DelixiCDIE100.h"
 
 #include <ctype.h>
+#include <cmath>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,7 +74,8 @@ bool DelixiCDIE100::resetFault() {
 }
 
 bool DelixiCDIE100::setFrequencyHz(float hz) {
-  if (hz < 0.0f || hz > profile_.maximumFrequencyHz) return false;
+  if (!std::isfinite(hz) || hz < 0.0f || hz > profile_.maximumFrequencyHz)
+    return false;
   const uint16_t raw = delixi::protocol::frequencyHzToRawPercent(
       hz, profile_.maximumFrequencyHz);
   return writeRegister(delixi::protocol::FREQUENCY_COMMAND, raw);

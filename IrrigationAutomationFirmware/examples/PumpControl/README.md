@@ -149,3 +149,46 @@ still be waiting in ChirpStack. Network Stop is not a physical emergency stop.
 Node-RED flow context is in memory unless persistent context storage is
 configured in Node-RED. After a restart, wait for a fresh device uplink to
 resynchronize command IDs.
+
+## Deferred commissioning issue: USB disconnect when the motor starts
+
+During the 2026-09-24 commissioning test, the VFD acknowledged an 18 Hz
+frequency command and the forward-run command. Serial printed
+`[PUMP] Start command accepted.`, immediately followed on the Windows host by:
+
+```text
+Serial read error: ClearCommError failed
+(PermissionError(13, 'Access is denied.', None, 5))
+```
+
+The accepted message is printed only after the Modbus frequency and RUN writes
+have succeeded. The subsequent error therefore indicates that Windows lost the
+USB-UART connection when the VFD/motor energized; it is not a rejected pump
+command or a `PumpController` state error. The current prototype's automatic-
+direction RS-485 converter is not galvanically isolated, so VFD-generated EMI,
+a ground-potential disturbance, or a controller/USB supply disturbance is the
+leading explanation. Another process taking the COM port is less likely but
+should still be excluded.
+
+Before further laptop-connected motor testing:
+
+- determine whether LoRaWAN telemetry continues after the USB failure; if it
+  does, the ESP32 remained active and the failure is limited to USB/host access;
+- check whether the COM port disappears/reappears and whether reconnecting shows
+  an ESP32 boot banner; a boot banner or LoRaWAN restart indicates a controller
+  reset or power disturbance;
+- replace the prototype interface with a galvanically isolated RS-485
+  transceiver with isolated power, and use a USB isolator for commissioning;
+- verify protective earth and VFD/motor-cable shielding according to the VFD
+  manual, using personnel qualified for the 380 V installation;
+- keep USB and shielded twisted-pair RS-485 wiring separated from VFD input and
+  U/V/W motor conductors, and verify that termination exists only at the two
+  physical ends of the RS-485 trunk;
+- if the ESP32 resets, inspect its regulated supply, grounding, local
+  decoupling, and transient behavior during motor startup;
+- confirm that only one serial-monitor application has the COM port open.
+
+This item is intentionally deferred. A firmware change cannot preserve a
+Windows COM handle when the USB-UART hardware or host controller disconnects.
+Do not treat LoRaWAN control as a replacement for the required hardwired stop
+and safe isolation arrangement.

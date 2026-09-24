@@ -1,5 +1,7 @@
 #include "PumpController.h"
 
+#include <cmath>
+
 PumpController::PumpController(DelixiCDIE100 &vfd, PrintController &logger,
                                const irrigation::MotorProfile &motor)
     : vfd_(vfd),
@@ -25,7 +27,13 @@ void PumpController::updateCommunicationState(bool success) {
 }
 
 bool PumpController::setSpeedHz(float hz) {
-  if (hz < motor_.minRunFrequencyHz || hz > motor_.maxRunFrequencyHz) {
+  // A new frequency request replaces the previous arm decision. If the new
+  // value is invalid or the VFD does not acknowledge it, starting with the
+  // previously accepted frequency would be surprising and unsafe.
+  status_.frequencyArmed = false;
+
+  if (!std::isfinite(hz) || hz < motor_.minRunFrequencyHz ||
+      hz > motor_.maxRunFrequencyHz) {
     logger_.print(F("[PUMP][ERROR] Frequency must be in range "), true);
     logger_.print(motor_.minRunFrequencyHz, true, "", 2);
     logger_.print(F(".."), true);
@@ -38,6 +46,15 @@ bool PumpController::setSpeedHz(float hz) {
   if (success) {
     status_.commandedFrequencyHz = hz;
     status_.frequencyArmed = true;
+  } else {
+    logger_.print(F("[PUMP][ERROR] Frequency write failed; Modbus status: "),
+                  true);
+    logger_.println(RS485Bus::statusName(status_.lastCommunicationError), true);
+    if (status_.lastCommunicationError == Rs485Status::Ok) {
+      logger_.println(
+          F("[PUMP][ERROR] The VFD response was not a complete matching write acknowledgement."),
+          true);
+    }
   }
   return success;
 }
@@ -77,9 +94,15 @@ bool PumpController::start() {
                     true);
     return false;
   }
-  if (!vfd_.setFrequencyHz(status_.commandedFrequencyHz) ||
-      !vfd_.runForward()) {
+  // Reconfirm the armed setpoint immediately before RUN. This also disarms the
+  // controller and reports the exact communication failure if the write is no
+  // longer acknowledged.
+  if (!setSpeedHz(status_.commandedFrequencyHz)) return false;
+  if (!vfd_.runForward()) {
     updateCommunicationState(false);
+    logger_.print(F("[PUMP][ERROR] Forward-run write failed; Modbus status: "),
+                  true);
+    logger_.println(RS485Bus::statusName(status_.lastCommunicationError), true);
     return false;
   }
   updateCommunicationState(true);
