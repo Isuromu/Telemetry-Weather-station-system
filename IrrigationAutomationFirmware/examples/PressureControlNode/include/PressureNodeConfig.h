@@ -103,7 +103,7 @@ inline constexpr bool CLOSE_IN2_HIGH = true;
 }  // namespace pcv
 
 namespace energy {
-inline constexpr bool PERIODIC_SAMPLING_ENABLED = false;
+inline constexpr bool PERIODIC_SAMPLING_ENABLED = true;
 inline constexpr uint32_t SAMPLE_INTERVAL_MS = 60000;
 inline constexpr uint32_t TELEMETRY_INTERVAL_MS = 60000;
 }  // namespace energy

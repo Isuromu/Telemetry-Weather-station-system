@@ -37,9 +37,35 @@ The planned project direction is to implement constant-pressure logic using
 the electronic pressure sensor installed upstream of MainValve, between the
 pump and the valve. The supervisory controller will use that pressure value to
 request bounded PumpNode frequency changes through the existing Modbus
-frequency command. Exact pressure targets, alarm thresholds, hysteresis,
-frequency ramp limits, stale-data behavior, and restart policy remain to be
-approved and commissioned before this control is enabled.
+frequency command.
+
+Confirmed initial requirements are:
+
+- MainValve and PumpNode are separate devices, so MainValve pressure reaches
+  the controller through LoRaWAN/MQTT rather than a direct wired connection;
+- MainValve, valve1, and valve2 use the same XDB401 pressure-sensor type;
+- the initial pressure target is 1.5 bar, with later target adjustment planned
+  through Dashboard 2 and Serial commands;
+- valve1, valve2, or both may be selected according to the land's irrigation
+  requirement;
+- MainValve, valve1, and valve2 can be operated electronically or manually, so
+  pressure/flow supervision must also detect hydraulic changes that were not
+  initiated by a dashboard command;
+- the existing 10-50 Hz pump range and configured acceleration/deceleration
+  behavior remain the initial operating limits;
+- invalid or stale pressure must block frequency increases, cause a
+  conservative reduction, and lead to a controlled stop if valid data does not
+  return within a commissioned timeout;
+- high-high pressure and repeated faults require manual reset rather than
+  automatic restart.
+
+Because the pressure feedback crosses separate radio/network devices, this is
+a slow supervisory control loop, not a fast or safety-rated PID loop. The
+controller may trim frequency around the 1.5 bar target, but local hydraulic
+protection remains necessary. Sensor calibration, the acceptable pressure
+band and hysteresis, hydraulic component pressure ratings, alarm/trip limits,
+and pressure/flow measurements at fixed frequencies are intentionally deferred
+until the relevant commissioning checks can be performed.
 
 The MainValve pressure signal currently reaches the integrated controller over
 LoRaWAN/MQTT. That path can support slow pressure optimization, but it is not a

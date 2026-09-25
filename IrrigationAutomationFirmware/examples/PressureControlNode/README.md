@@ -36,9 +36,10 @@ pio run -e pcv_low_power_class_a
 
 The node wakes, reads status, sends on FPort 31, accepts one queued FPort 30
 command in RX1/RX2, executes it, sends an immediate acknowledgement status, and
-enters ESP32 timer deep sleep. Serial produces diagnostics only and accepts no
-commands. Use `tools/chirpstack/pcv_low_power_class_a_codec.js`; `sleep_time`
-controls real deep-sleep duration.
+enters ESP32 timer deep sleep. During every wake cycle, Serial prints the
+decoded TUF-2000M flow status, rate, velocity, and available error bits. Serial
+accepts no commands. Use `tools/chirpstack/pcv_low_power_class_a_codec.js`;
+`sleep_time` controls real deep-sleep duration.
 
 The current valve_1 commissioning build defaults to 10-second sleep and
 accepts `sleep_seconds` down to 10 through its matching codec. This short

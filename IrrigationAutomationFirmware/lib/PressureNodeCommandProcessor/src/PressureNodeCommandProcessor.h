@@ -13,6 +13,7 @@ class PressureNodeCommandProcessor {
 
   void processLine(const char *line);
   void printHelp();
+  void printFlow(const FlowReading &reading);
 
  private:
   static constexpr size_t MAX_LINE_LENGTH = 96;
@@ -24,7 +25,6 @@ class PressureNodeCommandProcessor {
   void printBattery(const BatteryReading &reading);
   void printPressure(const char *label, const PressureReading &reading);
   void printPressurePair(const PressurePairReading &readings);
-  void printFlow(const FlowReading &reading);
   void printFlowTotals(const FlowTotalReading &reading);
   void handleFlowTotalReset();
   void printFlowWordOrderProbe(const FlowMeterWordOrderProbe &probe);

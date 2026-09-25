@@ -548,8 +548,9 @@ void buildCurrentStatusPayload(uint8_t *uplink) {
       retainedNodeState.lastCommandId, uplink);
 }
 
-StatusUplinkResult sendStatusUplink() {
-  const PressureControlNodeStatus &status = pressureNode.refreshStatus();
+StatusUplinkResult sendStatusUplink(bool refreshMeasurements = true) {
+  const PressureControlNodeStatus &status =
+      refreshMeasurements ? pressureNode.refreshStatus() : pressureNode.status();
   uint8_t uplink[lora_protocol::STATUS_PAYLOAD_SIZE] = {};
   lora_protocol::buildStatusPayload(
       status,
@@ -770,6 +771,8 @@ void runLowPowerClassACycle() {
   }
 
   Serial.println("[LORAWAN] Starting low-power Class A cycle.");
+  const PressureControlNodeStatus &status = pressureNode.refreshStatus();
+  commands.printFlow(status.flow);
   if (!setupLoRaWan()) {
     retainedNodeState.statusReason =
         static_cast<uint8_t>(lora_protocol::StatusReason::LoRaWanError);
@@ -777,7 +780,7 @@ void runLowPowerClassACycle() {
     return;
   }
 
-  const StatusUplinkResult result = sendStatusUplink();
+  const StatusUplinkResult result = sendStatusUplink(false);
   if (result.applicationDownlinkReceived)
     (void)sendCommandAcknowledgementUplink();
   enterDeepSleep();
