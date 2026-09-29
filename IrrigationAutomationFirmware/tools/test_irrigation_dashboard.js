@@ -1,22 +1,124 @@
-// Safety-sequence smoke test for the generated Node-RED function.
+// Safety-sequence smoke test for the generated Node-RED function, plus the
+// import invariants the shipped flow has to keep.
 const fs = require('fs');
 const assert = require('assert');
 const nodes = JSON.parse(fs.readFileSync('examples/IntegratedDashboard/irrigation_dashboard_flow.json', 'utf8'));
 const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+// Ids the live canvas already owns. Node-RED's importer preserves incoming ids
+// and reuses or replaces a node whose id it recognises, but adds a *second*
+// node for an id it does not -- so a re-import only updates the running
+// dashboard in place if these match. See tools/build_irrigation_dashboard.py.
+const IDS = {
+  canvas: 'dc658b3ab3f2917e', tick: 'fd327e43632c19d6',
+  settings: '0da71259acd21508', subscribeTick: '9b727c5b0531676e',
+  subscribe: '405c9e29995e8efe', mqttIn: 'ed30a564d5bb461a',
+  status: '50c3e5351eac102c', control: '1406698c9cd792c5',
+  mqttOut: '03424753ad790e6b', ui: 'd490a04f3084b9da',
+  page: 'irrigation_page', group: 'irrigation_group',
+  base: 'f53e93e9ba219e63', theme: 'e49416861823a329'
+};
+const SHARED_BROKER = 'ae0178f3742ff530';
+
+assert(!nodes.some(n => n.type === 'tab'),
+  'no tab node may ship: the import dialog decides which flow the nodes join, and a tab would add a second one');
+assert(!nodes.some(n => n.type === 'mqtt-broker'),
+  'the shared ChirpStack broker must not ship, or the import adds a duplicate server and can overwrite its settings');
+for (const n of nodes.filter(n => n.broker)) {
+  assert.equal(n.broker, SHARED_BROKER,
+    `${n.id} must reference the canvas's shared chirpstack_mosquito broker`);
+}
+// Singletons belong to no flow; everything else must name the canvas's flow,
+// so an import cannot drop a node into a second copy of it.
+const GLOBAL = new Set(['ui-base', 'ui-theme', 'ui-breakpoint', 'global-config']);
+for (const n of nodes.filter(n => !GLOBAL.has(n.type))) {
+  assert.equal(n.z, 'irrigation_single_page', `${n.id} must stay in the flow the canvas uses`);
+}
+
+const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqttIn,
+               IDS.status, IDS.control, IDS.mqttOut, IDS.ui];
+assert(byId[IDS.canvas] && byId[IDS.canvas].type === 'group', 'the canvas group node is part of the export');
+assert.deepEqual([...byId[IDS.canvas].nodes].sort(), [...wired].sort(),
+  'the canvas group must list exactly the flow nodes, or the canvas loses its frame on import');
+for (const id of wired) {
+  assert.equal(byId[id].g, IDS.canvas, `${id} must sit inside the canvas group`);
+}
 for (const group of nodes.filter(n => n.type === 'ui-group')) {
   const page = byId[group.page];
   assert(page && page.type === 'ui-page', `ui-group ${group.id} has no valid page`);
   const base = byId[page.ui];
   assert(base && base.type === 'ui-base', `ui-page ${page.id} has no valid base`);
 }
-const settings = nodes.find(n => n.id === 'irrigation_settings').func;
-const control = nodes.find(n => n.id === 'irrigation_control').func;
-const template = nodes.find(n => n.id === 'irrigation_ui').format;
-const subscribeNode = byId.irrigation_subscribe;
-assert.deepEqual(byId.irrigation_tick.wires[0], ['irrigation_settings', 'irrigation_subscribe']);
-assert.equal(byId.irrigation_mqtt_in.inputs, 1);
-assert.equal(byId.irrigation_mqtt_in.topic, '');
-assert.deepEqual(subscribeNode.wires[0], ['irrigation_mqtt_in']);
+const page = byId[IDS.page];
+assert(page && page.type === 'ui-page', 'the page id must match the canvas, or an import adds a second "Irrigation" page');
+assert(byId[IDS.group] && byId[IDS.group].type === 'ui-group', 'the group id must match the canvas, or an import adds a second group');
+assert.equal(page.ui, IDS.base, 'the page must use the workspace dashboard, not one of its own');
+assert.equal(page.theme, IDS.theme, 'the page must use the workspace theme');
+assert.equal(byId[IDS.group].page, IDS.page);
+
+const settings = byId[IDS.settings].func;
+const control = byId[IDS.control].func;
+const template = byId[IDS.ui].format;
+const subscribeNode = byId[IDS.subscribe];
+assert.deepEqual(byId[IDS.tick].wires[0], [IDS.settings]);
+assert.deepEqual(byId[IDS.subscribeTick].wires[0], [IDS.subscribe]);
+assert.equal(byId[IDS.mqttIn].inputs, 1);
+assert.equal(byId[IDS.mqttIn].topic, '');
+assert.deepEqual(subscribeNode.wires[0], [IDS.mqttIn]);
+
+// The water tile goes stale on the WaterLevel node's own schedule. Re-resolved
+// here rather than imported from tools/water_level_interval.py: a check that
+// mirrors the implementation it checks proves nothing. Resolution follows the
+// compiler, so a -D in platformio.ini wins over the header's #ifndef fallback.
+const ini = fs.readFileSync('platformio.ini', 'utf8');
+const header = fs.readFileSync('examples/WaterLevel/src/WaterLevelConfig.h', 'utf8');
+const sleep = Number((ini.match(/^\s*-D\s*WATER_LEVEL_SLEEP_SECONDS=(\d+)/m)
+  || header.match(/#define\s+WATER_LEVEL_SLEEP_SECONDS\s+(\d+)/) || [])[1]);
+assert(sleep, 'cannot resolve WATER_LEVEL_SLEEP_SECONDS from platformio.ini or WaterLevelConfig.h');
+const waterAge = Number(settings.match(/waterMaxAgeSec:\s*(\d+)/)[1]);
+assert.equal(waterAge, Math.max(2 * sleep, 60),
+  `waterMaxAgeSec ${waterAge} s does not track the node's ${sleep} s reporting interval`);
+
+// The field valves report on a fixed short cadence while their valve is open, and
+// each valve runs its own firmware, so one valveOpenMaxAgeSec can only fit both if
+// both headers agree. Resolved from the two headers directly, like the water
+// interval above. valveClosedMaxAgeSec is deliberately not resolved: the closed
+// cadence is an operator setting with a downlink, so there is no compile-time
+// value to check it against.
+const pcvHeaders = [
+  'examples/PressureControlNode/include/PressureNodeConfig.h',
+  'examples/PressureControlNode2/include/PressureNode2Config.h',
+].map(p => fs.readFileSync(p, 'utf8'));
+const openCadences = pcvHeaders.map(h => Number(
+  (h.match(/#define\s+PCV_LORAWAN_OPEN_INTERVAL_SECONDS\s+(\d+)/)
+   || h.match(/VALVE_OPEN_REPORT_INTERVAL_SECONDS\s*=\s*(\d+)/) || [])[1]));
+openCadences.forEach((v, i) => assert(v,
+  `cannot resolve the open-valve reporting interval from ${['PressureControlNode', 'PressureControlNode2'][i]}`));
+assert.equal(openCadences[0], openCadences[1],
+  `valve_1 and valve_2 open on different reporting cadences (${openCadences.join(' s vs ')} s); one limit cannot fit both`);
+const valveOpenAge = Number(settings.match(/valveOpenMaxAgeSec:\s*(\d+)/)[1]);
+assert(valveOpenAge >= 2 * openCadences[0] && valveOpenAge <= 4 * openCadences[0],
+  `valveOpenMaxAgeSec ${valveOpenAge} s does not clear two of the ${openCadences[0]} s open-valve cadence`);
+
+// PumpControl reports on a fixed stopped cadence, resolved from its source like the
+// water interval above. The pump carries two stopped-state limits and they have to
+// bracket each other: pumpOnlineMaxAgeSec is the loose one every liveness question
+// reads, pumpStopTimeoutSec is the deadline a stop confirmation is judged against,
+// and pumpStoppedMaxAgeSec is the tight one in between that the stop sequence uses
+// to decide it may close the valves.
+const pumpSource = fs.readFileSync('examples/PumpControl/src/main.cpp', 'utf8');
+const stoppedCadence = Number(
+  (pumpSource.match(/STATUS_INTERVAL_STOPPED_MS\s*=\s*(\d+)\s*\*\s*1000/) || [])[1]);
+assert(stoppedCadence, 'cannot resolve STATUS_INTERVAL_STOPPED_MS from examples/PumpControl/src/main.cpp');
+const pumpOnlineAge = Number(settings.match(/pumpOnlineMaxAgeSec:\s*(\d+)/)[1]);
+const pumpStoppedAge = Number(settings.match(/pumpStoppedMaxAgeSec:\s*(\d+)/)[1]);
+const pumpStopTimeout = Number(settings.match(/pumpStopTimeoutSec:\s*(\d+)/)[1]);
+assert(pumpOnlineAge >= 2 * stoppedCadence && pumpOnlineAge <= 4 * stoppedCadence,
+  `pumpOnlineMaxAgeSec ${pumpOnlineAge} s does not clear two of the ${stoppedCadence} s stopped heartbeat`);
+assert(pumpStoppedAge < pumpOnlineAge,
+  `pumpStoppedMaxAgeSec ${pumpStoppedAge} s is not tighter than pumpOnlineMaxAgeSec ${pumpOnlineAge} s, so the split does nothing`);
+assert(pumpOnlineAge > pumpStopTimeout,
+  `pumpOnlineMaxAgeSec ${pumpOnlineAge} s sits below pumpStopTimeoutSec ${pumpStopTimeout} s, leaving a band where the sequencer can neither judge the pump fresh nor fault`);
 const subscriptionContext = new Map();
 const subscription = new Function('env','context','node', subscribeNode.func);
 const subscriptionStatus = {status:()=>{}};
@@ -128,12 +230,42 @@ Date.now=()=>base+46001;
 new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
 assert.equal(adaptiveMemory.get('irrigation').notice,'pump: stop sent; awaiting device result');
 assert.equal(adaptiveMemory.get('irrigation').stopReason,'Pump status unsafe');
-adaptiveMemory.set('irrigation',{phase:'idle',selected:[],step:0,notice:'Ready',pending:null,devices:{...commonDevices,pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}}});
-Date.now=()=>base+74000;
+// A stopped PumpControl reports once a minute, so the two questions asked of its
+// last report are answered off different limits. This is the split, stated as the
+// one thing it exists to prevent: the same 100 s old "stopped" report must clear the
+// Start gate and must still be refused by the stop sequence.
+const pumpTick = devices => {
+  adaptiveMemory.set('irrigation',{phase:'idle',selected:[],step:0,notice:'Ready',pending:null,devices});
+  Date.now=()=>base;
+  new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
+  return adaptiveMemory.get('irrigation');
+};
+const stoppedPump = age => ({...commonDevices,
+  pump:{at:base-age,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}});
+assert.equal(pumpTick(stoppedPump(100000)).check,'',
+  'a stopped pump silent for 100 s is within pumpOnlineMaxAgeSec and must not refuse Start');
+assert.equal(pumpTick(stoppedPump(190000)).check,'Pump offline, running or faulted',
+  'past pumpOnlineMaxAgeSec the Start gate must still refuse');
+adaptiveMemory.set('irrigation',{phase:'stop_pump',selected:['valve1'],step:0,notice:'',pending:null,devices:stoppedPump(100000)});
+Date.now=()=>base;
 new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
-assert.equal(adaptiveMemory.get('irrigation').devices.pump.stale,false);
-Date.now=()=>base+76000;
+assert.equal(adaptiveMemory.get('irrigation').phase,'wait_pump_stop',
+  'the same 100 s old "stopped" is past pumpStoppedMaxAgeSec: the stop sequence must command a stop rather than close the valves');
+assert.equal(adaptiveMemory.get('irrigation').notice,'pump: stop sent; awaiting device result');
+assert.equal(pumpTick(stoppedPump(76000)).devices.pump.stale,false,
+  'the card reads pumpOnlineMaxAgeSec: one lost 60 s heartbeat must not flicker it stale');
+assert.equal(pumpTick(stoppedPump(190000)).devices.pump.stale,true,
+  'past pumpOnlineMaxAgeSec the card must read stale');
+// The valve limits split by state: the same minute of silence is stale while a
+// valve is open and still fresh while it is closed. That is what lets the open
+// half stay tight without the closed half flagging a healthy idle valve.
+adaptiveMemory.set('irrigation',{phase:'idle',selected:[],step:0,notice:'Ready',pending:null,devices:{...commonDevices,
+  valve1:{at:base,pcv_last_commanded:'open'}, valve2:{at:base,pcv_last_commanded:'close'},
+  pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}}});
+Date.now=()=>base+60000;
 new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
-assert.equal(adaptiveMemory.get('irrigation').devices.pump.stale,true);
+const splitState=adaptiveMemory.get('irrigation').devices;
+assert.equal(splitState.valve1.stale,true,'a valve open and silent past valveOpenMaxAgeSec must read stale');
+assert.equal(splitState.valve2.stale,false,'a closed valve silent for the same time is within valveClosedMaxAgeSec');
 Date.now=realNow;
 console.log('Irrigation sequence smoke test passed');

@@ -23,8 +23,8 @@ inline constexpr int8_t PCV_POWER_ENABLE = 27;
 
 inline constexpr int8_t I2C_UPSTREAM_SDA = 21;
 inline constexpr int8_t I2C_UPSTREAM_SCL = 22;
-inline constexpr int8_t I2C_DOWNSTREAM_SDA = 13;
-inline constexpr int8_t I2C_DOWNSTREAM_SCL = 4;
+inline constexpr int8_t I2C_DOWNSTREAM_SDA = 4;
+inline constexpr int8_t I2C_DOWNSTREAM_SCL = 13;
 
 inline constexpr int8_t RS485_RX = 16;
 inline constexpr int8_t RS485_TX = 17;
@@ -45,7 +45,7 @@ inline constexpr float DIVIDER_HIGH_OHM = 100000.0F;
 // Imported valve_2 divider value. The calibration factor is neutral because
 // the divider has not been verified against a multimeter on the assembled
 // board; measure and correct both before the voltage is trusted.
-inline constexpr float DIVIDER_LOW_OHM = 22000.0F;
+inline constexpr float DIVIDER_LOW_OHM = 22000.0F; // fixme: maybe 20000.0F?
 inline constexpr float CALIBRATION = 1.0F;
 inline constexpr uint8_t SAMPLE_COUNT = 32;
 // With 100 nF at the ADC input and about 16.7 kOhm Thevenin resistance, 10 ms
@@ -100,6 +100,14 @@ inline constexpr uint8_t SUB_BAND = 0;
 inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS = 10; // 60;
 inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS = 10; // 60;
 inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS = 24UL * 60UL * 60UL;
+// While a valve is open the node reports on this fixed short cadence instead of
+// the configured interval, mirroring PumpControl's running cadence: an open valve
+// is passing water, and in Class A a downlink can only arrive in the RX window
+// after an uplink, so this is also the worst-case delay before a close command
+// reaches the valve. Deliberately below MIN_REPORT_INTERVAL_SECONDS, which bounds
+// what an operator may configure, not what the firmware may do; the uplink keeps
+// reporting the configured interval.
+inline constexpr uint32_t VALVE_OPEN_REPORT_INTERVAL_SECONDS = 15;
 inline constexpr uint32_t JOIN_RETRY_INTERVAL_MS = 60UL * 1000UL;
 inline constexpr bool CONFIRMED_UPLINK = false;
 // Must remain "valve_lora". That namespace holds the OTAA DevNonce history

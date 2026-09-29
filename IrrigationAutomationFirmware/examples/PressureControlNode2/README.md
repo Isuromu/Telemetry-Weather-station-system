@@ -133,3 +133,13 @@ already accepted.
 
 valve_2 is Class A, so a command waits in ChirpStack until the node's next uplink
 and is applied in the receive window that follows it.
+
+That interval is the cadence for a **closed** valve. While a valve is open the
+node ignores it and reports every 15 seconds
+(`VALVE_OPEN_REPORT_INTERVAL_SECONDS` in `include/PressureNode2Config.h`), because
+an open valve is passing water and, in Class A, a downlink can only arrive in the
+receive window after an uplink — so the interval is also the worst case before a
+close command reaches the valve. It only ever shortens: an interval configured
+below 15 seconds still wins. The interval field in the uplink keeps reporting the
+configured value rather than the cadence in force, so it stays a confirmation
+that the setting was accepted.

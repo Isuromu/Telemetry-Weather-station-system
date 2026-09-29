@@ -46,6 +46,17 @@ accepts `sleep_seconds` down to 10 through its matching codec. This short
 interval is for bench testing only; restore the Class A PlatformIO flags and
 codec lower bound to at least 60 seconds before deployment.
 
+`sleep_time`/`sleep_seconds` and `report_interval` set the cadence for a valve
+that is **closed**. While a valve is open the node ignores that setting and
+reports every 15 seconds (`VALVE_OPEN_REPORT_INTERVAL_SECONDS` in
+`include/PressureNodeConfig.h`), because an open valve is passing water and, in
+Class A, a downlink can only arrive in the receive window after an uplink — the
+interval is therefore also the worst case before a close command reaches the
+valve. The interval field in the uplink keeps reporting the configured value, not
+the cadence in force, so it stays a confirmation of the setting. Any configured
+interval shorter than 15 seconds still wins, which is what keeps the bench build
+at its 10-second cycle.
+
 ### Credentials
 
 The active Class A firmware reads the git-ignored

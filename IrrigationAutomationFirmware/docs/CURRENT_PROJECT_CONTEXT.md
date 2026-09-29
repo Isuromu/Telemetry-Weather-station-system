@@ -130,6 +130,15 @@ the default and minimum to at least 60 seconds before field deployment. Class C
 deliberately trades energy for command latency and retains its 60-second
 minimum.
 
+Whichever policy is built, the configured interval is the cadence for a valve
+that is **closed**. While a valve is open both PCV firmwares report every 15
+seconds instead (`VALVE_OPEN_REPORT_INTERVAL_SECONDS` in
+`PressureControlNode`'s and `PressureControlNode2`'s config headers), because an
+open valve is passing water and in Class A the interval is also the worst case
+before a close command can reach the valve. It only ever shortens, so a
+configured interval below 15 seconds still wins. The uplink's interval field
+keeps reporting the configured value, not the cadence in force.
+
 The user confirmed that the working `klapan.zip` project is the separate
 valve_2 device without a flow meter. It uses LoRaWAN Class C and its own older
 FPort-10 codec. valve_1 is a distinct Class A device with the commissioned

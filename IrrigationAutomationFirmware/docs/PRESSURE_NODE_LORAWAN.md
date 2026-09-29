@@ -211,8 +211,12 @@ The command is exactly 10 bytes, big-endian:
 Every new command must use a new `command_id`. An exact duplicate is reported
 but cannot pulse the solenoid twice. Reusing the same ID with different bytes
 is rejected. In Class C the interval is a report interval; in Class A it is
-deep-sleep time. Bit 2 reads the current positive TUF accumulator and stores it
-as the new local NVS baseline; it does not erase the meter.
+deep-sleep time. Whichever it is, the setting applies to a valve that is
+**closed**: while a valve is open the node reports every 15 seconds regardless
+(`VALVE_OPEN_REPORT_INTERVAL_SECONDS` in the two `PressureNode*Config.h` headers),
+so the interval field in bytes 22-25 keeps echoing the configured value rather
+than the cadence in force. Bit 2 reads the current positive TUF accumulator and
+stores it as the new local NVS baseline; it does not erase the meter.
 
 Example reset JSON in either matching codec:
 

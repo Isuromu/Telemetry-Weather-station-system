@@ -122,7 +122,9 @@ constexpr float PRESSURE_FULL_SCALE_KPA = 1000.0f;  // 0-1 MPa sensor
 // ---------------------------- LoRaWAN -----------------------------
 constexpr uint8_t COMMAND_FPORT = 30;
 constexpr uint8_t STATUS_FPORT = 31;
-constexpr uint32_t STATUS_INTERVAL_MS = 5UL * 60UL * 1000UL;
+// 60 s, not minutes: the integrated dashboard's mainMaxAgeSec is 150 s and must
+// clear two uplinks. See tools/build_irrigation_dashboard.py.
+constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t SENSOR_INTERVAL_MS = 1000;
 constexpr uint32_t ACTUATOR_STATUS_INTERVAL_MS = 2000;
 // Commissioning value: verify against measured full-travel time before field use.

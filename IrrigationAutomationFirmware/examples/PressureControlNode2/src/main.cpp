@@ -725,8 +725,21 @@ void scheduleNextReport(uint32_t delayMs) {
                 static_cast<unsigned long>(delayMs / 1000UL));
 }
 
+// The cadence used for the next wake: the configured interval, except while a
+// valve is open, when the fixed short interval applies. Only ever shortens, so a
+// configured interval below it still wins and a bench build is not slowed down.
+uint32_t effectiveReportIntervalSeconds() {
+  const uint32_t configured = retainedNodeState.reportIntervalSeconds;
+  if (retainedNodeState.lastValveState !=
+      static_cast<uint8_t>(PressureControlValveState::Open))
+    return configured;
+  const uint32_t openInterval =
+      config::lorawan::VALVE_OPEN_REPORT_INTERVAL_SECONDS;
+  return configured < openInterval ? configured : openInterval;
+}
+
 void scheduleNextConfiguredReport() {
-  scheduleNextReport(retainedNodeState.reportIntervalSeconds * 1000UL);
+  scheduleNextReport(effectiveReportIntervalSeconds() * 1000UL);
 }
 
 void enterDeepSleep() {
@@ -743,13 +756,15 @@ void enterDeepSleep() {
   downstreamI2c.end();
   SPI.end();
 
+  const uint32_t sleepSeconds = effectiveReportIntervalSeconds();
   const uint64_t sleepMicroseconds =
-      static_cast<uint64_t>(retainedNodeState.reportIntervalSeconds) *
-      1000000ULL;
+      static_cast<uint64_t>(sleepSeconds) * 1000000ULL;
   esp_sleep_enable_timer_wakeup(sleepMicroseconds);
-  Serial.printf("[POWER] Deep sleeping for %lu seconds.\n",
-                static_cast<unsigned long>(
-                    retainedNodeState.reportIntervalSeconds));
+  Serial.printf("[POWER] Deep sleeping for %lu seconds%s.\n",
+                static_cast<unsigned long>(sleepSeconds),
+                sleepSeconds != retainedNodeState.reportIntervalSeconds
+                    ? " (valve open)"
+                    : "");
   Serial.flush();
   delay(20);
   esp_deep_sleep_start();

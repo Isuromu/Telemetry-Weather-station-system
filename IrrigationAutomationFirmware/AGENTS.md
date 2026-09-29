@@ -66,3 +66,76 @@ never name a Vue method `value`: the widget context shadows it, causing a blank
 widget with `TypeError: value is not a function`. Use `cardValue` or another
 distinct name. Check the rendered Dashboard page and browser console; script
 parsing alone is insufficient.
+
+## Generated device dashboard flows
+
+Device flows (`WaterLevel`, `SoilNode`, `PressureControlNode*`) are generated,
+not hand-written. Never edit the importable JSON: change
+`tools/build_<name>_dashboard.py`, then run the builder **and**
+`tools/test_<name>_dashboard.js`. The check re-runs the decoder against a
+recorded uplink and asserts the import invariants below, so a mistake fails
+there instead of on the user's Node-RED.
+
+Imports must need no hand cleanup. The user imports these into a live
+workspace, so the file has to land cleanly the first time:
+
+- **No `tab` node.** Leave nodes pointing at a `z` id absent from the file so
+  the import dialog retargets them into the chosen flow. A shipped tab node
+  creates a second, identical tab on every import.
+- **No `mqtt-broker` node.** Reference the shared `chirpstack_mosquito` by id
+  (`ae0178f3742ff530`, as `MainValve` does) and configure the server once, in
+  the flow that already owns it. A shipped broker arrives as a duplicate server
+  to delete by hand; re-declaring the shared id can overwrite the user's host,
+  port and TLS settings.
+- **Every shipped config node must carry an id the workspace already owns.**
+  Node-RED's importer preserves incoming ids (`generateIds: false`) and raises
+  `import_conflict` when one is taken; in the dialog that follows, clashing
+  *config* nodes start unticked (`isSelected = !isConflicted ||
+  !importConfig.configs[node.id]`) and are listed under their own heading. So a
+  matching id can never duplicate: the existing node wins, or is explicitly
+  replaced. An id matching nothing is imported as-is. Shared singletons follow
+  from this (`ui-base` `f53e93e9ba219e63`, `ui-theme` `e49416861823a329`,
+  broker `ae0178f3742ff530`), and the page and groups are no exception — a
+  builder-minted `sc_wl_ui_page` is what leaves a second `Water Level` page and
+  a second pair of groups on every import. Use the workspace ids
+  `334b707b21a5ce0a`, `0dcf231c222554fc`, `18fb832a66d8775e`.
+
+### Not yet brought in line
+
+`WaterLevel` and `IntegratedDashboard` are the only flows that follow all of the
+above. The rest are hand-authored JSON, and only those two have a builder at
+all, so the others cannot simply be regenerated — fixing one means editing its
+JSON by hand, or introducing a builder for it.
+
+| Flow | Shipped broker | Tab node | Builder |
+| --- | --- | --- | --- |
+| `WaterLevel` | none (borrows `ae0178f3742ff530`) | no | `build_water_level_dashboard.py` |
+| `SoilNode` | **own copy, id `sc_ae0178f3742ff530`** | no | none |
+| `MainValve`, `PumpControl`, `PressureControlNode`, `PressureControlNode2` | own node, shared id `ae0178f3742ff530` | no | none |
+| `IntegratedDashboard` | none (borrows `ae0178f3742ff530`) | no | `build_irrigation_dashboard.py` |
+
+`SoilNode` is the one with a live defect: its broker id is distinct from the
+shared one, so importing it adds a second `chirpstack_mosquito` server to
+delete by hand — exactly the chore `WaterLevel` no longer causes. The middle
+row reuses the shared id, so the editor reuses that node rather than
+duplicating it, but those files still re-declare the server settings and so can
+overwrite the user's host, port and TLS on import. Confirm each row against the
+files before relying on it; this table is a snapshot, not a guarantee.
+
+`IntegratedDashboard` follows the same rules and adds one the others do not
+need: its *ordinary* nodes carry the canvas's ids too (`fd327e43632c19d6`,
+`0da71259acd21508`, `ed30a564d5bb461a`, …), because that flow is maintained by
+re-exporting it from Node-RED. A re-import then replaces each node in place
+instead of appending a second copy — a duplicate `mqtt in` would send every
+downlink twice. Re-export rather than hand-editing, and refresh the ids in
+`build_irrigation_dashboard.py` if the canvas ever changes.
+
+### Diagnosing deploy errors
+
+`TypeError: Cannot read properties of null (reading 'getBase')` at
+`ui_chart.js` does **not** mean the chart is wrong. `ui_chart` resolves
+`RED.nodes.getNode(config.group)` and calls `getBase()` on it; the group is
+null because `ui_group.js` threw first on its own
+`RED.nodes.getNode(config.page)`. The missing or orphaned node is the
+`ui-page`, usually after a duplicate import was deleted. Fix the page and its
+groups, and the chart recovers untouched.

@@ -1,11 +1,18 @@
 """Build the single-page Node-RED Dashboard 2 irrigation flow."""
 
 import json
+import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "examples" / "IntegratedDashboard" / "irrigation_dashboard_flow.json"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# The water tile goes stale on the WaterLevel node's own schedule, and that
+# interval changes between bench and field, so the limit is derived rather than
+# typed in. See tools/water_level_interval.py.
+from water_level_interval import stale_after_seconds as water_stale_after_seconds
 
 
 def node(node_id, kind, **kwargs):
@@ -13,6 +20,8 @@ def node(node_id, kind, **kwargs):
 
 
 SETTINGS = r'''// Edit all site thresholds, limits and timeouts here (seconds unless noted).
+// waterMaxAgeSec is generated to match the WaterLevel node's reporting interval;
+// change that interval in tools/water_level_interval.py and regenerate.
 const settings = {
   startLevelCm: 20, stopLevelCm: 19,
   startMoisturePercent: 70, stopMoisturePercent: 90,
@@ -20,11 +29,40 @@ const settings = {
   mainClosedMaxDeg: 5,
   pumpFrequencyHz: 25, pumpMinFrequencyHz: 10, pumpMaxFrequencyHz: 50,
   pumpFrequencyToleranceHz: 0.2,
-  waterMaxAgeSec: 1200, soilMaxAgeSec: 1200,
+  waterMaxAgeSec: ''' + str(water_stale_after_seconds()) + r''', soilMaxAgeSec: 1200,
+  // Clears two of MainValve's 60 s heartbeats (STATUS_INTERVAL_MS in
+  // examples/MainValve/src/main.cpp), so one lost uplink does not mark a healthy
+  // valve stale at build_irrigation_dashboard.py:89 or stop a run at :154. That
+  // heartbeat is what keeps this limit workable: at the 300 s it used to be, this
+  // value could never clear two uplinks. Keep the heartbeat at 2x this value or
+  // less if either number is ever changed.
   mainMaxAgeSec: 150,
-  pumpRunningMaxAgeSec: 45, pumpStoppedMaxAgeSec: 75,
-  valve1MaxAgeSec: 1200, valve2MaxAgeSec: 180,
-  mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 2100,
+  // The pump's stopped state carries two limits, because two questions get asked of
+  // it. pumpStoppedMaxAgeSec is the one the stop sequence uses to decide it may trust
+  // the last "stopped" report enough to close the valves; it stays tight, because the
+  // cost of being wrong is closing the main valve onto a running pump. Everywhere that
+  // only asks whether the pump is alive -- the Start gate and the card -- reads
+  // pumpOnlineMaxAgeSec instead. While stopped the node reports once a minute
+  // (STATUS_INTERVAL_STOPPED_MS in examples/PumpControl/src/main.cpp), so 75 s is only
+  // 1.25 intervals and one lost uplink refuses Start with "Pump offline, running or
+  // faulted" or flickers the card stale; 180 s is three. It is also above
+  // pumpStopTimeoutSec, so a stop confirmation that has aged out is judged against the
+  // same clock as its own deadline rather than sitting between the two.
+  pumpRunningMaxAgeSec: 45, pumpStoppedMaxAgeSec: 75, pumpOnlineMaxAgeSec: 180,
+  // The field valves split by state, like the pump above: 45 s is three of the
+  // 15 s cadence a PCV uses while its valve is open
+  // (VALVE_OPEN_REPORT_INTERVAL_SECONDS in PressureNodeConfig.h and
+  // PressureNode2Config.h), 180 s is three of the 60 s interval it is configured
+  // with while closed. Change either firmware cadence and one of these must move.
+  valveOpenMaxAgeSec: 45, valveClosedMaxAgeSec: 180,
+  // These two are failure detectors, not retries: neither wait_field phase ever
+  // re-sends, so this is only how long a sequence that looks frozen runs before
+  // the operator is told the downlink was lost. 300 s clears 5x the field valves'
+  // 60 s production interval and 20x their 15 s open-state cadence, and matches
+  // the main valve, whose own 180 s movement timeout it must also clear. The
+  // 2100 s this used to carry meant 35 minutes of silence with the main valve
+  // open, in both the open and the close case.
+  mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 300,
   pumpCommandTimeoutSec: 150, pumpStopTimeoutSec: 150,
   maxWateringSec: 14400
 };
@@ -51,7 +89,18 @@ const emit = (k,port,body) => downlinks.push({topic:`application/${app}/device/$
 const device = k => s.devices[k] || {};
 const fresh = (k,age) => !!device(k).at && now-device(k).at <= age*1000;
 const pumpMaxAge = () => device('pump').running === true ? cfg.pumpRunningMaxAgeSec : cfg.pumpStoppedMaxAgeSec;
+// pumpFresh judges the pump's condition: it is the limit the stop sequence uses to
+// decide it may believe the last "stopped" report and close the valves, so it stays
+// tight. pumpLive only asks whether the pump is talking to us at all, and reads the
+// looser stopped-state limit; the running side of both is the same 45 s.
 const pumpFresh = () => fresh('pump',pumpMaxAge());
+const pumpLive = () => fresh('pump',device('pump').running===true?cfg.pumpRunningMaxAgeSec:cfg.pumpOnlineMaxAgeSec);
+const isValve = k => k==='valve1'||k==='valve2';
+// The field valves report on a short fixed cadence while a valve is open and on
+// their configured interval while closed, so one limit cannot fit both states.
+// The last commanded state is the discriminator, as it is on the device.
+const valveMaxAge = k => device(k).pcv_last_commanded === 'open' ? cfg.valveOpenMaxAgeSec : cfg.valveClosedMaxAgeSec;
+const valveFresh = k => fresh(k,valveMaxAge(k));
 const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
 const nextId = k => {let n=flow.get('irrigation_id_'+k); if (!Number.isInteger(n)||n<0||n>65534) {const last=num(device(k).last_command_id);n=last===null?1:(last+1)%65535;} flow.set('irrigation_id_'+k,(n+1)%65535);return n;};
 function command(k,op) {
@@ -71,9 +120,9 @@ function ready() {
   if (!fresh('soil',cfg.soilMaxAgeSec)||t.sensor_valid!==true||num(t.vwc_percent)===null) return 'Soil moisture unavailable or stale';
   if (t.vwc_percent>=cfg.startMoisturePercent) return 'Soil is not dry enough';
   if (!fresh('main',cfg.mainMaxAgeSec)||m.actuator_online!==true||m.overpressure===true||num(m.actuator_fault_code)!==0) return 'Main valve offline, stale or faulted';
-  if (!pumpFresh()||p.communication_ok!==true||p.configuration_valid!==true||num(p.vfd_fault_code)!==0||p.running===true) return 'Pump offline, running or faulted';
+  if (!pumpLive()||p.communication_ok!==true||p.configuration_valid!==true||num(p.vfd_fault_code)!==0||p.running===true) return 'Pump offline, running or faulted';
   if (!p.frequency_armed && !(cfg.pumpFrequencyHz>=cfg.pumpMinFrequencyHz&&cfg.pumpFrequencyHz<=cfg.pumpMaxFrequencyHz)) return 'Pump frequency invalid';
-  for (const k of s.selected) if (!fresh(k,cfg[k+'MaxAgeSec'])) return k+' status unavailable or stale';
+  for (const k of s.selected) if (!valveFresh(k)) return k+' status unavailable or stale';
   return '';
 }
 function decodePump(e) {
@@ -137,11 +186,11 @@ if (s.phase==='running') {
   else if (!fresh('soil',cfg.soilMaxAgeSec)||t.sensor_valid!==true||num(t.vwc_percent)===null||t.vwc_percent>=cfg.stopMoisturePercent) stop('Soil wet enough or reading unavailable');
   else if (!fresh('main',cfg.mainMaxAgeSec)||!mainOpen()||m.overpressure===true) stop('Main valve unsafe');
   else if (!pumpFresh()||p.communication_ok!==true||num(p.vfd_fault_code)!==0||p.running!==true) stop('Pump status unsafe');
-  else if (s.selected.some(k=>!fresh(k,cfg[k+'MaxAgeSec'])||device(k).pcv_last_commanded!=='open')) stop('Field valve status unsafe');
+  else if (s.selected.some(k=>!valveFresh(k)||device(k).pcv_last_commanded!=='open')) stop('Field valve status unsafe');
 }
 if (s.phase==='open_main') {if(mainOpen()) advance('open_fields');else {command('main','open');advance('wait_main_open');}}
 if (s.phase==='wait_main_open') {if(done('main','open')) advance('open_fields');else if(timed(cfg.mainCommandTimeoutSec)||m.command_phase==='failed'||m.command_phase==='rejected') stop('Main valve open failed');}
-if (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='open'&&fresh(k,cfg[k+'MaxAgeSec'])) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}
+if (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='open'&&valveFresh(k)) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}
 if (s.phase==='wait_field_open') {if(done(s.selected[s.step],'open')) {s.step++;advance('open_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed');}
 if (s.phase==='set_frequency') {const problem=ready();if(problem){stop('Start recheck: '+problem);}else if(p.frequency_armed===true&&Math.abs((num(p.commanded_frequency_hz)||0)-cfg.pumpFrequencyHz)<cfg.pumpFrequencyToleranceHz) advance('start_pump');else {command('pump','frequency');advance('wait_frequency');}}
 if (s.phase==='wait_frequency') {if(done('pump','frequency')) advance('start_pump');else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump frequency command unconfirmed');}
@@ -149,11 +198,11 @@ if (s.phase==='start_pump') {const problem=ready();if(problem) stop('Start reche
 if (s.phase==='wait_pump_start') {if(done('pump','start')) {advance('running');s.runAt=now;s.notice='Watering';}else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump start accepted; waiting for final VFD condition';else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump start unconfirmed');}
 if (s.phase==='stop_pump') {if(p.running===false&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else {command('pump','stop');advance('wait_pump_stop');}}
 if (s.phase==='wait_pump_stop') {if((done('pump','stop')||done('pump','estop'))&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump stop accepted; waiting for final VFD condition';else if(timed(cfg.pumpStopTimeoutSec)){if(s.pending.op==='stop'){command('pump','estop');s.notice='Pump stop unconfirmed; emergency stop sent';}else {s.phase='fault';s.notice='Pump stop unconfirmed. Valves left open; inspect pump.';}}}
-if (s.phase==='close_fields') {if(s.step<0) advance('close_main');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='close'&&fresh(k,cfg[k+'MaxAgeSec'])) s.step--;else {command(k,'close');advance('wait_field_close');}}}
+if (s.phase==='close_fields') {if(s.step<0) advance('close_main');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='close'&&valveFresh(k)) s.step--;else {command(k,'close');advance('wait_field_close');}}}
 if (s.phase==='wait_field_close') {if(done(s.selected[s.step],'close')) {s.step--;advance('close_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)){s.phase='fault';s.notice='Field valve close unconfirmed; inspect system';}}
 if (s.phase==='close_main') {if(num(m.actual_angle_deg)!==null&&m.actual_angle_deg<=cfg.mainClosedMaxDeg&&m.valve_moving===false) advance('idle');else {command('main','close');advance('wait_main_close');}}
 if (s.phase==='wait_main_close') {if(done('main','close')) {advance('idle');s.notice='Watering stopped; valves closed';}else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
-s.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpFresh():!fresh(k,cfg[k+'MaxAgeSec'])}]));
+s.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
 
@@ -179,34 +228,70 @@ node.status({fill:'green',shape:'dot',text:topic});
 return {action:'subscribe',topic,qos:0};'''
 
 
+# These ids are the live canvas's, not the builder's own. Node-RED's importer
+# preserves incoming ids and raises an import conflict when one is already
+# taken, so a matching id is reused or explicitly replaced, while an id matching
+# nothing is added as a *second* node. This flow is maintained by re-exporting
+# it from Node-RED, so the builder reproduces that export: a re-import updates
+# the running dashboard in place instead of doubling every node. Re-export
+# rather than hand-editing, and refresh these ids whenever the canvas changes.
+ID_CANVAS = "dc658b3ab3f2917e"          # canvas group
+ID_TICK = "fd327e43632c19d6"
+ID_SETTINGS = "0da71259acd21508"
+ID_SUBSCRIBE_TICK = "9b727c5b0531676e"
+ID_SUBSCRIBE = "405c9e29995e8efe"
+ID_MQTT_IN = "ed30a564d5bb461a"
+ID_STATUS = "50c3e5351eac102c"
+ID_CONTROL = "1406698c9cd792c5"
+ID_MQTT_OUT = "03424753ad790e6b"
+ID_UI = "d490a04f3084b9da"
+ID_GLOBAL_CONFIG = "c7c03261e21b3272"
+
+# z only. No tab node ships, so the import dialog's "Import to" list decides
+# which flow the nodes join and no second tab is ever created.
+FLOW_ID = "irrigation_single_page"
+# The workspace's shared ChirpStack broker, as MainValve uses. No mqtt-broker
+# node ships: one would arrive as a duplicate server to delete by hand, and
+# re-declaring the shared id can overwrite the host, port and TLS settings.
+BROKER = "ae0178f3742ff530"
+PAGE = "irrigation_page"
+GROUP = "irrigation_group"
+UI_BASE = "f53e93e9ba219e63"   # shared "My Dashboard"
+UI_THEME = "e49416861823a329"  # shared "MyTheme"
+
+CANVAS_STYLE = {"stroke": "#999999", "stroke-opacity": "1", "fill": "none",
+                "fill-opacity": "1", "label": True, "label-position": "nw",
+                "color": "#767676"}
+BREAKPOINTS = [{"name": "Default", "px": "0", "cols": "3"},
+               {"name": "Tablet", "px": "576", "cols": "6"},
+               {"name": "Small Desktop", "px": "768", "cols": "9"},
+               {"name": "Desktop", "px": "1024", "cols": "12"}]
+
+
 def build():
-    flow_id = "irrigation_single_page"
-    broker = "irrigation_broker"
-    page = "irrigation_page"
-    group = "irrigation_group"
-    nodes = [node(flow_id, "tab", label="Irrigation system", disabled=False, info="Single-page safety sequencer for six LoRaWAN nodes.")]
-    nodes += [
-        node("irrigation_tick", "inject", z=flow_id, name="Refresh safety and settings", props=[{"p":"payload"}], repeat="5", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=140, y=80, wires=[["irrigation_settings", "irrigation_subscribe"]]),
-        node("irrigation_settings", "function", z=flow_id, name="Irrigation settings — edit limits here", func=SETTINGS, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=400, y=80, wires=[["irrigation_control"]]),
-        node("irrigation_subscribe", "function", z=flow_id, name="Subscribe to configured ChirpStack application", func=SUBSCRIBE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=400, y=120, wires=[["irrigation_mqtt_in"]]),
-        node("irrigation_mqtt_in", "mqtt in", z=flow_id, name="All six ChirpStack uplinks", topic="", qos="0", datatype="auto-detect", broker=broker, nl=False, rap=True, rh=0, inputs=1, x=150, y=140, wires=[["irrigation_control"]]),
-        node("irrigation_mqtt_status", "status", z=flow_id, name="MQTT connection", scope=["irrigation_mqtt_in", "irrigation_mqtt_out"], x=150, y=200, wires=[["irrigation_control"]]),
-        node("irrigation_control", "function", z=flow_id, name="Safety checks and irrigation sequence", func=CONTROL, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=430, y=160, wires=[["irrigation_mqtt_out"],["irrigation_ui"]]),
-        node("irrigation_mqtt_out", "mqtt out", z=flow_id, name="ChirpStack downlinks", topic="", qos="", retain="", respTopic="", contentType="", userProps="", correl="", expiry="", broker=broker, x=750, y=120, wires=[]),
-        node("irrigation_ui", "ui-template", z=flow_id, group=group, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="14", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=760, y=200, wires=[["irrigation_control"]]),
-        node(broker, "mqtt-broker", name="ChirpStack MQTT", broker="localhost", port="1883", clientid="", autoConnect=True, usetls=False, protocolVersion="4", keepalive="60", cleansession=True, autoUnsubscribe=True, birthTopic="", birthQos="0", birthPayload="", birthMsg={"topic":"","payload":""}, closeTopic="", closeQos="0", closePayload="", closeMsg={"topic":"","payload":""}, willTopic="", willQos="0", willPayload="", willMsg={"topic":"","payload":""}),
-        node(group, "ui-group", name="Irrigation", page=page, width="12", height="14", order=1, showTitle=False, className="", visible=True, disabled=False, groupType="default"),
-        node(page, "ui-page", name="Irrigation", ui="irrigation_base", path="/irrigation", icon="water", layout="grid", theme="irrigation_theme", order=1, className="", visible=True, disabled=False),
+    canvas_nodes = [ID_TICK, ID_SETTINGS, ID_SUBSCRIBE_TICK, ID_SUBSCRIBE,
+                    ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI]
+    nodes = [
+        node(ID_CANVAS, "group", z=FLOW_ID, style=CANVAS_STYLE, nodes=canvas_nodes,
+             x=74, y=39, w=1502, h=322),
+        node(ID_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh safety and settings", props=[{"p":"payload"}], repeat="5", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=720, y=80, wires=[[ID_SETTINGS]]),
+        node(ID_SETTINGS, "function", z=FLOW_ID, g=ID_CANVAS, name="Irrigation settings — edit limits here", func=SETTINGS, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=860, y=140, wires=[[ID_CONTROL]]),
+        node(ID_SUBSCRIBE_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh ChirpStack subscription", props=[{"p":"payload"}], repeat="", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=250, y=100, wires=[[ID_SUBSCRIBE]]),
+        node(ID_SUBSCRIBE, "function", z=FLOW_ID, g=ID_CANVAS, name="Subscribe to configured ChirpStack application", func=SUBSCRIBE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=400, y=160, wires=[[ID_MQTT_IN]]),
+        node(ID_MQTT_IN, "mqtt in", z=FLOW_ID, g=ID_CANVAS, name="All six ChirpStack uplinks", topic="", qos="0", datatype="auto-detect", broker=BROKER, nl=False, rap=True, rh=0, inputs=1, x=730, y=220, wires=[[ID_CONTROL]]),
+        node(ID_STATUS, "status", z=FLOW_ID, g=ID_CANVAS, name="MQTT connection", scope=[ID_MQTT_IN, ID_MQTT_OUT], x=710, y=300, wires=[[ID_CONTROL]]),
+        node(ID_CONTROL, "function", z=FLOW_ID, g=ID_CANVAS, name="Safety checks and irrigation sequence", func=CONTROL, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1090, y=280, wires=[[ID_MQTT_OUT],[ID_UI]]),
+        node(ID_MQTT_OUT, "mqtt out", z=FLOW_ID, g=ID_CANVAS, name="ChirpStack downlinks", topic="", qos="", retain="", respTopic="", contentType="", userProps="", correl="", expiry="", broker=BROKER, x=1410, y=240, wires=[]),
+        node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="17", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_CONTROL]]),
+        node(GROUP, "ui-group", z=FLOW_ID, name="Irrigation", page=PAGE, width="12", height="1", order=1, showTitle=False, className="", visible="true", disabled="false", groupType="default"),
+        node(PAGE, "ui-page", z=FLOW_ID, name="Irrigation", ui=UI_BASE, path="/irrigation", icon="water", layout="grid", theme=UI_THEME, breakpoints=BREAKPOINTS, order=4, className="", visible=True, disabled=False),
+        # Shared singletons, shipped so a fresh canvas gets them. Their ids match
+        # what the workspace owns, so the import reuses or replaces that node
+        # rather than adding another base or theme.
+        node(UI_BASE, "ui-base", name="My Dashboard", path="/dashboard", appIcon="", includeClientData=True, acceptsClientConfig=["ui-notification", "ui-control"], showPathInSidebar=False, headerContent="page", navigationStyle="fixed", titleBarStyle="default", showReconnectNotification=True, notificationDisplayTime=1, showDisconnectNotification=True, allowInstall=True),
+        node(UI_THEME, "ui-theme", name="MyTheme", colors={"surface": "#ffffff", "primary": "#0094ce", "bgPage": "#eeeeee", "groupBg": "#ffffff", "groupOutline": "#cccccc"}, sizes={"density": "default", "pagePadding": "12px", "groupGap": "12px", "groupBorderRadius": "4px", "widgetGap": "12px"}),
+        node(ID_GLOBAL_CONFIG, "global-config", env=[], modules={"@flowfuse/node-red-dashboard": "1.30.2"}),
     ]
-    source = json.loads((ROOT / "examples/PumpControl/include/pump_control_dashboard2_flow.json").read_text(encoding="utf-8"))
-    for old_type, new_id in [("ui-base", "irrigation_base"), ("ui-theme", "irrigation_theme"), ("ui-breakpoint", "irrigation_breakpoint")]:
-        original = next((x for x in source if x.get("type") == old_type), None)
-        if original:
-            clone = {**original, "id": new_id}
-            if old_type == "ui-base":
-                clone["name"] = "Irrigation dashboard"
-                clone["path"] = "/irrigation-dashboard"
-            nodes.append(clone)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(nodes, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(OUTPUT)

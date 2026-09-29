@@ -10,6 +10,17 @@
 #define PCV_LORAWAN_MIN_INTERVAL_SECONDS 10 // 60
 #endif
 
+// While a valve is open the node reports on this fixed short cadence instead of
+// the configured interval, mirroring PumpControl's running cadence: an open valve
+// is passing water, and in Class A a downlink can only arrive in the RX window
+// after an uplink, so this is also the worst-case delay before a close command
+// reaches the valve. Deliberately below PCV_LORAWAN_MIN_INTERVAL_SECONDS, which
+// bounds what an operator may configure, not what the firmware may do; the uplink
+// keeps reporting the configured interval.
+#ifndef PCV_LORAWAN_OPEN_INTERVAL_SECONDS
+#define PCV_LORAWAN_OPEN_INTERVAL_SECONDS 15
+#endif
+
 #ifndef PCV_LORAWAN_NVS_NAMESPACE
 #define PCV_LORAWAN_NVS_NAMESPACE "pcv_node"
 #endif
@@ -118,6 +129,8 @@ inline constexpr uint32_t DEFAULT_REPORT_INTERVAL_SECONDS =
     PCV_LORAWAN_DEFAULT_INTERVAL_SECONDS;
 inline constexpr uint32_t MIN_REPORT_INTERVAL_SECONDS =
     PCV_LORAWAN_MIN_INTERVAL_SECONDS;
+inline constexpr uint32_t VALVE_OPEN_REPORT_INTERVAL_SECONDS =
+    PCV_LORAWAN_OPEN_INTERVAL_SECONDS;
 inline constexpr uint32_t MAX_REPORT_INTERVAL_SECONDS =
     24UL * 60UL * 60UL;
 inline constexpr uint32_t JOIN_RETRY_INTERVAL_MS = 60UL * 1000UL;
