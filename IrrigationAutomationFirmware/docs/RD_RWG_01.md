@@ -13,8 +13,11 @@ the installed unit's range, construction or ingress-protection rating.
 - Section 4, p. 2: RS485 output; supply **12-36 VDC**, typical 24 V;
   stated accuracy 0.2%; medium temperature -20 to 75 degrees C and ambient
   temperature -30 to 80 degrees C.
-- The range line on p. 2 says `0~10meters (-0.1~0~60Mpa)`. This mixes level
-  and pressure-family ranges; it does not establish a specific purchased range.
+- The range line on p. 2 says `0~10meters (-0.1~0~60Mpa)`: the level range is
+  **0-10 m**, with the parenthetical being the pressure family's range, not a
+  second level span. Read as the manual's stated level range. The purchased
+  unit's own span is normally on its nameplate and in `0x0005`/`0x0006`, so
+  confirm it there rather than from this line alone.
 - Section 5, p. 3: the drawing shows **blue = supply positive, black = supply
   negative, red = RS485 A, white = RS485 B**. Verify the actual cable against
   its supplier markings before using these colors as a wiring instruction.
@@ -63,7 +66,11 @@ and [implementation](../examples/WaterLevel/src/main.cpp) currently use:
 - UART2 RX GPIO16 / TX GPIO17, 9600 8N1, unit 1, automatic RS485 direction;
 - separate function-03 reads of unit, decimals and measurement;
 - signed decoding and conversion to depth using water density 1000 kg/m3
-  and gravity 9.81 m/s2, with **5 m** used as the project's percentage range;
+  and gravity 9.81 m/s2, with **5 m** used as the project's percentage range.
+  This disagrees with the manual's 0-10 m level range (see above), so the
+  percentage is reported against an unconfirmed span and reads **half** the
+  true fill if the installed unit is 10 m. `RANGE_METERS` in
+  `WaterLevelConfig.h` is the single place to change it;
 - fallback unit 7 (mH2O) and three decimals if metadata reads fail or are
   invalid. A successful value read can therefore produce telemetry based on
   assumed metadata; it is not proof that the fallback matches the sensor.
@@ -79,8 +86,18 @@ manual and usage illustration alone do not establish commissioning results.
 
 ## Unresolved items
 
-- Confirm installed model/range, pressure reference type and cable colors;
-  reconcile the manual's range wording with the project's 5 m percentage scale.
+- **Before production, settle the percentage range for the installed sensor and
+  the existing pool.** Two questions, and `RANGE_METERS` is the only place they
+  are answered: (a) the installed unit's span — the manual states 0-10 m, so
+  the code's 5 m is unconfirmed and halves `levelPercent` if the unit is 10 m;
+  and (b) what **100 %** should mean for this pool — the sensor's full span, or
+  the pool's filled depth at the probe. A pool shallower than the sensor's
+  range would never reach 100 % under the span reading, so pick deliberately
+  rather than inheriting the 5 m default. Only `levelPercent` is affected:
+  `depthMeters` and `pressureBar` are measured values and neither
+  `updateLoadControl()` nor anything physical depends on the percentage (the
+  level argument at `main.cpp:222` is commented out).
+- Confirm installed model/range, pressure reference type and cable colors.
 - Capture unit, decimals, range endpoints, address and baud from the real device;
   compare readings at known depths, including the zero reference.
 - Verify voltage at the sensor under load: the manual's minimum is 12 V,

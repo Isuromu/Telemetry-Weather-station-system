@@ -2,8 +2,11 @@
 
 #include <stdint.h>
 
+// Fallback for a build that does not set the flag, kept short so bench work
+// does not wait a quarter of an hour per uplink. The deployment interval is set
+// by -D WATER_LEVEL_SLEEP_SECONDS in platformio.ini.
 #ifndef WATER_LEVEL_SLEEP_SECONDS
-#define WATER_LEVEL_SLEEP_SECONDS 10 // fixme: 900
+#define WATER_LEVEL_SLEEP_SECONDS 10
 #endif
 
 namespace irrigation::water_level::config {
@@ -50,6 +53,11 @@ inline constexpr uint16_t MODBUS_REGISTER_COUNT = 0x0001;
 inline constexpr int16_t DEFAULT_UNIT = 7;
 inline constexpr int16_t DEFAULT_DECIMALS = 3;
 
+// Span that levelPercent is a percentage of. Unconfirmed: the sensor manual
+// states a 0-10 m level range, so the true fill reads half this value if the
+// installed unit is 10 m. Set it for the installed sensor and for the pool it
+// serves before production; see docs/RD_RWG_01.md. Depth and pressure are
+// measured and do not depend on it, and neither does the load output.
 inline constexpr float RANGE_METERS = 5.0F;
 inline constexpr float WATER_DENSITY_KG_M3 = 1000.0F;
 inline constexpr float GRAVITY_M_S2 = 9.81F;
@@ -67,6 +75,6 @@ inline constexpr char NVS_NONCES_KEY[] = "nonces";
 
 static_assert(lorawan::SLEEP_SECONDS >= 10 &&
                   lorawan::SLEEP_SECONDS <= 24UL * 60UL * 60UL,
-              "WaterLevel sleep interval must be 60..86400 seconds.");
+              "WaterLevel sleep interval must be 10..86400 seconds.");
 
 }  // namespace irrigation::water_level::config

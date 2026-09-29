@@ -204,12 +204,18 @@ every complete TX/RX frame. Its TUF profile now uses the hardware-confirmed
 
 The separately imported reservoir-monitoring firmware is available as the
 `water_level` PlatformIO target under `examples/WaterLevel`. It retains the
-RD-RWG-01 Modbus measurement, five-metre depth conversion, battery calculation,
+RD-RWG-01 Modbus measurement, an unconfirmed five-metre percentage range (the
+sensor manual states 0-10 m; must be set for the installed unit and the existing
+pool before production), battery calculation,
 and GPIO27 threshold-controlled load behavior from `suv.zip`. Its added network
 transport is telemetry-only LoRaWAN Class A on FPort 40. Each wake measures,
 applies the local load rule, transmits, completes RX1/RX2, and deep-sleeps while
-holding the selected load-output state. The current 900-second sleep interval
-is provisional. WaterLevel has its own ignored OTAA credentials and does not
+holding the selected load-output state. The sleep interval comes from
+`-D WATER_LEVEL_SLEEP_SECONDS` on the `water_level` target; the 900-second
+deployment value is prepared but commented out, so the build still sleeps for
+the header fallback of 10 seconds. The dashboard flow's freshness limit is
+derived from the interval at generation time, so switching the flag requires
+regenerating the flow. WaterLevel has its own ignored OTAA credentials and does not
 reuse pressure-valve credentials or command protocols.
 
 ## Preliminary production PCB planning

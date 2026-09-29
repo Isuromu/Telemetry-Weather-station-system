@@ -1,0 +1,513 @@
+[
+    {
+        "id": "sc_wl_group_flow",
+        "type": "group",
+        "z": "sc_wl_tab",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#767676"
+        },
+        "nodes": [
+            "sc_wl_inject",
+            "sc_wl_subscribe",
+            "sc_wl_mqtt_in",
+            "sc_wl_decode",
+            "sc_wl_ui",
+            "sc_wl_stale_inject",
+            "sc_wl_stale",
+            "sc_wl_zoom",
+            "sc_wl_chart_depth",
+            "sc_wl_chart_pressure",
+            "sc_wl_zoom_depth",
+            "sc_wl_zoom_pressure"
+        ],
+        "x": 44,
+        "y": 39,
+        "w": 1652,
+        "h": 482
+    },
+    {
+        "id": "sc_wl_inject",
+        "type": "inject",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "Refresh subscription",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 170,
+        "y": 160,
+        "wires": [
+            [
+                "sc_wl_subscribe"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_subscribe",
+        "type": "function",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "Subscribe to configured ChirpStack application",
+        "func": "// Subscribe to the WaterLevel node's ChirpStack events. The application ID and\n// DevEUI come from the same environment variables the IntegratedDashboard uses,\n// so one settings.js block configures both flows.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nconst eui = String(env.get('WATER_DEV_EUI') || '').toLowerCase();\nconst state = Object.assign({}, flow.get('water_state') || {});\nconst snapshot = {payload:{kind:'state', state:state}};\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:'red',shape:'ring',text:'set IRRIGATION_APP_ID and WATER_DEV_EUI'});\n  state.config_error = 'Set IRRIGATION_APP_ID and WATER_DEV_EUI in the Node-RED environment, then redeploy.';\n  flow.set('water_state', state);\n  return [null, {payload:{kind:'state', state:state}}];\n}\nconst topic = 'application/' + app + '/device/' + eui + '/event/+';\nstate.config_error = '';\nflow.set('water_state', state);\nif (context.get('topic') === topic) return [null, null];\ncontext.set('topic', topic);\nnode.status({fill:'green',shape:'dot',text:topic});\nreturn [{action:'subscribe', topic:topic, qos:0}, {payload:{kind:'state', state:state}}];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 450,
+        "y": 160,
+        "wires": [
+            [
+                "sc_wl_mqtt_in"
+            ],
+            [
+                "sc_wl_ui"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_mqtt_in",
+        "type": "mqtt in",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "ChirpStack events",
+        "topic": "",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "ae0178f3742ff530",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 1,
+        "x": 760,
+        "y": 100,
+        "wires": [
+            [
+                "sc_wl_decode"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_decode",
+        "type": "function",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "Filter and decode WaterLevel events",
+        "func": "// WaterLevel Class A reservoir node, telemetry only.\n// FPort 40, protocol v1, ten bytes. The firmware deliberately ignores\n// application downlinks, so this flow never publishes one.\n// Outputs: 0 state card, 1 water depth chart, 2 pressure chart.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nconst eui = String(env.get('WATER_DEV_EUI') || '').toLowerCase();\nconst parts = String(msg.topic || '').toLowerCase().split('/');\nif (parts.length !== 6 || parts[0] !== 'application' || parts[2] !== 'device' ||\n    parts[4] !== 'event' || parts[1] !== app || parts[3] !== eui) return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString('utf8'));\n  else if (typeof event === 'string') event = JSON.parse(event);\n} catch (err) { node.warn('Invalid ChirpStack JSON: ' + err.message); return null; }\nif (!event || typeof event !== 'object') return null;\nconst kind = parts[5];\nconst num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;\nconst arrivedAt = Date.now();\nconst s = Object.assign({}, flow.get('water_state') || {});\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nconst card = () => [{payload:{kind:'state', state:s}}, null, null];\nif (kind === 'up') {\n  if (event.fPort !== 40) return null;\n  let d = event.object;\n  let fromRaw = false;\n  if (!d || typeof d !== 'object' ||\n      !Object.prototype.hasOwnProperty.call(d, 'pressure_valid')) {\n    // The ChirpStack codec is not installed or returned an error; decode the\n    // documented ten-byte v1 payload instead.\n    fromRaw = true;\n    let b = null;\n    try { b = Buffer.from(event.data || '', 'base64'); } catch (_) { b = null; }\n    if (!b || b.length !== 10 || b[0] !== 1) {\n      s.decode_error = 'FPort 40 needs the WaterLevel codec object or a ten-byte v1 payload.';\n      return card();\n    }\n    const valid = !!(b[1] & 0x01);\n    d = {\n      protocol_version: b[0],\n      pressure_valid: valid,\n      load_on: !!(b[1] & 0x02),\n      battery_voltage_v: b.readUInt16BE(2) / 1000,\n      pressure_bar: valid ? b.readInt16BE(4) / 1000 : null,\n      depth_m: valid ? b.readUInt16BE(6) / 1000 : null,\n      water_level_percent: valid ? b.readUInt16BE(8) / 10 : null\n    };\n  }\n  s.decode_error = '';\n  s.config_error = '';\n  // Surface which path decoded this uplink: \"codec\" is normal, anything else\n  // means the ChirpStack device profile is not decoding for us.\n  s.decoded_from = fromRaw ? 'raw payload' : 'codec';\n  s.protocol_version = num(d.protocol_version);\n  s.pressure_valid = d.pressure_valid === true;\n  s.load_on = d.load_on === true;\n  s.battery_voltage_v = num(d.battery_voltage_v);\n  // Depth, level and pressure are only meaningful while the sensor reports valid.\n  s.pressure_bar = s.pressure_valid ? num(d.pressure_bar) : null;\n  s.depth_m = s.pressure_valid ? num(d.depth_m) : null;\n  s.water_level_percent = s.pressure_valid ? num(d.water_level_percent) : null;\n  s.depth_cm = s.depth_m === null ? null : s.depth_m * 100;\n  s.last_seen = event.time || new Date(arrivedAt).toISOString();\n  // Only the telemetry uplink counts as a report. A join, log or status event\n  // proves the radio is up but is not the reading this page waits for.\n  s.last_seen_ms = arrivedAt;\n  s.stale = false;\n  s.f_port = event.fPort;\n  s.f_cnt = event.fCnt == null ? null : event.fCnt;\n  s.uplink_count = (s.uplink_count || 0) + 1;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) {\n    const best = rx.reduce((a, b) => Number(b.snr) > Number(a.snr) ? b : a);\n    s.rssi = num(best.rssi);\n    s.snr = num(best.snr);\n    s.gateway_id = best.gatewayId || '';\n  }\n  const lora = (((event.txInfo || {}).modulation || {}).lora || {});\n  s.sf = num(lora.spreadingFactor);\n  s.dr = num(event.dr);\n  s.frequency_hz = num((event.txInfo || {}).frequency);\n  node.status({fill: s.pressure_valid ? 'green' : 'yellow', shape:'dot',\n    text: s.pressure_valid ? 'level ' + s.water_level_percent + ' %' : 'level sensor invalid'});\n  flow.set('water_state', s);\n  // Only a valid reading is charted. A null point would plot a gap the sensor\n  // never reported, so gaps stay gaps. waterMetric routes the point to the\n  // right chart through the chart time zoom function.\n  const point = (metric, series, value) =>\n    value === null ? null : {waterMetric:metric, topic:series, payload:value};\n  return [\n    {payload:{kind:'state', state:s}},\n    point('depth', 'Water depth', s.depth_cm),\n    point('pressure', 'Pressure', s.pressure_bar)\n  ];\n} else if (kind === 'join') { s.network_join = s.last_event_time; }\nelse if (kind === 'txack') { s.network_txack = 'Gateway transmission acknowledged'; }\nelse if (kind === 'ack') { s.network_ack = event.acknowledged === true ? 'Confirmed uplink ACK' : 'Uplink not acknowledged'; }\nelse if (kind === 'log') { s.network_log = event.description || event.code || 'Device log'; }\nelse if (kind === 'status') { s.network_status = event.battery == null ? 'Device status received' : 'Network battery ' + event.battery; }\nelse return null;\nflow.set('water_state', s);\nreturn card();",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1000,
+        "y": 180,
+        "wires": [
+            [
+                "sc_wl_ui"
+            ],
+            [
+                "sc_wl_zoom"
+            ],
+            [
+                "sc_wl_zoom"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_stale_inject",
+        "type": "inject",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "Refresh and check staleness",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "15",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 190,
+        "y": 300,
+        "wires": [
+            [
+                "sc_wl_stale"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_stale",
+        "type": "function",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "Check stale status",
+        "func": "// The node reports once per wake cycle and then deep-sleeps, so age is\n// measured from when an uplink reached Node-RED, not from the gateway\n// timestamp. The limit tracks the firmware's sleep interval (2 x it, floor\n// 60 s), so it tightens when the interval is short and never trips on one\n// lost uplink.\nconst STALE_AFTER_SECONDS = 60;\nconst s = Object.assign({}, flow.get('water_state') || {});\ns.stale_after_seconds = STALE_AFTER_SECONDS;\ns.stale = !s.last_seen_ms || Date.now() - s.last_seen_ms > STALE_AFTER_SECONDS * 1000;\nflow.set('water_state', s);\nmsg.payload = {kind:'state', state:s};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 300,
+        "wires": [
+            [
+                "sc_wl_ui"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_zoom",
+        "type": "function",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "name": "WaterLevel chart time zoom",
+        "func": "// Per-chart time window. + shows a shorter span; - shows a longer span.\nconst windows = [\n  {label:'30 min',ms:1800000}, {label:'1 h',ms:3600000},\n  {label:'3 h',ms:10800000}, {label:'6 h',ms:21600000},\n  {label:'12 h',ms:43200000}, {label:'24 h',ms:86400000}\n];\nconst metrics = {depth:0, pressure:1};\nconst metric = msg.waterMetric || (msg.payload && msg.payload.metric);\nif (!Object.prototype.hasOwnProperty.call(metrics, metric)) return null;\nconst slot = metrics[metric];\nconst key = 'water_zoom_' + metric;\nlet index = Number(flow.get(key));\nif (!Number.isInteger(index) || index < 0 || index >= windows.length) index = 3;\nconst control = msg.payload && msg.payload.kind === 'zoom';\nif (control) {\n  if (msg.payload.direction !== 1 && msg.payload.direction !== -1) return null;\n  index = Math.max(0, Math.min(windows.length - 1, index - msg.payload.direction));\n  flow.set(key, index);\n} else if (typeof msg.payload !== 'number' || !Number.isFinite(msg.payload)) return null;\nconst now = Date.now();\nconst axis = {ui_update:{chartOptions:{xAxis:{min:now - windows[index].ms, max:now}}}};\nconst out = Array(4).fill(null);\nout[slot] = control ? axis : [axis, {topic:msg.topic, payload:msg.payload}];\nif (control) out[slot + 2] = {payload:{kind:'zoom_state', label:windows[index].label}};\nreturn out;",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1250,
+        "y": 420,
+        "wires": [
+            [
+                "sc_wl_chart_depth"
+            ],
+            [
+                "sc_wl_chart_pressure"
+            ],
+            [
+                "sc_wl_zoom_depth"
+            ],
+            [
+                "sc_wl_zoom_pressure"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_ui",
+        "type": "ui-template",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "group": "0dcf231c222554fc",
+        "page": "",
+        "ui": "",
+        "name": "WaterLevel telemetry",
+        "order": 1,
+        "width": "8",
+        "height": "9",
+        "format": "<template>\n<div class=\"wl\">\n  <div class=\"wl-head\">\n    <div><strong>Water Level Node</strong><small>Class A reservoir monitor &middot; FPort 40</small></div>\n    <span class=\"wl-pill\" :class=\"pill.cls\">{{ pill.text }}</span>\n  </div>\n  <div class=\"wl-stale\" v-if=\"state.stale && state.last_seen\">\n    No uplink for {{ ageText }} (limit {{ show(state.stale_after_seconds, ' s') }}). Last report {{ local(state.last_seen) }}.\n    The node sleeps between reports, so a long gap can be normal &mdash; check the device, its sleep interval and ChirpStack before treating the readings below as current.\n  </div>\n  <div class=\"wl-grid\" :class=\"{stale: state.stale}\">\n    <div><small>Water level</small><b>{{ show(state.water_level_percent, ' %') }}</b></div>\n    <div><small>Depth</small><b>{{ show(state.depth_cm, ' cm') }}</b></div>\n    <div><small>Pressure</small><b>{{ show(state.pressure_bar, ' bar') }}</b></div>\n    <div><small>Battery</small><b>{{ show(state.battery_voltage_v, ' V') }}</b></div>\n    <div><small>Load output</small><b>{{ state.load_on === undefined ? '-' : state.load_on ? 'ON' : 'OFF' }}</b></div>\n    <div><small>Signal</small><b>{{ signalText }}</b></div>\n  </div>\n  <div class=\"wl-alert\" v-if=\"state.pressure_valid === false && !state.stale\">Level sensor reported invalid; depth, water level and pressure are not published. The charts show no new points for this uplink.</div>\n  <div class=\"wl-note\">Sensor range 0&ndash;5 m. The load output currently follows battery only: ON at {{ batteryMinimum }} V or more. The level threshold is commented out in the firmware.</div>\n  <div class=\"wl-footer\">\n    <div><b>Last uplink:</b> {{ local(state.last_seen) }} <template v-if=\"state.last_seen_ms\">({{ ageText }} ago)</template> | <b>Freshness limit:</b> {{ show(state.stale_after_seconds, ' s') }} | <b>Uplinks:</b> {{ show(state.uplink_count) }} | <b>FCnt:</b> {{ show(state.f_cnt) }} | <b>DR:</b> {{ show(state.dr) }} | <b>SF:</b> {{ show(state.sf) }}</div>\n    <div><b>Gateway:</b> {{ state.gateway_id || '-' }} | <b>Frequency:</b> {{ show(state.frequency_hz, ' Hz') }} | <b>Protocol:</b> {{ show(state.protocol_version) }} | <b>Decoded by:</b> {{ state.decoded_from || '-' }}</div>\n    <div><b>Last event:</b> {{ state.last_event || '-' }} &middot; {{ local(state.last_event_time) }}</div>\n    <div v-if=\"state.network_join\"><b>Join:</b> {{ local(state.network_join) }}</div>\n    <div v-if=\"state.network_txack\">{{ state.network_txack }}</div>\n    <div v-if=\"state.network_ack\">{{ state.network_ack }}</div>\n    <div v-if=\"state.network_log\"><b>Log:</b> {{ state.network_log }}</div>\n    <div v-if=\"state.network_status\">{{ state.network_status }}</div>\n  </div>\n  <div class=\"wl-alert\" v-if=\"state.config_error\">{{ state.config_error }}</div>\n  <div class=\"wl-alert\" v-if=\"state.decode_error\">{{ state.decode_error }}</div>\n</div>\n</template>\n<script>\nexport default {\n  data() { return {state:{stale:true},batteryMinimum:11.5,now:Date.now(),timer:null}; },\n  computed: {\n    ageSeconds() {\n      if (!this.state.last_seen_ms) return null;\n      return Math.max(0, Math.round((this.now - this.state.last_seen_ms) / 1000));\n    },\n    ageText() {\n      const s = this.ageSeconds;\n      if (s === null) return '-';\n      if (s < 60) return s + ' s';\n      const m = Math.floor(s / 60);\n      if (m < 60) return m + ' min';\n      return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';\n    },\n    // Link quality is a live property: a reading from before the gap says\n    // nothing about the radio now.\n    signalText() {\n      if (this.state.stale) return 'Unknown';\n      return this.show(this.state.rssi, ' dBm') + ' / ' + this.show(this.state.snr, ' dB');\n    },\n    pill() {\n      if (this.state.config_error) return {cls:'bad',text:'Not configured'};\n      if (!this.state.last_seen) return {cls:'stale',text:'Waiting for uplink'};\n      if (this.state.stale) return {cls:'stale',text:'No recent uplink'};\n      if (this.state.pressure_valid !== true) return {cls:'bad',text:'Level sensor invalid'};\n      return {cls:'ok',text:'Level ' + this.show(this.state.water_level_percent, ' %')};\n    }\n  },\n  watch: {msg: {handler(m) { if (m && m.payload && m.payload.kind === 'state') this.state = m.payload.state || {}; }, immediate:true}},\n  // Re-render every second so the age grows between the watchdog's pushes.\n  mounted() { this.timer = setInterval(() => { this.now = Date.now(); }, 1000); },\n  beforeUnmount() { if (this.timer) clearInterval(this.timer); },\n  methods: {\n    show(v,suffix='') { return v === null || v === undefined || v === '' ? '-' : String(v) + suffix; },\n    local(iso) { if (!iso) return '-'; const d = new Date(iso); return isNaN(d.getTime()) ? '-' : d.toLocaleString(); }\n  }\n}\n</script>\n<style>\n.wl{padding:8px}.wl-head{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:1.15rem}.wl-head small{display:block;color:#667;font-size:.8rem}.wl-pill{padding:6px 12px;border-radius:20px;background:#e5e7eb;font-size:.85rem;white-space:nowrap}.wl-pill.ok{background:#dcfce7;color:#166534}.wl-pill.bad{background:#fecaca;color:#991b1b}.wl-pill.stale{background:#fef3c7;color:#92400e}.wl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:16px 0}.wl-grid>div{padding:12px;border:1px solid #ccd7df;border-radius:8px}.wl-grid.stale{opacity:.5}.wl-grid small{display:block;color:#566}.wl-grid b{font-size:1.3rem}.wl-note{border-top:1px solid #ccd7df;padding-top:10px;color:#566;font-size:.82rem}.wl-footer{font-size:.84rem;line-height:1.7;border-top:1px solid #ccd7df;margin-top:12px;padding-top:10px}.wl-alert{background:#b3261e;color:#fff;border-radius:5px;padding:8px;margin:8px 0}.wl-stale{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:5px;padding:8px;margin:8px 0;font-size:.85rem}\n</style>",
+        "head": "",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1250,
+        "y": 180,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "sc_wl_chart_depth",
+        "type": "ui-chart",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "group": "18fb832a66d8775e",
+        "name": "Water depth history",
+        "label": "Water depth (cm)",
+        "order": 1,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 1250,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "sc_wl_zoom_depth",
+        "type": "ui-template",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "group": "18fb832a66d8775e",
+        "page": "",
+        "ui": "",
+        "name": "DEPTH chart zoom",
+        "order": 2,
+        "width": "1",
+        "height": "4",
+        "format": "<template>\n<div class=\"wl-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"depth\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.wl-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.wl-zoom span{text-align:center;white-space:nowrap}\n.wl-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.wl-zoom button:hover{background:#e3edf4}\n</style>",
+        "head": "",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1560,
+        "y": 340,
+        "wires": [
+            [
+                "sc_wl_zoom"
+            ]
+        ]
+    },
+    {
+        "id": "sc_wl_chart_pressure",
+        "type": "ui-chart",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "group": "18fb832a66d8775e",
+        "name": "Pressure history",
+        "label": "Pressure (bar)",
+        "order": 3,
+        "chartType": "line",
+        "category": "topic",
+        "categoryType": "msg",
+        "xAxisLabel": "",
+        "xAxisProperty": "",
+        "xAxisPropertyType": "timestamp",
+        "xAxisType": "time",
+        "xAxisFormat": "",
+        "xAxisFormatType": "{HH}:{mm}",
+        "xmin": "",
+        "xmax": "",
+        "yAxisLabel": "",
+        "yAxisProperty": "payload",
+        "yAxisPropertyType": "msg",
+        "ymin": "",
+        "ymax": "",
+        "bins": "",
+        "action": "append",
+        "stackSeries": false,
+        "pointShape": "circle",
+        "pointRadius": "",
+        "showLegend": false,
+        "removeOlder": "24",
+        "removeOlderUnit": "60",
+        "removeOlderPoints": "",
+        "colors": [
+            "#1f77b4"
+        ],
+        "textColor": [
+            "#666666"
+        ],
+        "textColorDefault": true,
+        "gridColor": [
+            "#e5e5e5"
+        ],
+        "gridColorDefault": true,
+        "width": "3",
+        "height": "4",
+        "className": "",
+        "interpolation": "linear",
+        "x": 1250,
+        "y": 500,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "sc_wl_zoom_pressure",
+        "type": "ui-template",
+        "z": "sc_wl_tab",
+        "g": "sc_wl_group_flow",
+        "group": "18fb832a66d8775e",
+        "page": "",
+        "ui": "",
+        "name": "PRESSURE chart zoom",
+        "order": 4,
+        "width": "1",
+        "height": "4",
+        "format": "<template>\n<div class=\"wl-zoom\">\n  <span>View {{ msg && msg.payload && msg.payload.kind === 'zoom_state' ? msg.payload.label : '6 h' }}</span>\n  <button type=\"button\" title=\"Zoom in: shorter time range\" aria-label=\"Zoom in\" @click=\"zoom(1)\">+</button>\n  <button type=\"button\" title=\"Zoom out: longer time range\" aria-label=\"Zoom out\" @click=\"zoom(-1)\">&minus;</button>\n</div>\n</template>\n<script>\nexport default {\n  methods: {\n    zoom(direction) {\n      this.send({payload:{kind:\"zoom\",metric:\"pressure\",direction}});\n    }\n  }\n}\n</script>\n<style>\n.wl-zoom{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#566;font-size:.72rem}\n.wl-zoom span{text-align:center;white-space:nowrap}\n.wl-zoom button{width:27px;height:25px;padding:0;border:1px solid #b7c4ce;border-radius:5px;background:#f5f8fa;color:#203447;font-size:17px;line-height:1;cursor:pointer}\n.wl-zoom button:hover{background:#e3edf4}\n</style>",
+        "head": "",
+        "storeOutMessages": false,
+        "passthru": false,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 1560,
+        "y": 500,
+        "wires": [
+            [
+                "sc_wl_zoom"
+            ]
+        ]
+    },
+    {
+        "id": "0dcf231c222554fc",
+        "type": "ui-group",
+        "z": "sc_wl_tab",
+        "name": "Water Level",
+        "page": "334b707b21a5ce0a",
+        "width": "8",
+        "height": 8,
+        "order": 1,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "18fb832a66d8775e",
+        "type": "ui-group",
+        "z": "sc_wl_tab",
+        "name": "Water Level history",
+        "page": "334b707b21a5ce0a",
+        "width": "4",
+        "height": 8,
+        "order": 2,
+        "showTitle": true,
+        "className": "",
+        "visible": "true",
+        "disabled": "false",
+        "groupType": "default"
+    },
+    {
+        "id": "334b707b21a5ce0a",
+        "type": "ui-page",
+        "z": "sc_wl_tab",
+        "name": "Water Level",
+        "ui": "f53e93e9ba219e63",
+        "path": "/water-level",
+        "icon": "mdi-water-percent",
+        "layout": "grid",
+        "theme": "e49416861823a329",
+        "breakpoints": [
+            {
+                "name": "Default",
+                "px": "0",
+                "cols": "3"
+            },
+            {
+                "name": "Tablet",
+                "px": "576",
+                "cols": "6"
+            },
+            {
+                "name": "Small Desktop",
+                "px": "768",
+                "cols": "9"
+            },
+            {
+                "name": "Desktop",
+                "px": "1024",
+                "cols": "12"
+            }
+        ],
+        "order": 2,
+        "className": "",
+        "visible": "true",
+        "disabled": "false"
+    },
+    {
+        "id": "f53e93e9ba219e63",
+        "type": "ui-base",
+        "name": "My Dashboard",
+        "path": "/dashboard",
+        "appIcon": "",
+        "includeClientData": true,
+        "acceptsClientConfig": [
+            "ui-notification",
+            "ui-control"
+        ],
+        "showPathInSidebar": false,
+        "headerContent": "page",
+        "navigationStyle": "fixed",
+        "titleBarStyle": "default",
+        "showReconnectNotification": true,
+        "notificationDisplayTime": 1,
+        "showDisconnectNotification": true,
+        "allowInstall": true
+    },
+    {
+        "id": "e49416861823a329",
+        "type": "ui-theme",
+        "name": "MyTheme",
+        "colors": {
+            "surface": "#ffffff",
+            "primary": "#0094ce",
+            "bgPage": "#eeeeee",
+            "groupBg": "#ffffff",
+            "groupOutline": "#cccccc"
+        },
+        "sizes": {
+            "density": "default",
+            "pagePadding": "12px",
+            "groupGap": "12px",
+            "groupBorderRadius": "4px",
+            "widgetGap": "12px"
+        }
+    },
+    {
+        "id": "sc_wl_global_config",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@flowfuse/node-red-dashboard": "1.30.2"
+        }
+    }
+]
