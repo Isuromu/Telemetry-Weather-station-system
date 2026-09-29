@@ -107,6 +107,10 @@ unchanged until a new production-board firmware target is explicitly created.
 
 ## Hardware validation checklist
 
+The supplied [IrriRich reference](IRRIRICH_3W_SOLENOID.md) describes the regular
+3-way model despite its latch filename. It does not resolve the installed
+latching coil's model, pulse duration, current or OPEN/CLOSE polarity.
+
 - confirm GPIO27 active level against the BJT/P-MOSFET circuit;
 - keep and verify the installed 20 kOhm pull-downs on GPIO2 and GPIO15, and fit
   the required pull-down on GPIO27 power-gate control so reset cannot energize

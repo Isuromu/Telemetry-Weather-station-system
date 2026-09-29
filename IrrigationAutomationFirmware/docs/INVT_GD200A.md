@@ -1,10 +1,22 @@
 # INVT GD200A pump VFD
 
-## Status
+## Project status and hardware confirmation
 
 The planned production pump inverter is `GD200A-022G/030P-4`. The existing
 `DelixiCDIE100` integration remains active temporarily. The INVT library and
 example are staging-only and cannot control hardware yet.
+The planned model and code constants do not establish hardware commissioning;
+installed-unit identity and settings remain subject to the checks below.
+
+## Source selection
+
+Use [manual 2](references/INVT_GD200A/invt-gd200a-user-manual2.pdf):
+*Goodrive200A Series VFD*, English, 201908 (V2.4), document 66001-00342
+(edition information on PDF p. 179). Page references here are 1-based PDF pages.
+
+[Manual 1](references/INVT_GD200A/invt-gd200a-user-manual1.pdf) has a GD200A
+filename but its preface (PDF p. 2) identifies **Goodrive200**. Keep it as a
+related reference; do not assume its parameter definitions apply to GD200A.
 
 ## Confirmed manual facts
 
@@ -19,7 +31,9 @@ example are staging-only and cannot control hardware yet.
 - `P14.00` through `P14.06` contain serial communication settings and behavior.
 - The model is rated 22 kW/45 A in G mode or 30 kW/60 A in P mode.
 
-Primary protocol reference: INVT `GD200A Series VFD Manual`, Chapter 9.
+Source locations in manual 2: chapter 9, PDF pp. 143-146 for the control,
+status, identification and monitoring tables; pp. 38-39 for command/frequency
+sources; pp. 96-98 for P14 communication settings; p. 15 for model ratings.
 
 ## Open commissioning questions
 

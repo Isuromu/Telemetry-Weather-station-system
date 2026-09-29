@@ -4,6 +4,10 @@ This file records direct user clarifications made after the preserved Codex
 handoff was created. It is the current source of truth when it differs from the
 archived handoff package.
 
+For device-specific work, use the [hardware reference index](references/README.md)
+and the relevant summary before opening manual pages. Read the sections below
+that apply to the task, including later corrections to the same topic.
+
 ## System scope
 
 The irrigation automation project is a complex system with multiple distinct

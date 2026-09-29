@@ -1,11 +1,9 @@
 # TUF-2000M with TS-2 clamp-on transducers
 
-## Confirmed hardware and purpose
+## Hardware-confirmed installation and project purpose
 
 - Converter: TUF-2000M module type.
 - Transducers: TS-2 (small), clamp-on.
-- Documented pipe-size range: DN25-100.
-- Documented transducer temperature range: -30 to 90 degrees C.
 - Project purpose: obtain an on-demand water-flow measurement over RS485;
   continuous polling is not required.
 - Installed pipe marking: PVC-U W/P, 63 x 3 mm, PN10.
@@ -13,15 +11,21 @@
   calculated inside diameter, water, no liner, and V-method.
 - Reported M25 inner transducer spacing: 39.655 mm.
 
+These installation values are user/commissioning observations recorded in
+[current project context](CURRENT_PROJECT_CONTEXT.md#planned-sensor-transport).
+The supplied general manual, PDF p. 4, separately specifies TS-2 for DN25-100
+and -30 to 90 degrees C; these are manual ratings, not measured limits.
+
 The manuals distinguish volumetric flow rate from fluid velocity. The firmware
 therefore returns both values from one Modbus transaction:
 
 - flow rate in cubic metres per hour;
 - water velocity in metres per second.
 
-## Confirmed RS485 and Modbus RTU protocol
+## Manual facts: RS485 and Modbus RTU protocol
 
-The technical manual, section 7, confirms:
+The [technical manual](references/tuf-2000m_ts2/TUF-2000M_Technical_Manual_Modbus.pdf),
+section 7, PDF pp. 39-45, confirms:
 
 - isolated RS485 port;
 - selectable Modbus ASCII or Modbus RTU in M63; the factory default is ASCII,
@@ -40,7 +44,7 @@ The manual's RTU example reads documented `REG0001` through `REG0010` from unit
 
 This confirms that documented register numbers are one-based while the Modbus
 start address is zero-based: `REG0001` is requested as address `0x0000`.
-The installed meter's M46 address is confirmed as unit 1. Its M62 framing is
+**Hardware-confirmed:** the installed meter's M46 address is unit 1. Its M62 framing is
 confirmed as 9600 none 8 1 and M63 is confirmed as `MODBUS_RTU`.
 
 Registers used by the firmware:
@@ -58,7 +62,7 @@ Registers used by the firmware:
 | REG0115-0116 | `0x0072` | Positive accumulated volume | REAL4 | m3 |
 | REG0117-0118 | `0x0074` | Negative accumulated volume | REAL4 | m3 |
 
-## Raw Modbus RTU bench requests for unit 1
+## Project implementation and diagnostic requests
 
 These complete hexadecimal frames include the Modbus CRC in wire order
 (low byte first). A USB-RS485 program that appends CRC automatically must be
@@ -143,9 +147,9 @@ reset register. M37 can also enter a master erase sequence. The firmware and
 diagnostic utility therefore remain read-only toward TUF totalizers and do not
 simulate menu-key writes.
 
-## Confirmed terminals and menus
+## Manual facts: terminals and menus
 
-The TUF-2000M manual specifies an `8-36 VDC` supply at approximately 50 mA
+The TUF-2000M manual, PDF pp. 5 and 7, specifies an `8-36 VDC` supply at approximately 50 mA
 (`10-36 VAC` is also stated). Therefore the installed 12 V battery is within
 the documented DC input range; 24 V is a common nominal supply, not a minimum
 requirement. Confirm the actual voltage at the meter terminals under load and
@@ -178,7 +182,7 @@ Relevant menus:
 - M91: measured/calculated transit-time ratio; installation guidance gives an
   acceptable range of 97-103 percent.
 
-## Remaining activation data
+## Unresolved items and commissioning status
 
 The register map is implemented. M46 address 1, M62 9600 none 8 1, M63
 MODBUS_RTU, `LOW_WORD_FIRST` decoding, live flow/velocity, and the physical
@@ -191,7 +195,7 @@ The following still require validation:
 - measured power-on stabilization time and whether power cycling the meter is
   acceptable.
 
-## On-demand power strategy
+## Proposed on-demand power strategy (requires hardware validation)
 
 The supplied manual explicitly permits 8-36 VDC, so the meter can be supplied
 from a suitably protected and switched 12 V rail without a boost converter.
@@ -227,11 +231,11 @@ must be verified on the actual meter before adopting this strategy.
 
 ## Preserved sources
 
-- `references/tuf2000m_ts2/TUF-2000M_Technical_Manual_Modbus.pdf`
-- `references/tuf2000m_ts2/TUF-2000_Series_Ultrasonic_Flowmeter_User_Manual.pdf`
-- `references/tuf2000m_ts2/TUF-2000M_module.png`
-- `references/tuf2000m_ts2/TS-2_range.png`
-- `references/tuf2000m_ts2/TUF-2000M_TS-2_clamp_on.png`
+- [Technical Modbus manual](references/tuf-2000m_ts2/TUF-2000M_Technical_Manual_Modbus.pdf)
+- [General user manual](references/tuf-2000m_ts2/TUF-2000_Series_Ultrasonic_Flowmeter_User_Manual.pdf)
+- [Module image](references/tuf-2000m_ts2/TUF-2000M_module.png)
+- [TS-2 range image](references/tuf-2000m_ts2/TS-2_range.png)
+- [TS-2 clamp-on image](references/tuf-2000m_ts2/TUF-2000M_TS-2_clamp_on.png)
 
 SHA-256 hashes:
 

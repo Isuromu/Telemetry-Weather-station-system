@@ -132,9 +132,14 @@ erase the TUF-2000M internal accumulators. See
 
 ## Documentation
 
+- [Hardware manual index and reading guide](docs/references/README.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Board and peripheral pinout](docs/PINOUT.md)
 - [DELIXI CDI-E100 protocol](docs/DELIXI_CDI_E100.md)
+- [INVT GD200A reference and source selection](docs/INVT_GD200A.md)
+- [RD-RWG-01 level-sensor reference](docs/RD_RWG_01.md)
+- [Epever LS1024B controller reference](docs/EPEVER_LS1024B.md)
+- [IrriRich 3-way solenoid source and model distinction](docs/IRRIRICH_3W_SOLENOID.md)
 - [Grandfar pump profile](docs/GRANDFAR_2CP50_160B.md)
 - [Serial commands](docs/SERIAL_COMMANDS.md)
 - [Commissioning](docs/COMMISSIONING.md)

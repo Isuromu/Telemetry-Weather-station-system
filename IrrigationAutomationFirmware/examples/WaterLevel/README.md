@@ -4,6 +4,9 @@
 LoRaWAN Class A transport added around its existing measurement and load-control
 logic.
 
+Sensor manual facts, implemented settings and open hardware checks are separated
+in [RD-RWG-01 reference notes](../../docs/RD_RWG_01.md).
+
 Each wake cycle:
 
 1. reads the GPIO35 battery divider;

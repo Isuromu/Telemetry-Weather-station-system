@@ -1,9 +1,11 @@
 # DELIXI CDI-E100 Modbus driver
 
-Primary source: DELIXI CDI-E frequency inverter manual, especially Chapter 8
-and parameter tables P0, P4.1, and P9.0.
+Primary source: [DELIXI CDI-E frequency inverter manual](references/DelixiCDIE100/delixi-instrukciya-po-ekspluatacii.pdf),
+Russian, revision not identified. Use chapter 8 (especially PDF pp. 235-240)
+and parameter tables P0, P4.1 and P9.0. P4.1 is detailed on PDF pp. 174-175.
+All page references are 1-based PDF pages, including the cover.
 
-## Physical unit
+## Project-recorded physical unit
 
 - Model: CDI-E100G2R2T4B
 - Input: three-phase 380 V, 50/60 Hz
@@ -14,7 +16,10 @@ and parameter tables P0, P4.1, and P9.0.
 The motor protection limit is based on the connected motor's 3.3 A rating, not
 the VFD's 6.0 A rating.
 
-## Initial communication
+## Project communication profile
+
+The table combines the intended bring-up profile with the explicitly recorded
+commissioned framing. Do not treat every expected value as a hardware readback.
 
 | Parameter | Expected value | Meaning |
 |---|---:|---|
@@ -31,7 +36,7 @@ manual states that an elapsed communication timeout produces fault Err14. The
 installation must also verify the configured fault action and must not rely on
 firmware alone for emergency protection.
 
-## Verified register map
+## Manual facts: register map
 
 | Address | Access | Scale or value |
 |---:|---|---|
@@ -88,7 +93,7 @@ configuration examples and parameter map also require P0 values. This driver
 uses the same documented addressing rule for P0 and records this manual wording
 as an ambiguity rather than inventing a different map.
 
-## Configuration behavior
+## Project implementation: configuration behavior
 
 `checkConfiguration()` is read-only. It checks control mode, frequency source,
 frequency limits, ramp times, motor nameplate values, V/F mode, communication
@@ -103,3 +108,9 @@ settings, and that parameter identification is idle.
   bring-up profile's disabled value;
 - never starts motor identification;
 - never runs automatically at boot.
+
+## Unresolved commissioning items
+
+The final communication timeout and its physical fault action require the
+commissioning checks above. Record actual parameter readbacks and test results
+separately from this expected profile; do not infer them from library constants.
