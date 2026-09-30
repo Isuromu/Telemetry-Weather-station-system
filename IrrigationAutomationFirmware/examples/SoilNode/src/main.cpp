@@ -1,5 +1,6 @@
 #include <Adafruit_ADS1X15.h>
 #include <Arduino.h>
+#include <BatteryMonitor.h>
 #include <Preferences.h>
 #include <RadioLib.h>
 #include <SPI.h>
@@ -20,9 +21,51 @@ namespace {
 namespace config = irrigation::soil_node::config;
 namespace protocol = irrigation::soil_node::lorawan_protocol;
 namespace secrets = irrigation::soil_node::lorawan_secrets;
+using irrigation::pressure_node::BatteryAdcSource;
+using irrigation::pressure_node::BatteryMonitor;
+using irrigation::pressure_node::BatteryReading;
+using irrigation::pressure_node::ReadingStatus;
+using irrigation::pressure_node::readingStatusName;
+
+class Ads1115BatteryAdc final : public BatteryAdcSource {
+ public:
+  Ads1115BatteryAdc(Adafruit_ADS1115 &ads, uint8_t channel)
+      : ads_(ads), channel_(channel) {}
+
+  ReadingStatus begin() override {
+    return ads_.begin() ? ReadingStatus::Valid : ReadingStatus::NotFound;
+  }
+
+  ReadingStatus readAdcVoltage(float &adcVoltage) override {
+    const int16_t raw = ads_.readADC_SingleEnded(channel_);
+    if (raw < 0) return ReadingStatus::ReadError;
+
+    adcVoltage = ads_.computeVolts(raw);
+    return isfinite(adcVoltage) && adcVoltage >= 0.0F
+               ? ReadingStatus::Valid
+               : ReadingStatus::ReadError;
+  }
+
+ private:
+  Adafruit_ADS1115 &ads_;
+  uint8_t channel_;
+};
 
 HardwareSerial rs485(1);
 Adafruit_ADS1115 ads;
+Ads1115BatteryAdc batteryAdc(ads, config::battery::ADS1115_CHANNEL);
+// The adapter supplies ADC-pin volts. The final multiplier is the prototype's
+// direct-reading/divider-ratio configuration, so resistor values are unused.
+BatteryMonitor battery({
+                           0,
+                           0.0F,
+                           1.0F,
+                           config::battery::CALIBRATION,
+                           config::battery::SAMPLE_COUNT,
+                           config::battery::ADC_SETTLING_TIME_MS,
+                           config::battery::DIVIDER_RATIO,
+                       },
+                       batteryAdc);
 SPISettings loraSpiSettings(2000000, MSBFIRST, SPI_MODE0);
 SX1262 radio = new Module(
     config::pins::LORA_NSS, config::pins::LORA_DIO1,
@@ -38,7 +81,6 @@ RTC_DATA_ATTR uint8_t
     rtcLoRaWanSession[RADIOLIB_LORAWAN_SESSION_BUF_SIZE] = {};
 
 bool radioInitialized = false;
-bool adsInitialized = false;
 uint32_t sleepIntervalSeconds = config::lorawan::DEFAULT_SLEEP_SECONDS;
 
 uint16_t crc16Modbus(const uint8_t *data, size_t length) {
@@ -148,19 +190,19 @@ bool readSoil(protocol::Telemetry &telemetry) {
   return false;
 }
 
-uint8_t readBatteryEncoded() {
-  if (!adsInitialized) {
-    Serial.println("[BATTERY] ADS1115 unavailable; reporting zero.");
+uint8_t readBatteryEncoded(BatteryReading &batteryReading) {
+  batteryReading = battery.read();
+  if (!batteryReading.hasVoltage()) {
+    Serial.printf("[BATTERY] ADS1115 read failed: %s; reporting zero.\n",
+                  readingStatusName(batteryReading.status));
     return 0;
   }
 
-  const int16_t raw = ads.readADC_SingleEnded(config::battery::ADS1115_CHANNEL);
-  const float pinVoltage = ads.computeVolts(raw);
-  const float batteryVoltage = pinVoltage * config::battery::DIVIDER_RATIO;
   Serial.printf("[BATTERY] ADS A0 %.3f V; battery %.3f V\n",
-                pinVoltage, batteryVoltage);
+                batteryReading.adcVoltageV, batteryReading.voltageV);
 
-  const float clamped = constrain(batteryVoltage, config::battery::MIN_VOLTS,
+  const float clamped = constrain(batteryReading.voltageV,
+                                  config::battery::MIN_VOLTS,
                                   config::battery::MAX_VOLTS);
   return static_cast<uint8_t>(
       (clamped - config::battery::ENCODED_OFFSET_VOLTS) * 100.0F);
@@ -398,12 +440,12 @@ void setup() {
               config::pins::RS485_TX);
 
   Wire.begin(config::pins::I2C_SDA, config::pins::I2C_SCL);
-  adsInitialized = ads.begin();
-  if (!adsInitialized) Serial.println("[BATTERY] ADS1115 not detected.");
+  if (!battery.begin()) Serial.println("[BATTERY] ADS1115 not detected.");
 
   protocol::Telemetry telemetry{};
   readSoil(telemetry);
-  telemetry.batteryEncoded = readBatteryEncoded();
+  BatteryReading batteryReading{};
+  telemetry.batteryEncoded = readBatteryEncoded(batteryReading);
   if (telemetry.sensorValid) {
     Serial.printf("Temperature %.2f C; VWC %.2f %%; EC %.3f mS/cm\n",
                   telemetry.temperature100 / 100.0F,
@@ -417,8 +459,12 @@ void setup() {
   }
 
   if (setupLoRaWan(wokeFromDeepSleep)) {
-    const uint8_t batteryStatus = map(
-        constrain(telemetry.batteryEncoded, 100, 220), 100, 220, 1, 254);
+    const uint8_t batteryStatus = batteryReading.hasVoltage()
+                                      ? static_cast<uint8_t>(map(
+                                            constrain(telemetry.batteryEncoded,
+                                                      100, 220),
+                                            100, 220, 1, 254))
+                                      : 255;
     lorawan.setDeviceStatus(batteryStatus);
     sendTelemetry(telemetry);
   }

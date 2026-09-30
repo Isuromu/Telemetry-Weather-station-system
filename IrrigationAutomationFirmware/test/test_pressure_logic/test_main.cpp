@@ -24,12 +24,17 @@ static_assert(!readingHasSample(ReadingStatus::ReadError),
               "Sensor errors must not be exposed as samples.");
 constexpr BatteryMonitorConfiguration kMeasuredBatteryConfiguration{
     35, 100000.0F, 20000.0F, 0.9883F, 32, 10};
+constexpr BatteryMonitorConfiguration kDirectBatteryConfiguration{
+    0, 0.0F, 1.0F, 1.0F, 1, 0, 1.0F};
 static_assert(batteryVoltageFromAdc(2.097F,
                                     kMeasuredBatteryConfiguration) > 12.43F &&
                   batteryVoltageFromAdc(2.097F,
                                         kMeasuredBatteryConfiguration) <
                       12.44F,
               "Measured battery-divider calibration changed.");
+static_assert(batteryVoltageFromAdc(3.514F, kDirectBatteryConfiguration) ==
+                  3.514F,
+              "Direct external ADC conversion changed.");
 static_assert(config::pins::PCV_IN1 == 2 && config::pins::PCV_IN2 == 15,
               "The valve bridge pin migration changed.");
 static_assert(config::flow_meter::UART_RX == 16 &&
@@ -86,6 +91,12 @@ void test_battery_calibration_matches_measured_reference() {
   TEST_ASSERT_FLOAT_WITHIN(
       0.005F, 12.435F,
       batteryVoltageFromAdc(2.097F, kMeasuredBatteryConfiguration));
+}
+
+void test_direct_battery_multiplier_preserves_external_adc_voltage() {
+  TEST_ASSERT_FLOAT_WITHIN(
+      0.0001F, 3.514F,
+      batteryVoltageFromAdc(3.514F, kDirectBatteryConfiguration));
 }
 
 void test_unavailable_flow_meter_is_explicit() {
@@ -247,6 +258,7 @@ void runTests() {
   RUN_TEST(test_pressure_error_has_no_sample);
   RUN_TEST(test_default_status_does_not_claim_battery_soc);
   RUN_TEST(test_battery_calibration_matches_measured_reference);
+  RUN_TEST(test_direct_battery_multiplier_preserves_external_adc_voltage);
   RUN_TEST(test_unavailable_flow_meter_is_explicit);
   RUN_TEST(test_power_policy_does_not_enable_sleep_implicitly);
   RUN_TEST(test_lorawan_open_and_report_interval_command_decodes);

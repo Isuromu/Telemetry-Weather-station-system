@@ -5,16 +5,28 @@ namespace irrigation::pressure_node {
 BatteryMonitor::BatteryMonitor(BatteryMonitorConfiguration configuration)
     : configuration_(configuration) {}
 
+BatteryMonitor::BatteryMonitor(BatteryMonitorConfiguration configuration,
+                               BatteryAdcSource &adcSource)
+    : configuration_(configuration), adcSource_(&adcSource) {}
+
 bool BatteryMonitor::configurationValid() const {
-  return configuration_.dividerHighOhm > 0.0F &&
-         configuration_.dividerLowOhm > 0.0F &&
+  const bool hasDivider = configuration_.dividerHighOhm >= 0.0F &&
+                          configuration_.dividerLowOhm > 0.0F;
+  return (configuration_.voltageMultiplier > 0.0F || hasDivider) &&
          configuration_.calibration > 0.0F && configuration_.sampleCount > 0;
 }
 
 bool BatteryMonitor::begin() {
   if (!configurationValid()) {
     initialized_ = false;
+    initializationStatus_ = ReadingStatus::ConfigurationMissing;
     return false;
+  }
+
+  if (adcSource_ != nullptr) {
+    initializationStatus_ = adcSource_->begin();
+    initialized_ = initializationStatus_ == ReadingStatus::Valid;
+    return initialized_;
   }
 
   analogReadResolution(12);
@@ -27,7 +39,15 @@ bool BatteryMonitor::begin() {
   // rebuild it.
   analogSetAttenuation(ADC_11db);
   initialized_ = true;
+  initializationStatus_ = ReadingStatus::Valid;
   return true;
+}
+
+ReadingStatus BatteryMonitor::readAdcVoltage(float &adcVoltage) {
+  if (adcSource_ != nullptr) return adcSource_->readAdcVoltage(adcVoltage);
+
+  adcVoltage = analogReadMilliVolts(configuration_.adcPin) / 1000.0F;
+  return ReadingStatus::Valid;
 }
 
 BatteryReading BatteryMonitor::read() {
@@ -37,25 +57,31 @@ BatteryReading BatteryMonitor::read() {
     return reading;
   }
   if (!initialized_) {
-    reading.status = ReadingStatus::NotInitialized;
+    reading.status = initializationStatus_;
     return reading;
   }
 
   // Discard the first conversion, then allow the ADC input and its 100 nF
   // filter capacitor to settle before averaging the on-demand sample.
-  (void)analogReadMilliVolts(configuration_.adcPin);
+  float discardedVoltage = 0.0F;
+  (void)readAdcVoltage(discardedVoltage);
   if (configuration_.settlingTimeMs > 0)
     delay(configuration_.settlingTimeMs);
 
-  uint32_t millivoltSum = 0;
+  float adcVoltageSum = 0.0F;
   for (uint8_t sample = 0; sample < configuration_.sampleCount; ++sample) {
-    millivoltSum += analogReadMilliVolts(configuration_.adcPin);
+    float adcVoltage = 0.0F;
+    const ReadingStatus status = readAdcVoltage(adcVoltage);
+    if (status != ReadingStatus::Valid) {
+      reading.status = status;
+      return reading;
+    }
+    adcVoltageSum += adcVoltage;
     delayMicroseconds(200);
   }
 
   const float adcVoltage =
-      (millivoltSum / static_cast<float>(configuration_.sampleCount)) /
-      1000.0F;
+      adcVoltageSum / static_cast<float>(configuration_.sampleCount);
   reading.adcVoltageV = adcVoltage;
   reading.voltageV = batteryVoltageFromAdc(adcVoltage, configuration_);
   reading.status = ReadingStatus::Valid;

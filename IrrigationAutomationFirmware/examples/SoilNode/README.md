@@ -9,7 +9,8 @@ does not use the preliminary production ESP32-C6 pinout. Each Class A cycle:
 1. enables the RS485 soil-sensor power switch on GPIO27 and waits 2 seconds;
 2. reads three holding registers from Modbus address 3 on UART1 GPIO16/GPIO17;
 3. turns sensor power off and reads the 1S battery through an ADS1115 on
-   GPIO21/GPIO22;
+   GPIO21/GPIO22. The ADS1115 adapter supplies the shared `BatteryMonitor`,
+   which performs voltage conversion and reports an explicit read status;
 4. sends an eight-byte FPort 10 uplink and completes RX1/RX2, accepting an
    optional sleep-interval command in those Class A receive windows;
 5. sends an immediate FPort 11 application result when it receives an FPort 10
@@ -64,9 +65,9 @@ build_flags =
 ```
 
 The current prototype log reports about 3.514 V directly at ADS1115 A0, which
-is already a plausible 1S battery voltage. The default battery divider ratio is
-therefore `1.0`; override `SOIL_NODE_BATTERY_DIVIDER_RATIO` if the assembled
-board is later confirmed to contain a divider.
+is already a plausible 1S battery voltage. The default `BatteryMonitor`
+multiplier is therefore `1.0`; override `SOIL_NODE_BATTERY_DIVIDER_RATIO` if
+the assembled board is later confirmed to contain a divider.
 
 ## Uplink payload
 
@@ -79,6 +80,10 @@ FPort 10 carries eight big-endian bytes, matching the supplied sketch:
 | 3 | 2 | Volumetric water content in 0.01 percent |
 | 5 | 2 | Conductivity in 0.001 mS/cm |
 | 7 | 1 | Battery voltage encoded as `(volts - 2.0) * 100` |
+
+The eight-byte compatibility payload has no battery-validity flag. An ADS1115
+failure therefore remains encoded as zero, while the LoRaWAN device battery
+status is set to `255` (unknown) and Serial reports the failure.
 
 The firmware accepts and ignores a local eight-byte transmit echo, retries the
 read three times, and requires the 11-byte `03 03 06 ...` CRC-valid sensor

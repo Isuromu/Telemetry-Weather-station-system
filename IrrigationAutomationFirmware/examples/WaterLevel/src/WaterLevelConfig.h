@@ -33,6 +33,10 @@ namespace battery {
 inline constexpr float DIVIDER_HIGH_OHM = 100000.0F;
 inline constexpr float DIVIDER_LOW_OHM = 20000.0F;
 inline constexpr float CALIBRATION = 12.10F / 12.46F;
+// Preserve the imported one-sample measurement; BatteryMonitor discards its
+// warm-up conversion before this sample.
+inline constexpr uint8_t SAMPLE_COUNT = 1;
+inline constexpr uint16_t ADC_SETTLING_TIME_MS = 0;
 inline constexpr float LOW_VOLTAGE = 11.5F;
 }  // namespace battery
 

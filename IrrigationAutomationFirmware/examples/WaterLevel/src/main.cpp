@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <BatteryMonitor.h>
 #include <Preferences.h>
 #include <RadioLib.h>
 #include <SPI.h>
@@ -19,8 +20,19 @@ namespace {
 namespace config = irrigation::water_level::config;
 namespace lora_protocol = irrigation::water_level::lorawan_protocol;
 namespace lora_secrets = irrigation::water_level::lorawan_secrets;
+using irrigation::pressure_node::BatteryMonitor;
+using irrigation::pressure_node::BatteryReading;
+using irrigation::pressure_node::readingStatusName;
 
 HardwareSerial rs485(2);
+BatteryMonitor battery({
+    static_cast<uint8_t>(config::pins::BATTERY_ADC),
+    config::battery::DIVIDER_HIGH_OHM,
+    config::battery::DIVIDER_LOW_OHM,
+    config::battery::CALIBRATION,
+    config::battery::SAMPLE_COUNT,
+    config::battery::ADC_SETTLING_TIME_MS,
+});
 
 const LoRaWANBand_t loraWanRegion = EU868;
 SPISettings loraSpiSettings(500000, MSBFIRST, SPI_MODE0);
@@ -169,15 +181,6 @@ bool readWaterLevel(float &depthMeters) {
   return true;
 }
 
-float readBatteryVoltage() {
-  const int adcMilliVolts = analogReadMilliVolts(config::pins::BATTERY_ADC);
-  const float adcVoltage = adcMilliVolts / 1000.0F;
-  return adcVoltage *
-         (config::battery::DIVIDER_HIGH_OHM +
-          config::battery::DIVIDER_LOW_OHM) /
-         config::battery::DIVIDER_LOW_OHM * config::battery::CALIBRATION;
-}
-
 bool updateLoadControl(float batteryVoltage/*, float levelPercent*/) {
   const bool loadOn =
       batteryVoltage >= config::battery::LOW_VOLTAGE /*&& levelPercent >= 15.0F*/;
@@ -199,7 +202,16 @@ void initializeLoadOutput(bool wokeFromDeepSleep) {
 
 lora_protocol::Telemetry runMeasurementAndControlCycle() {
   lora_protocol::Telemetry telemetry{};
-  telemetry.batteryVoltage = readBatteryVoltage();
+  const BatteryReading batteryReading = battery.read();
+  if (batteryReading.hasVoltage()) {
+    telemetry.batteryVoltage = batteryReading.voltageV;
+    Serial.printf("Battery: ADC %.3f V; battery %.2f V\n",
+                  batteryReading.adcVoltageV, telemetry.batteryVoltage);
+  } else {
+    // A measurement failure must not leave the threshold-controlled load on.
+    Serial.printf("[BATTERY] Read failed: %s; treating voltage as zero.\n",
+                  readingStatusName(batteryReading.status));
+  }
   telemetry.pressureValid = readWaterLevel(telemetry.depthMeters);
 
   if (telemetry.pressureValid) {
@@ -213,7 +225,6 @@ lora_protocol::Telemetry runMeasurementAndControlCycle() {
         0.0F, 100.0F);
   }
 
-  Serial.printf("Battery: %.2f V\n", telemetry.batteryVoltage);
   Serial.printf("Pressure transmitter: %.3f bar / %.2f kPa\n",
                 telemetry.pressureBar, telemetry.pressureBar * 100.0F);
   Serial.printf("Depth: %.2f m\n", telemetry.depthMeters);
@@ -396,8 +407,9 @@ void setup() {
   Serial.println("ESP32 WaterLevel Class A cycle started");
   Serial.println("====================================");
 
-  pinMode(config::pins::BATTERY_ADC, ANALOG);
-  analogSetPinAttenuation(config::pins::BATTERY_ADC, ADC_11db);
+  if (!battery.begin()) {
+    Serial.println("[BATTERY] Invalid ADC configuration.");
+  }
   if (config::pins::RS485_DE_RE >= 0) {
     pinMode(config::pins::RS485_DE_RE, OUTPUT);
     digitalWrite(config::pins::RS485_DE_RE, LOW);

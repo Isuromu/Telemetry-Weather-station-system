@@ -9,7 +9,7 @@ in [RD-RWG-01 reference notes](../../docs/RD_RWG_01.md).
 
 Each wake cycle:
 
-1. reads the GPIO35 battery divider;
+1. reads the GPIO35 battery divider through the shared `BatteryMonitor`;
 2. reads the RD-RWG-01 on UART2 GPIO16/GPIO17: REG0002 (primary variable unit)
    and REG0003 (decimal places) tell the firmware how to interpret REG0004
    (measurement output value);
@@ -25,6 +25,10 @@ Each wake cycle:
    not currently depend on the water level;
 5. sends one FPort 40 uplink and completes RX1/RX2;
 6. enters timer deep sleep while holding the selected GPIO27 output state.
+
+If a battery sample fails, the node reports the failure on Serial, sends zero
+millivolts in the existing telemetry field, and turns the threshold-controlled
+load off for that cycle.
 
 Application downlinks are deliberately ignored. This first network integration
 does not add remote load control or modify the existing threshold policy.

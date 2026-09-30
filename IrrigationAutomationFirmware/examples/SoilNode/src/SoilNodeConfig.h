@@ -54,6 +54,10 @@ inline constexpr uint32_t RETRY_DELAY_MS = 100;
 namespace battery {
 inline constexpr uint8_t ADS1115_CHANNEL = 0;
 inline constexpr float DIVIDER_RATIO = SOIL_NODE_BATTERY_DIVIDER_RATIO;
+inline constexpr float CALIBRATION = 1.0F;
+// Preserve the supplied prototype's one-sample ADS1115 measurement.
+inline constexpr uint8_t SAMPLE_COUNT = 1;
+inline constexpr uint16_t ADC_SETTLING_TIME_MS = 0;
 inline constexpr float ENCODED_OFFSET_VOLTS = 2.0F;
 inline constexpr float MIN_VOLTS = 2.0F;
 inline constexpr float MAX_VOLTS = 4.55F;
