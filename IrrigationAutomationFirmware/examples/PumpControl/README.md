@@ -264,7 +264,7 @@ a ground-potential disturbance, or a controller/USB supply disturbance is the
 leading explanation. Another process taking the COM port is less likely but
 should still be excluded.
 
-Before further laptop-connected motor testing:
+Before further laptop-connected motor testing (VFD noise causing unavailable ESP32 usb port):
 
 - determine whether LoRaWAN telemetry continues after the USB failure; if it
   does, the ESP32 remained active and the failure is limited to USB/host access;
@@ -286,3 +286,24 @@ This item is intentionally deferred. A firmware change cannot preserve a
 Windows COM handle when the USB-UART hardware or host controller disconnects.
 Do not treat LoRaWAN control as a replacement for the required hardwired stop
 and safe isolation arrangement.
+
+### Follow-up test observations (2026-09-30)
+
+- The ESP32 3.3 V rail and `EN` reset signal remained stable while the motor
+  ran. The PumpNode continued to receive start/stop commands and stopped the
+  pump even while Windows could not find its USB serial port.
+- Disconnecting the RS-485 link while the pump ran restored the USB serial
+  port. The VFD communication-side ground measured about 1 V lower than ESP32
+  ground; that static difference remained after stopping, without a USB event.
+- The USB disconnect also occurred with the VFD in manual mode, so Modbus
+  command traffic is not its trigger. The USB connection could return near zero
+  motor speed.
+- A PH-6081-01 eight-port optically isolated RS-485 hub was inserted between
+  PumpNode and VFD, but the behavior remained. With the hub unpowered, a
+  continuity check found no direct beep/path from its power GND to the tested
+  input/output A/B terminals. This does not prove high-frequency isolation.
+
+Current conclusion: PumpNode remains operational; the fault is a USB-link
+failure coupled to the RS-485/VFD environment. The remaining causes to separate
+are high-frequency common-mode coupling through the hub/cabling, a shield or
+reference bypass, and pickup at the ESP32-side RS-485 converter.
