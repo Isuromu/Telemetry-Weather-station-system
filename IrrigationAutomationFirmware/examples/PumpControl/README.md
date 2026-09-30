@@ -195,14 +195,14 @@ dashboard tracks the commands it queued itself.
 
 ## Node-RED Dashboard 2.0
 
-Import `include/pump_control_dashboard2_flow.json` into Node-RED. It replaces
+Import `include/pump_control_dashboard_flow.json` into Node-RED. It replaces
 the old Pump controls that sent text commands on FPort 10. Disable or remove
 those old controls after importing, so operators do not have two command
-panels. The new Pump group references the same Dashboard base, page, theme,
-and MQTT broker IDs as the MainValve example. After import, check that Node-RED
-has placed the Pump group on the intended page and has not made duplicate
-configuration nodes. The included MQTT broker defaults to `localhost:1883`;
-select the deployed ChirpStack broker if different.
+panels. The new Pump group references the same Dashboard base, page, theme, and
+shared `chirpstack_mosquito` broker ID as the MainValve example. The import does
+not ship broker settings, so it preserves the workspace's existing host, port,
+and TLS configuration. After import, confirm that Node-RED placed the Pump
+group on the intended page without creating duplicate configuration nodes.
 
 The flow is configured for the Pump application ID and DevEUI from the supplied
 dashboard. These values appear in the MQTT input topic and two Function nodes;

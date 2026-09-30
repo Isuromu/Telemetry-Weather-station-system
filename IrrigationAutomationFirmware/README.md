@@ -48,7 +48,7 @@ pio device monitor -b 115200
 The standalone example can also be built:
 
 ```text
-pio run -e pump_control_example
+pio run -e pump_control
 ```
 
 The pressure-control end node has three deliberately distinct builds:
