@@ -226,12 +226,57 @@ void PressureNodeCommandProcessor::printFlowWordOrderProbe(
   } else {
     logger_.println(F("INVALID"), true);
   }
-  logger_.println(
-      F("[FLOW][PROBE] LOW_WORD_FIRST is hardware-verified for this meter."),
+
+  if (probe.diagnosticsAvailable) {
+    logger_.print(F("[FLOW][PROBE] TUF-2000M error bits: 0x"), true);
+    logger_.print(probe.deviceErrorBits, true, "", HEX);
+    logger_.println(probe.flowSampleValid
+                        ? F(" (flow sample valid)")
+                        : F(" (flow sample INVALID)"),
+                    true);
+  } else {
+    logger_.println(
+        F("[FLOW][PROBE] TUF-2000M error bits unavailable; this probe cannot "
+          "confirm signal quality."),
+        true);
+  }
+  if (probe.signalQualityAvailable) {
+    logger_.print(F("[FLOW][PROBE] Signal quality Q: "), true);
+    logger_.print(probe.signalQuality, true);
+    logger_.print(F(" (0-99); transducer strength upstream/downstream: "), true);
+    logger_.print(probe.upstreamSignalStrength, true);
+    logger_.print(F("/"), true);
+    logger_.print(probe.downstreamSignalStrength, true);
+    logger_.println(F(" (0-2047)"), true);
+  }
+
+  // The verdict covers only the order this build actually decodes with, and
+  // only when the decode above succeeded. Printing a fixed LOW_WORD_FIRST claim
+  // would contradict an INVALID line and is wrong for any build whose order is
+  // not validated yet.
+  if (!probe.configuredOrderValidated) {
+    logger_.println(
+        F("[FLOW][PROBE] No word order is marked hardware-validated in this "
+          "build; normal flow telemetry is not decoding REAL4 values."),
+        true);
+    return;
+  }
+  const bool configuredOrderDecoded = probe.configuredLowWordFirst
+                                          ? probe.lowWordFirstDecoded
+                                          : probe.highWordFirstDecoded;
+  if (!configuredOrderDecoded) {
+    logger_.println(
+        F("[FLOW][PROBE] The configured word order did not decode on this "
+          "reading; confirm the meter's REAL4 format before trusting "
+          "telemetry."),
+        true);
+    return;
+  }
+  logger_.print(F("[FLOW][PROBE] The configured "), true);
+  logger_.print(
+      probe.configuredLowWordFirst ? F("LOW_WORD_FIRST") : F("HIGH_WORD_FIRST"),
       true);
-  logger_.println(
-      F("[FLOW][PROBE] Normal telemetry uses the configured LOW_WORD_FIRST decoder."),
-      true);
+  logger_.println(F(" decoder is hardware-verified for this meter."), true);
 }
 
 void PressureNodeCommandProcessor::printValveStatus(

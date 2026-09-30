@@ -5,6 +5,25 @@
 
 namespace irrigation::pressure_node {
 
+namespace {
+
+// Backs the no-flow constructor. UnavailableFlowMeter is stateless -- every
+// method returns a fixed ConfigurationMissing reading -- so one shared instance
+// serves any number of nodes and the reference lifetime is never in question.
+UnavailableFlowMeter &sharedUnavailableFlowMeter() {
+  static UnavailableFlowMeter instance;
+  return instance;
+}
+
+}  // namespace
+
+PressureControlNode::PressureControlNode(
+    BatteryMonitor &battery, PressureSensorXDB401 &upstreamPressure,
+    PressureSensorXDB401 &downstreamPressure, PressureControlValve &valve,
+    PowerPolicyConfiguration powerConfiguration)
+    : PressureControlNode(battery, upstreamPressure, downstreamPressure, valve,
+                          sharedUnavailableFlowMeter(), powerConfiguration) {}
+
 PressureControlNode::PressureControlNode(
     BatteryMonitor &battery, PressureSensorXDB401 &upstreamPressure,
     PressureSensorXDB401 &downstreamPressure, PressureControlValve &valve,

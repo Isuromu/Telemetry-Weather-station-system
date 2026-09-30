@@ -24,6 +24,16 @@ class PressureControlNode {
                       PressureControlValve &valve, FlowMeter &flowMeter,
                       PowerPolicyConfiguration powerConfiguration);
 
+  // Build shape for a node with no flow meter fitted: the flow methods stay
+  // callable and report ConfigurationMissing, so callers need no flow-specific
+  // branch. Prefer this over constructing an UnavailableFlowMeter at the call
+  // site, which would leak the flow concept into a node that has none.
+  PressureControlNode(BatteryMonitor &battery,
+                      PressureSensorXDB401 &upstreamPressure,
+                      PressureSensorXDB401 &downstreamPressure,
+                      PressureControlValve &valve,
+                      PowerPolicyConfiguration powerConfiguration);
+
   bool begin();
   BatteryReading readBattery();
   PressurePairReading readPressures();

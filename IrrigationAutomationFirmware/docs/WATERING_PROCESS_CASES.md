@@ -204,6 +204,18 @@ interval cannot be changed remotely.
    produces false failures or late fault detection.** WaterLevel has builders
    to keep this synchronized. SoilNode and field valves need the same
    operational discipline when their stored Class A intervals change.
+6. **In Class A the report interval is also the join-retry period.** Every exit
+   path of the wake cycle, including a failed join, deep-sleeps the configured
+   interval; `JOIN_RETRY_INTERVAL_MS` (60 s) is used only by the Class C paths.
+   At the 10 s and 60 s settings in use this is harmless — a lost join retries
+   in about the same time either way. Above roughly five minutes it becomes a
+   recovery trap: one lost join, or a cold boot while the join server is
+   unreachable, silences the node for the whole interval. The interval is
+   persisted in RTC memory and in NVS, so a long test `sleep_seconds` downlink
+   outlives a reflash. Before shipping any interval above five minutes, give
+   `enterDeepSleep` a seconds parameter and pass the join-retry interval when
+   the cycle did not complete a join plus uplink. The successful path is
+   unaffected.
 
 ## Source basis
 

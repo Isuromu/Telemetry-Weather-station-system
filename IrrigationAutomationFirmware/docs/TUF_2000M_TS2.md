@@ -110,6 +110,17 @@ The manual defines `REAL4` as a single IEEE-754 32-bit float. It does not state
 whether the first Modbus register contains the high or low 16-bit word. Modbus
 itself does not standardize multi-register word order.
 
+A REAL4 value occupies 4 bytes, but Modbus carries one 2-byte register at a
+time, so every float travels as two register halves. The sending meter decides
+whether the first register holds the low or the high half; both are valid, and
+the manual is silent on which one this meter uses. The choice matters because
+guessing wrong does not give a slightly wrong number. Flow rate 2.5 m3/h is the
+bytes `40 20 00 00`; sent low-half-first it arrives as `00 00` then `20 40`, and
+joining those halves in the opposite order produces about 2.3e-41, which
+displays as zero. A misread word order therefore looks like "no water flowing"
+rather than like a decoding fault — which is why Serial `flow probe` prints the
+raw bytes and both interpretations instead of asserting one.
+
 The commissioned meter returned raw REG0221-REG0222 data `00 00 42 64`. With
 the configured inner diameter known to be 57.0 mm, the only valid decoding is
 to swap the two 16-bit register words first, producing IEEE-754 bytes

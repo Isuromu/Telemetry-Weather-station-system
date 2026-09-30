@@ -1,10 +1,11 @@
-# No-flow-meter PCV node (valve_2)
+# PCV node (valve_2)
 
 The `pcv_low_power_class_a_without_flowmeter` environment builds this
 directory's `src/main.cpp` as a separate Class A application. It uses the
 shared safe latching-pulse driver and protocol, dual pressure
-sensors, battery monitor, FPort 30 commands and FPort 31 status. Flow fields
-are unavailable and the RS485 flow-meter transport is not started.
+sensors, battery monitor, FPort 30 commands and FPort 31 status. valve_2 has no
+flow meter: the firmware carries no flow-meter code or RS-485 transport, and the
+shared status payload reports its flow fields as unavailable.
 
 Valve_2 is configured for the same 12 V latching solenoid and L298N pulse
 sequence as valve_1. OPEN energizes IN1, CLOSE energizes IN2, and each command
@@ -14,11 +15,10 @@ timing values are provisional until verified on the installed valve_2 hardware;
 the GPIO27 active level and reset pull-downs also need physical validation.
 The superseded Class C source and its `lorawan_keys` files have been removed.
 
-The Class A target reuses the main application's validated structure while
-injecting `UnavailableFlowMeter`, separate valve_2 credentials, and valve_2's
-historical `valve_lora` NVS namespace for OTAA nonce continuity. Its
-application state uses the distinct `node_state` key. A missing prior nonce
-buffer blocks OTAA; do not erase NVS during migration.
+The Class A target reuses the main application's validated structure with
+separate valve_2 credentials and valve_2's historical `valve_lora` NVS namespace
+for OTAA nonce continuity. Its application state uses the distinct `node_state`
+key. A missing prior nonce buffer blocks OTAA; do not erase NVS during migration.
 
 ## Build and upload
 
@@ -39,7 +39,6 @@ The current commissioning default is 10 seconds. It does not accept Serial comma
 | Valve IN1 / IN2 | 2 / 15 |
 | L298N power enable | 27 |
 | Battery ADC | 35 |
-| RS485 RX / TX | 16 / 17 |
 | I2C before (SDA/SCL) | 21 / 22 |
 | I2C after (SDA/SCL) | 13 / 4 |
 
@@ -61,11 +60,13 @@ only place to change them.
 EU868, OTAA 1.0.x, Class A. Use the
 `tools/chirpstack/pcv_low_power_class_a_codec.js` codec in a *separate* Class A
 device profile. Command FPort is 30 and status FPort is 31. The previous
-FPort-10 codec is not compatible. Flow-meter readings decode as `null`.
+FPort-10 codec is not compatible. The codec and the shared 32-byte payload are
+unchanged; because no meter is fitted, the flow fields always decode as `null`.
 
 Use unique `command_id` values. The Class A node receives queued commands only
-after an uplink; it cannot receive while asleep. `flow_total_reset` is rejected
-because no meter is fitted. OPEN/CLOSE use the shared latching-valve driver.
+after an uplink; it cannot receive while asleep. A `flow_total_reset` downlink is
+still rejected explicitly, because there is no meter to hold a baseline.
+OPEN/CLOSE use the shared latching-valve driver.
 Each accepted command, including a repeat OPEN or CLOSE with a new command ID,
 sends a pulse; status records the last command, not confirmed physical position.
 
@@ -74,8 +75,7 @@ sends a pulse; status records the last command, not confirmed physical position.
 1. Keep the solenoid supply disconnected for the first radio and telemetry
    test. Do not erase NVS: the old OTAA nonce history is required.
 2. Flash only the `pcv_low_power_class_a_without_flowmeter` environment.
-   Confirm Serial prints `PCV_LOW_POWER_CLASS_A`, `No flow meter fitted`, and
-   `Valve pulses enabled`.
+   Confirm Serial prints `PCV_LOW_POWER_CLASS_A` and `Valve pulses enabled`.
 3. In ChirpStack, use a separate Class A device profile with the FPort-30/31
    codec. Confirm join/session restore, FPort-31 uplink, battery/pressure data,
    null flow data, then timer deep sleep and wake after about 10 seconds with

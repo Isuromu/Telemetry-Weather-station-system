@@ -1,12 +1,13 @@
 #pragma once
 
-// Board description for valve_2, the no-flow-meter Class A node built from
-// examples/PressureControlNode2. valve_2's pins and board constants can diverge
-// freely: change them HERE, and do not expect valve_1 to follow.
+// Board description for valve_2, the Class A node built from
+// examples/PressureControlNode2. valve_2 has no flow meter. Its pins and board
+// constants can diverge freely: change them HERE, and do not expect valve_1 to
+// follow.
 //
 // Build-shape switches stay in platformio.ini because they gate code structure
-// rather than describing hardware: PCV_NO_FLOW_METER,
-// PCV_NO_FLOW_ACTUATION_ENABLED and PRESSURE_NODE_RUNTIME_MODE.
+// rather than describing hardware: PCV_NO_FLOW_ACTUATION_ENABLED and
+// PRESSURE_NODE_RUNTIME_MODE.
 
 #include <stdint.h>
 
@@ -25,9 +26,6 @@ inline constexpr int8_t I2C_UPSTREAM_SDA = 21;
 inline constexpr int8_t I2C_UPSTREAM_SCL = 22;
 inline constexpr int8_t I2C_DOWNSTREAM_SDA = 4;
 inline constexpr int8_t I2C_DOWNSTREAM_SCL = 13;
-
-inline constexpr int8_t RS485_RX = 16;
-inline constexpr int8_t RS485_TX = 17;
 
 inline constexpr int8_t LORA_NSS = 5;
 inline constexpr int8_t LORA_DIO1 = 26;
@@ -132,12 +130,6 @@ static_assert(pins::PCV_IN1 != pins::PCV_IN2 &&
                   pins::PCV_IN1 != pins::PCV_POWER_ENABLE &&
                   pins::PCV_IN2 != pins::PCV_POWER_ENABLE,
               "The H-bridge pins must be unique.");
-static_assert(pins::RS485_RX != pins::RS485_TX &&
-                  pins::RS485_RX != pins::PCV_IN1 &&
-                  pins::RS485_RX != pins::PCV_IN2 &&
-                  pins::RS485_TX != pins::PCV_IN1 &&
-                  pins::RS485_TX != pins::PCV_IN2,
-              "RS-485 UART must not overlap the H-bridge.");
 static_assert(lorawan::DEFAULT_REPORT_INTERVAL_SECONDS >=
                       lorawan::MIN_REPORT_INTERVAL_SECONDS &&
                   lorawan::DEFAULT_REPORT_INTERVAL_SECONDS <=

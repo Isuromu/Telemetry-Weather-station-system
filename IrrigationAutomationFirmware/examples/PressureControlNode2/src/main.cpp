@@ -9,19 +9,13 @@
 #include <PressureNodeRuntimeMode.h>
 #include <PressureSensorXDB401.h>
 #include <PrintController.h>
-#include <RS485ModBus.h>
 #include <RadioLib.h>
 #include <SPI.h>
-#include <Tuf2000mFlowMeter.h>
 #include <Wire.h>
 #include <esp_sleep.h>
 
 #include <math.h>
 #include <string.h>
-
-#if !defined(PCV_NO_FLOW_METER) || PCV_NO_FLOW_METER != 1
-#error "PressureControlNode2 Class A requires PCV_NO_FLOW_METER=1"
-#endif
 
 #if __has_include("PressureNode2LoRaSecrets.h")
 #include "PressureNode2LoRaSecrets.h"
@@ -82,28 +76,8 @@ PressureControlValve pressureControlValve({
     {config::pcv::CLOSE_IN1_HIGH, config::pcv::CLOSE_IN2_HIGH},
 });
 
-#if defined(PCV_NO_FLOW_METER)
-UnavailableFlowMeter flowMeter;
-bool flowTransportStarted = false;
-#else
-RS485Bus flowTransport;
-bool flowTransportStarted = false;
-const Tuf2000mConfiguration tuf2000mConfiguration{
-    config::flow_meter::SLAVE_ADDRESS,
-    config::flow_meter::RESPONSE_TIMEOUT_MS,
-    config::flow_meter::FLOAT_WORD_ORDER_VALIDATED
-        ? (config::flow_meter::LOW_WORD_FIRST
-               ? tuf2000m::FloatWordOrder::LowWordFirst
-               : tuf2000m::FloatWordOrder::HighWordFirst)
-        : tuf2000m::FloatWordOrder::Unspecified,
-    false,
-};
-Tuf2000mFlowMeter flowMeter(flowTransport, tuf2000mConfiguration);
-#endif
-
 PressureControlNode pressureNode(
     battery, upstreamPressure, downstreamPressure, pressureControlValve,
-    flowMeter,
     {
         config::energy::PERIODIC_SAMPLING_ENABLED,
         config::energy::SAMPLE_INTERVAL_MS,
@@ -149,10 +123,18 @@ struct PersistentNodeState {
   uint8_t hasLastCommand;
   uint8_t reserved;
   uint8_t lastCommand[lora_protocol::COMMAND_PAYLOAD_SIZE];
-  float flowTotalBaselineCubicMeters;
-  uint8_t hasFlowTotalBaseline;
-  uint8_t reserved2[3];
+  // Formerly the flow-total baseline (a float plus a flag) and its padding:
+  // seven bytes, kept as reserved so this struct's size stays distinct from
+  // PersistentNodeStateV1. loadPersistentState() chooses its migration branch by
+  // blob length, so collapsing the two sizes would make the v1 branch
+  // unreachable and silently reset a v1 device's stored interval and valve
+  // state instead of migrating them.
+  uint8_t reserved2[7];
 };
+
+static_assert(sizeof(PersistentNodeState) != sizeof(PersistentNodeStateV1),
+              "Stored-state sizes must stay distinct so the v1 migration branch "
+              "remains reachable.");
 
 RTC_DATA_ATTR uint32_t rtcSessionMagic = 0;
 RTC_DATA_ATTR uint8_t
@@ -177,10 +159,7 @@ bool persistentStateValid(const PersistentNodeState &state) {
          state.statusReason <=
              static_cast<uint8_t>(
                  lora_protocol::StatusReason::FlowTotalResetFailed) &&
-         state.hasLastCommand <= 1 && state.hasFlowTotalBaseline <= 1 &&
-         (state.hasFlowTotalBaseline == 0 ||
-          (isfinite(state.flowTotalBaselineCubicMeters) &&
-           state.flowTotalBaselineCubicMeters >= 0.0F));
+         state.hasLastCommand <= 1;
 }
 
 bool persistentStateV1Valid(const PersistentNodeStateV1 &state) {
@@ -300,70 +279,20 @@ void printHexFrame(const char *label, const uint8_t *data, size_t length) {
   Serial.println();
 }
 
-void initializeFlowTransportIfConfigured() {
-#if defined(PCV_NO_FLOW_METER)
-  return;
-#else
-  if (!config::flow_meter::CURRENT_RS485_PINS_AVAILABLE ||
-      config::flow_meter::UART_RX < 0 || config::flow_meter::UART_TX < 0 ||
-      config::flow_meter::SLAVE_ADDRESS < 1 ||
-      config::flow_meter::SLAVE_ADDRESS > 247 ||
-      (!config::flow_meter::AUTOMATIC_DIRECTION &&
-       config::flow_meter::DE_RE < 0))
-    return;
-
-  if (config::flow_meter::AUTOMATIC_DIRECTION) {
-    flowTransport.setDirectionMode(Rs485DirectionMode::Automatic);
-  } else {
-    flowTransport.setDirectionMode(
-        Rs485DirectionMode::Manual, config::flow_meter::DE_RE,
-        config::flow_meter::DE_RE_ACTIVE_HIGH_TX);
-  }
-  flowTransport.begin(Serial2, config::flow_meter::BAUD,
-                      config::flow_meter::UART_RX,
-                      config::flow_meter::UART_TX, SERIAL_8N1);
-  flowTransportStarted = true;
-#endif
-}
-
 void printBootStatus(bool essentialHardwareReady) {
   logger.println(F("[SYSTEM] Latching-valve monitoring end node, Rev A"),
                  true);
   logger.print(F("[SYSTEM] Firmware mode: "), true);
   logger.println(runtime::modeName(runtime::ACTIVE_MODE), true);
-#if defined(PCV_NO_FLOW_METER)
-  logger.println(F("[SYSTEM] PCV IN1=GPIO2, IN2=GPIO15; no flow RS-485."),
-                 true);
-#else
-  logger.println(F("[SYSTEM] PCV IN1=GPIO2, IN2=GPIO15; RS-485 UART2 RX=GPIO16, TX=GPIO17."),
-                 true);
-#endif
+  logger.println(F("[SYSTEM] PCV IN1=GPIO2, IN2=GPIO15."), true);
   logger.println(
       F("[SYSTEM] Dual I2C pressure sensors remain enabled for Rev A."),
       true);
-#if defined(PCV_NO_FLOW_METER)
-  logger.println(F("[SYSTEM] No flow meter fitted; flow telemetry unavailable."),
-                 true);
   logger.println(
       PCV_NO_FLOW_ACTUATION_ENABLED
           ? F("[CONTROL] Valve pulses enabled; verify polarity and timing on this valve.")
           : F("[CONTROL] Valve pulses locked pending polarity/pulse validation."),
       true);
-#else
-  if (flowMeter.available()) {
-    logger.println(F("[SYSTEM] TUF-2000M on-demand RS-485 is ready."), true);
-  } else if (flowTransportStarted) {
-    logger.print(F("[SYSTEM] TUF RS-485 ID="), true);
-    logger.print(config::flow_meter::SLAVE_ADDRESS, true);
-    logger.println(
-        F(" ready for diagnostic 'flow probe'; decoded reads are not configured."),
-        true);
-  } else {
-    logger.println(
-        F("[SYSTEM] TUF RS-485 transport configuration is incomplete."),
-        true);
-  }
-#endif
   if (runtime::ACTIVE_MODE == runtime::Mode::SerialOnly) {
     logger.println(F("[CONTROL] Serial commands only; LoRaWAN is disabled."),
                    true);
@@ -417,7 +346,6 @@ bool setupLoRaWan() {
   lorawan.setDeviceStatus(255);  // Battery SOC is not calibrated yet.
 
   const bool noncesRestored = loadNoncesFromNvs();
-#if defined(PCV_NO_FLOW_METER)
   // This is a migration of the already-joined valve_2 device. Reusing a
   // DevNonce after NVS erase can make ChirpStack reject OTAA or weaken the
   // join history. Require the prior nonce buffer or a freshly provisioned
@@ -426,7 +354,6 @@ bool setupLoRaWan() {
     Serial.println("[LORAWAN][ERROR] Existing valve_2 OTAA nonces missing; join blocked.");
     return false;
   }
-#endif
   if (noncesRestored && rtcSessionMagic == RTC_SESSION_MAGIC_VALUE)
     (void)lorawan.setBufferSession(rtcLoRaWanSession);
 
@@ -478,7 +405,6 @@ void processRemoteCommand(const uint8_t *payload, size_t length,
     return;
   }
 
-#if defined(PCV_NO_FLOW_METER)
   if (command.hasFlowTotalReset) {
     retainedNodeState.statusReason = static_cast<uint8_t>(
         lora_protocol::StatusReason::InvalidCommandRejected);
@@ -493,7 +419,6 @@ void processRemoteCommand(const uint8_t *payload, size_t length,
     Serial.println("[LORAWAN] Valve command rejected: actuation locked.");
     return;
   }
-#endif
 
   if (retainedNodeState.hasLastCommand != 0 &&
       command.commandId == retainedNodeState.lastCommandId) {
@@ -513,7 +438,6 @@ void processRemoteCommand(const uint8_t *payload, size_t length,
       command.hasValveAction &&
       command.valveAction != lora_protocol::ValveAction::None;
   bool valveApplied = false;
-  bool flowTotalResetApplied = false;
   if (command.hasReportInterval)
     retainedNodeState.reportIntervalSeconds = command.reportIntervalSeconds;
 
@@ -537,29 +461,10 @@ void processRemoteCommand(const uint8_t *payload, size_t length,
     }
   }
 
-  if (command.hasFlowTotalReset) {
-    Serial.printf("[LORAWAN] Resetting local flow-total baseline, ID=%u.\n",
-                  command.commandId);
-    const FlowTotalResetResult result = pressureNode.resetFlowTotal();
-    flowTotalResetApplied = result.applied;
-    if (flowTotalResetApplied) {
-      retainedNodeState.flowTotalBaselineCubicMeters =
-          pressureNode.flowTotalBaselineCubicMeters();
-      retainedNodeState.hasFlowTotalBaseline = 1;
-    } else {
-      retainedNodeState.statusReason = static_cast<uint8_t>(
-          lora_protocol::StatusReason::FlowTotalResetFailed);
-      Serial.printf("[LORAWAN] Flow-total baseline reset failed: %s.\n",
-                    readingStatusName(result.totals.status));
-    }
-  }
-
-  if ((!requestsValveActuation || valveApplied) &&
-      (!command.hasFlowTotalReset || flowTotalResetApplied)) {
-    if (command.hasFlowTotalReset) {
-      retainedNodeState.statusReason = static_cast<uint8_t>(
-          lora_protocol::StatusReason::FlowTotalResetApplied);
-    } else if (requestsValveActuation && command.hasReportInterval) {
+  // A flow-total reset never reaches this point: it is rejected above, because
+  // this node has no meter to hold a baseline.
+  if (!requestsValveActuation || valveApplied) {
+    if (requestsValveActuation && command.hasReportInterval) {
       retainedNodeState.statusReason = static_cast<uint8_t>(
           lora_protocol::StatusReason::ValveAndReportIntervalApplied);
     } else if (requestsValveActuation) {
@@ -608,6 +513,14 @@ void buildCurrentStatusPayload(uint8_t *uplink) {
 
 StatusUplinkResult sendStatusUplink() {
   const PressureControlNodeStatus &status = pressureNode.refreshStatus();
+  // This payload carries the last *completed* cycle's reason; the successful
+  // send below then replaces it with PeriodicReport for the next one. The
+  // ordering is deliberate and must not be "corrected": a cycle that fails to
+  // join or fails to transmit produces no uplink at all, so the following
+  // uplink is the only place a join failure can ever reach the server. Moving
+  // the assignment above this call would silently delete that telemetry. A
+  // failure that persists keeps reporting itself, because the assignment is
+  // reached only after a successful send.
   uint8_t uplink[lora_protocol::STATUS_PAYLOAD_SIZE] = {};
   lora_protocol::buildStatusPayload(
       status,
@@ -683,18 +596,6 @@ void persistLocalStateIfChanged() {
     changed = true;
   }
 
-  if (pressureNode.hasFlowTotalBaseline() &&
-      (retainedNodeState.hasFlowTotalBaseline == 0 ||
-       retainedNodeState.flowTotalBaselineCubicMeters !=
-           pressureNode.flowTotalBaselineCubicMeters())) {
-    retainedNodeState.flowTotalBaselineCubicMeters =
-        pressureNode.flowTotalBaselineCubicMeters();
-    retainedNodeState.hasFlowTotalBaseline = 1;
-    retainedNodeState.statusReason = static_cast<uint8_t>(
-        lora_protocol::StatusReason::LocalCommandApplied);
-    changed = true;
-  }
-
   if (changed && !savePersistentState())
     Serial.println("[SYSTEM] Warning: local node state was not saved.");
 }
@@ -749,9 +650,6 @@ void enterDeepSleep() {
   }
 
   sleepRadio();
-#if !defined(PCV_NO_FLOW_METER)
-  if (flowTransportStarted) Serial2.end();
-#endif
   upstreamI2c.end();
   downstreamI2c.end();
   SPI.end();
@@ -881,16 +779,11 @@ void setup() {
                       config::pins::I2C_DOWNSTREAM_SCL,
                       config::pressure_sensor::I2C_FREQUENCY_HZ);
 
-  initializeFlowTransportIfConfigured();
   const bool essentialHardwareReady = pressureNode.begin();
   const auto retainedValveState = static_cast<PressureControlValveState>(
       retainedNodeState.lastValveState);
   if (retainedValveState != PressureControlValveState::Unknown)
     (void)pressureNode.restoreValveCommandedState(retainedValveState);
-  if (retainedNodeState.hasFlowTotalBaseline != 0 &&
-      !pressureNode.restoreFlowTotalBaseline(
-          retainedNodeState.flowTotalBaselineCubicMeters))
-    Serial.println("[FLOW][TOTAL] Stored baseline is invalid and was ignored.");
   printBootStatus(essentialHardwareReady);
 
   if (runtime::ACTIVE_MODE == runtime::Mode::SerialOnly) return;

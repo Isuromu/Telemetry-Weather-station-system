@@ -26,6 +26,8 @@ constexpr uint16_t modbusAddress(uint16_t documentedRegister) {
 inline constexpr uint16_t FLOW_RATE_REGISTER = modbusAddress(1);
 inline constexpr uint16_t VELOCITY_REGISTER = modbusAddress(5);
 inline constexpr uint16_t ERROR_CODE_REGISTER = modbusAddress(72);
+// REG0092-0094 in one transaction: the working step with the quality factor in
+// its low byte, then the up- and downstream transducer signal strengths.
 inline constexpr uint16_t SIGNAL_QUALITY_REGISTER = modbusAddress(92);
 // REG0113-REG0118 provide net, positive, and negative accumulators directly
 // as REAL4 cubic-metre values. They avoid the unit/multiplier reconstruction
@@ -38,6 +40,8 @@ inline constexpr uint16_t FLOW_AND_VELOCITY_REGISTER_COUNT = 6;
 inline constexpr uint8_t FLOW_AND_VELOCITY_BYTE_COUNT = 12;
 inline constexpr uint16_t ERROR_CODE_REGISTER_COUNT = 1;
 inline constexpr uint8_t ERROR_CODE_BYTE_COUNT = 2;
+inline constexpr uint16_t SIGNAL_QUALITY_REGISTER_COUNT = 3;
+inline constexpr uint8_t SIGNAL_QUALITY_BYTE_COUNT = 6;
 inline constexpr uint16_t FLOW_TOTALS_REGISTER_COUNT = 6;
 inline constexpr uint8_t FLOW_TOTALS_BYTE_COUNT = 12;
 

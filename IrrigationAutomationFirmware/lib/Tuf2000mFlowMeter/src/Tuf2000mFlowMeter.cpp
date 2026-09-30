@@ -192,6 +192,44 @@ FlowMeterWordOrderProbe Tuf2000mFlowMeter::probeWordOrder() {
           probe.lowWordFirstVelocityMetersPerSecond) &&
       isfinite(probe.lowWordFirstFlowRateM3PerHour) &&
       isfinite(probe.lowWordFirstVelocityMetersPerSecond);
+
+  probe.configuredLowWordFirst =
+      configuration_.floatWordOrder == tuf2000m::FloatWordOrder::LowWordFirst;
+  probe.configuredOrderValidated =
+      configuration_.floatWordOrder != tuf2000m::FloatWordOrder::Unspecified;
+
+  // Diagnostics are read after the measurement and never invalidate the probe:
+  // the raw bytes and both decodings above are still worth printing when the
+  // meter cannot answer a second transaction. A diagnostic failure is reported
+  // by leaving its availability flag false, not by changing status, which
+  // callers use to decide whether any response arrived at all.
+  ReadingStatus diagnosticStatus = ReadingStatus::ReadError;
+  const uint8_t *diagnosticData = nullptr;
+  if (readRegisters(tuf2000m::protocol::ERROR_CODE_REGISTER,
+                    tuf2000m::protocol::ERROR_CODE_REGISTER_COUNT,
+                    tuf2000m::protocol::ERROR_CODE_BYTE_COUNT, diagnosticData,
+                    diagnosticStatus)) {
+    probe.deviceErrorBits =
+        tuf2000m::protocol::decodeUint16(diagnosticData);
+    probe.diagnosticsAvailable = true;
+    probe.flowSampleValid =
+        (probe.deviceErrorBits &
+         tuf2000m::protocol::FLOW_VALIDITY_ERROR_MASK) == 0;
+  }
+
+  const uint8_t *signalData = nullptr;
+  if (readRegisters(tuf2000m::protocol::SIGNAL_QUALITY_REGISTER,
+                    tuf2000m::protocol::SIGNAL_QUALITY_REGISTER_COUNT,
+                    tuf2000m::protocol::SIGNAL_QUALITY_BYTE_COUNT, signalData,
+                    diagnosticStatus)) {
+    probe.signalQuality = signalData[1];
+    probe.upstreamSignalStrength =
+        tuf2000m::protocol::decodeUint16(&signalData[2]);
+    probe.downstreamSignalStrength =
+        tuf2000m::protocol::decodeUint16(&signalData[4]);
+    probe.signalQualityAvailable = true;
+  }
+
   probe.status = ReadingStatus::ValidUncalibrated;
   return probe;
 }

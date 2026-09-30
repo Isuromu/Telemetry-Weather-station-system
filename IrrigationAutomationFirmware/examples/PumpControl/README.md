@@ -307,3 +307,41 @@ Current conclusion: PumpNode remains operational; the fault is a USB-link
 failure coupled to the RS-485/VFD environment. The remaining causes to separate
 are high-frequency common-mode coupling through the hub/cabling, a shield or
 reference bypass, and pickup at the ESP32-side RS-485 converter.
+
+### CDI-E manual relevance to the USB-link fault
+
+**Manual facts.** The supplied DELIXI CDI-E operating manual does not mention
+USB or ESP32, so it does not diagnose a USB disconnect directly. It does state
+that VFD electromagnetic interference can modulate signal wiring and cause an
+external controller to operate incorrectly. It identifies the VFD's
+high-frequency output and motor-cable radiation as radio-noise sources, and
+states that a long motor cable or high IGBT carrier frequency can adversely
+affect peripheral equipment. Source: `delixi-instrukciya-po-ekspluatacii.pdf`,
+PDF p. 37 (printed p. 30).
+
+The manual recommends separating signal/control wiring from high-current and
+motor wiring by more than 30 cm; shielded wiring; short VFD-to-motor wiring;
+and appropriate input/output noise filters. Source: PDF p. 37 (printed p. 30).
+It separately says to isolate control wiring from main and relay-power circuits,
+use shielded or double-shielded twisted pair, and connect the control-cable
+shield to the VFD PE terminal. Source: PDF pp. 47-48 (printed pp. 40-41).
+An input-side noise filter reduces high-frequency noise conducted toward the
+supply; the appendix says the filter also suppresses conducted EMI, external
+radio noise, and transient voltage impulses, and should be close to the VFD
+with short connections. Source: PDF p. 36 (printed p. 29) and PDF pp. 253-254
+(printed pp. 246-247).
+
+For RS-485, the manual names only `SG+` and `SG-`; it does not direct an
+installer to join VFD signal ground to controller logic ground. Source: PDF
+p. 235 (printed p. 228).
+
+**Project implication.** The observed USB loss is consistent with the manual's
+described interference mechanism, but it remains a USB-link failure rather than
+an observed ESP32 reset: 3.3 V and `EN` were stable and PumpNode kept receiving
+commands. Keep the VFD-side reference, cable shield, and ESP32 logic ground
+separate as required by their interfaces; do not create a ground connection as
+an attempted noise cure. Confirm the actual shield/PE routing and the hub's
+power-reference wiring, then evaluate a dedicated high-common-mode-transient,
+galvanically isolated RS-485 transceiver installed beside PumpNode. A USB
+isolator remains useful for laptop commissioning but does not replace field-bus
+isolation.

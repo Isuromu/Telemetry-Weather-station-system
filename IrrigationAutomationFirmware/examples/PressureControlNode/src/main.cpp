@@ -551,6 +551,14 @@ void buildCurrentStatusPayload(uint8_t *uplink) {
 StatusUplinkResult sendStatusUplink(bool refreshMeasurements = true) {
   const PressureControlNodeStatus &status =
       refreshMeasurements ? pressureNode.refreshStatus() : pressureNode.status();
+  // This payload carries the last *completed* cycle's reason; the successful
+  // send below then replaces it with PeriodicReport for the next one. The
+  // ordering is deliberate and must not be "corrected": a cycle that fails to
+  // join or fails to transmit produces no uplink at all, so the following
+  // uplink is the only place a join failure can ever reach the server. Moving
+  // the assignment above this call would silently delete that telemetry. A
+  // failure that persists keeps reporting itself, because the assignment is
+  // reached only after a successful send.
   uint8_t uplink[lora_protocol::STATUS_PAYLOAD_SIZE] = {};
   lora_protocol::buildStatusPayload(
       status,
