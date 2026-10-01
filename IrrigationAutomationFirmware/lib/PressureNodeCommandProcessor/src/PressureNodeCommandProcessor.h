@@ -25,6 +25,9 @@ class PressureNodeCommandProcessor {
   void printBattery(const BatteryReading &reading);
   void printPressure(const char *label, const PressureReading &reading);
   void printPressurePair(const PressurePairReading &readings);
+  void printTuf2000mErrorBits(const __FlashStringHelper *prefix,
+                              uint16_t errorBits,
+                              bool flowSampleValid);
   void printFlowTotals(const FlowTotalReading &reading);
   void handleFlowTotalReset();
   void printFlowWordOrderProbe(const FlowMeterWordOrderProbe &probe);

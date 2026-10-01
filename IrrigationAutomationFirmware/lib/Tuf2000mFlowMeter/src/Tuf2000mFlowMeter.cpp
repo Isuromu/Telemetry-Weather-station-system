@@ -110,11 +110,9 @@ FlowReading Tuf2000mFlowMeter::read() {
   reading.deviceErrorBits =
       tuf2000m::protocol::decodeUint16(diagnosticData);
   reading.diagnosticsAvailable = true;
-  reading.status =
-      (reading.deviceErrorBits &
-       tuf2000m::protocol::FLOW_VALIDITY_ERROR_MASK) == 0
-          ? ReadingStatus::Valid
-          : ReadingStatus::ReadError;
+  reading.status = tuf2000m::protocol::flowSampleValid(reading.deviceErrorBits)
+                       ? ReadingStatus::Valid
+                       : ReadingStatus::ReadError;
   return reading;
 }
 
@@ -216,8 +214,7 @@ FlowMeterWordOrderProbe Tuf2000mFlowMeter::probeWordOrder() {
         tuf2000m::protocol::decodeUint16(diagnosticData);
     probe.diagnosticsAvailable = true;
     probe.flowSampleValid =
-        (probe.deviceErrorBits &
-         tuf2000m::protocol::FLOW_VALIDITY_ERROR_MASK) == 0;
+        tuf2000m::protocol::flowSampleValid(probe.deviceErrorBits);
   }
 
   const uint8_t *signalData = nullptr;

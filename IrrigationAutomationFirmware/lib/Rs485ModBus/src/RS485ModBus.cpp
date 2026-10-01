@@ -1,5 +1,7 @@
 #include "RS485ModBus.h"
 
+#include <ModbusErrorMeaning.h>
+
 #include <string.h>
 
 RS485Bus::RS485Bus()
@@ -335,11 +337,21 @@ void RS485Bus::logStatus(const Rs485Result &result, bool debug) const {
   logger_->print(F(", bytes="), true);
   logger_->println(static_cast<unsigned long>(result.responseLength), true);
   if (result.status == Rs485Status::ModbusException) {
-    logger_->print(F("[MODBUS] Exception=0x"), true);
-    logger_->println(result.exceptionCode, true, "", HEX);
+    logger_->print(F("[MODBUS] Exception: "), true);
+    logger_->print(
+        irrigation::diagnostics::modbusExceptionMeaning(result.exceptionCode),
+        true);
+    logger_->print(F(" [0x"), true);
+    if (result.exceptionCode < 0x10U) logger_->print('0', true);
+    logger_->print(result.exceptionCode, true, "", HEX);
+    logger_->println(F("]"), true);
   } else if (result.status == Rs485Status::DeviceError) {
-    logger_->print(F("[MODBUS] CDI-E error="), true);
-    logger_->println(static_cast<unsigned long>(result.deviceErrorCode), true);
+    logger_->print(F("[MODBUS] CDI-E device error [0x"), true);
+    if (result.deviceErrorCode < 0x1000U) logger_->print('0', true);
+    if (result.deviceErrorCode < 0x0100U) logger_->print('0', true);
+    if (result.deviceErrorCode < 0x0010U) logger_->print('0', true);
+    logger_->print(result.deviceErrorCode, true, "", HEX);
+    logger_->println(F("]"), true);
   }
 }
 

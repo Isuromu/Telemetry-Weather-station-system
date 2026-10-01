@@ -11,6 +11,7 @@
 #include <PrintController.h>
 #include <RS485ModBus.h>
 #include <RadioLib.h>
+#include <RadioErrorMeaning.h>
 #include <SerialAccess.h>
 #include <SPI.h>
 #include <Tuf2000mFlowMeter.h>
@@ -375,7 +376,8 @@ bool setupLoRaWan() {
       868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 0.0,
       false);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] SX1262 initialization failed: %d\n", state);
+    Serial.printf("[LORAWAN] SX1262 initialization failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   radioInitialized = true;
@@ -385,7 +387,8 @@ bool setupLoRaWan() {
   state = lorawan.beginOTAA(lora_secrets::JOIN_EUI, lora_secrets::DEV_EUI,
                             nullptr, lora_secrets::APP_KEY);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] beginOTAA failed: %d\n", state);
+    Serial.printf("[LORAWAN] beginOTAA failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   lorawan.setADR(true);
@@ -400,7 +403,8 @@ bool setupLoRaWan() {
       state != RADIOLIB_LORAWAN_SESSION_RESTORED) {
     (void)saveNoncesToNvs();
     rtcSessionMagic = 0;
-    Serial.printf("[LORAWAN] OTAA activation failed: %d\n", state);
+    Serial.printf("[LORAWAN] OTAA activation failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   // Do not rewrite flash on every one-minute RTC session restore. DevNonce
@@ -413,7 +417,8 @@ bool setupLoRaWan() {
                      : "[LORAWAN] Session restored from RTC memory.");
   state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_A);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] Could not select Class A: %d\n", state);
+    Serial.printf("[LORAWAN] Could not select Class A: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   return true;
@@ -590,7 +595,8 @@ StatusUplinkResult sendStatusUplink(bool refreshMeasurements = true) {
   if (state < RADIOLIB_ERR_NONE) {
     retainedNodeState.statusReason =
         static_cast<uint8_t>(lora_protocol::StatusReason::LoRaWanError);
-    Serial.printf("[LORAWAN] Uplink failed: %d\n", state);
+    Serial.printf("[LORAWAN] Uplink failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return {};
   }
 
@@ -618,7 +624,8 @@ bool sendCommandAcknowledgementUplink() {
   if (state < RADIOLIB_ERR_NONE) {
     retainedNodeState.statusReason =
         static_cast<uint8_t>(lora_protocol::StatusReason::LoRaWanError);
-    Serial.printf("[LORAWAN] Command acknowledgement failed: %d\n", state);
+    Serial.printf("[LORAWAN] Command acknowledgement failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
 
@@ -671,7 +678,8 @@ void sleepRadio() {
   if (radioInitialized) {
     const int16_t state = radio.sleep(true);
     if (state != RADIOLIB_ERR_NONE)
-      Serial.printf("[LORAWAN] Radio sleep warning: %d\n", state);
+      Serial.printf("[LORAWAN] Radio sleep warning: %s [%d]\n",
+                    irrigation::diagnostics::radioErrorMeaning(state), state);
   }
   setRfSwitchOff();
 }
@@ -732,7 +740,9 @@ bool initializeHybridClassC() {
 
   const int16_t classState = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_C);
   if (classState != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] Class C activation failed: %d\n", classState);
+    Serial.printf("[LORAWAN] Class C activation failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(classState),
+                  classState);
     return false;
   }
   loRaWanReady = true;
@@ -765,7 +775,9 @@ void serviceHybridClassC() {
   const int16_t downlinkState = lorawan.getDownlinkClassC(
       downlink, &downlinkLength, &downlinkEvent);
   if (downlinkState < RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] Class C downlink error: %d\n", downlinkState);
+    Serial.printf("[LORAWAN] Class C downlink error: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(downlinkState),
+                  downlinkState);
   } else if (downlinkState > RADIOLIB_ERR_NONE) {
     saveSessionToRtc();
     if (downlinkLength > 0) {

@@ -130,6 +130,13 @@ erase the TUF-2000M internal accumulators. See
   sources, including the persistent local water-total baseline
 - `PressureNodeLoRaProtocol`: versioned ChirpStack command/status payloads
 
+## Diagnostics convention
+
+Libraries and examples that present a numeric radio, protocol, or device diagnostic
+must use `meaning [code]`, for example `poor received signal [0x0004]` or
+`no OTAA JoinAccept received in RX1/RX2 [-1116]`. Keep the raw code and decode known
+bitfields; do not log numeric errors alone.
+
 ## Documentation
 
 - [Hardware manual index and reading guide](docs/references/README.md)

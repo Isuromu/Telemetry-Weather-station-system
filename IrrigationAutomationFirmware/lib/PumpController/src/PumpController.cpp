@@ -80,7 +80,10 @@ bool PumpController::start() {
   status_.vfdFaultCode = fault;
   if (fault != 0) {
     logger_.print(F("[PUMP][ERROR] Start blocked by VFD fault: "), true);
-    logger_.println(DelixiCDIE100::faultName(fault), true);
+    logger_.print(DelixiCDIE100::faultName(fault), true);
+    logger_.print(F(" ["), true);
+    logger_.print(static_cast<unsigned long>(fault), true);
+    logger_.println(F("]"), true);
     return false;
   }
   DelixiRunState state = DelixiRunState::Unknown;

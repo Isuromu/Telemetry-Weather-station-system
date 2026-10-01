@@ -2,6 +2,7 @@
 #include <BatteryMonitor.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <RadioErrorMeaning.h>
 #include <SerialAccess.h>
 #include <SPI.h>
 #include <driver/gpio.h>
@@ -290,7 +291,8 @@ bool setupLoRaWan() {
       868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 0.0,
       false);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] SX1262 initialization failed: %d\n", state);
+    Serial.printf("[LORAWAN] SX1262 initialization failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   radioInitialized = true;
@@ -300,7 +302,8 @@ bool setupLoRaWan() {
   state = lorawan.beginOTAA(lora_secrets::JOIN_EUI, lora_secrets::DEV_EUI,
                             nullptr, lora_secrets::APP_KEY);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] beginOTAA failed: %d\n", state);
+    Serial.printf("[LORAWAN] beginOTAA failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
 
@@ -317,7 +320,8 @@ bool setupLoRaWan() {
       state != RADIOLIB_LORAWAN_SESSION_RESTORED) {
     (void)saveNoncesToNvs();
     rtcSessionMagic = 0;
-    Serial.printf("[LORAWAN] OTAA activation failed: %d\n", state);
+    Serial.printf("[LORAWAN] OTAA activation failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
 
@@ -360,7 +364,8 @@ void sendTelemetry(const lora_protocol::Telemetry &telemetry) {
   saveSessionToRtc();
 
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] Uplink failed: %d\n", state);
+    Serial.printf("[LORAWAN] Uplink failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return;
   }
 
@@ -377,7 +382,8 @@ void enterDeepSleep() {
   if (radioInitialized) {
     const int16_t state = radio.sleep(true);
     if (state != RADIOLIB_ERR_NONE) {
-      Serial.printf("[LORAWAN] Radio sleep warning: %d\n", state);
+      Serial.printf("[LORAWAN] Radio sleep warning: %s [%d]\n",
+                    irrigation::diagnostics::radioErrorMeaning(state), state);
     }
   }
   setRfSwitchOff();

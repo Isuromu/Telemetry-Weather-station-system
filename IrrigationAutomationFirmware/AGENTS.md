@@ -45,6 +45,9 @@ the PCB; mains sites use an external certified isolated 230 VAC to 12 VDC supply
   (ESP32, Serial and continuous receive active; interval = telemetry interval);
   low-power LoRaWAN Class A (RX1/RX2 commands, immediate application acknowledgement,
   then real timer deep sleep; interval = sleep time). Never regress to raw LoRa.
+- All LoRa-capable examples must present RadioLib and device diagnostic codes as
+  `meaning [code]`. Retain the raw value for field diagnosis; decode known
+  bitfields such as TUF-2000M REG0072/M08 rather than logging only a number.
 - TUF-2000M Modbus RTU is implemented and commissioned, not a missing-protocol
   placeholder. M46 address is 1; UART2 GPIO16/GPIO17 uses automatic-direction RS485.
   Hardware confirms `LOW_WORD_FIRST`: REG0221..0222 bytes `00 00 42 64` decode

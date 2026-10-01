@@ -1,6 +1,7 @@
 #include "PressureNodeCommandProcessor.h"
 
 #include <SerialDebugMode.h>
+#include <Tuf2000mProtocol.h>
 
 #include <ctype.h>
 #include <string.h>
@@ -135,8 +136,9 @@ void PressureNodeCommandProcessor::printFlow(const FlowReading &reading) {
   logger_.print(F("[FLOW] Status: "), true);
   logger_.println(readingStatusName(reading.status), true);
   if (reading.diagnosticsAvailable) {
-    logger_.print(F("[FLOW] TUF-2000M error bits: 0x"), true);
-    logger_.println(reading.deviceErrorBits, true, "", HEX);
+    printTuf2000mErrorBits(
+        F("[FLOW] TUF-2000M: "), reading.deviceErrorBits,
+        tuf2000m::protocol::flowSampleValid(reading.deviceErrorBits));
   }
   if (!reading.hasSample()) {
     if (reading.status == ReadingStatus::ConfigurationMissing) {
@@ -158,6 +160,31 @@ void PressureNodeCommandProcessor::printFlow(const FlowReading &reading) {
     logger_.print(reading.velocityMetersPerSecond, true, "", 3);
     logger_.println(F(" m/s"), true);
   }
+}
+
+void PressureNodeCommandProcessor::printTuf2000mErrorBits(
+    const __FlashStringHelper *prefix, uint16_t errorBits,
+    bool flowSampleValid) {
+  logger_.print(prefix, true);
+  if (errorBits == 0) {
+    logger_.print(F("system normal"), true);
+  } else {
+    bool first = true;
+    for (uint8_t bit = 0; bit < 16; ++bit) {
+      if ((errorBits & (static_cast<uint16_t>(1U) << bit)) == 0) continue;
+      if (!first) logger_.print(F("; "), true);
+      logger_.print(tuf2000m::protocol::errorBitMeaning(bit), true);
+      first = false;
+    }
+  }
+  logger_.print(F(" [0x"), true);
+  if (errorBits < 0x1000U) logger_.print('0', true);
+  if (errorBits < 0x0100U) logger_.print('0', true);
+  if (errorBits < 0x0010U) logger_.print('0', true);
+  logger_.print(errorBits, true, "", HEX);
+  logger_.println(flowSampleValid ? F("] (flow sample valid)")
+                                   : F("] (flow sample invalid)"),
+                  true);
 }
 
 void PressureNodeCommandProcessor::printFlowTotals(
@@ -243,12 +270,8 @@ void PressureNodeCommandProcessor::printFlowWordOrderProbe(
   }
 
   if (probe.diagnosticsAvailable) {
-    logger_.print(F("[FLOW][PROBE] TUF-2000M error bits: 0x"), true);
-    logger_.print(probe.deviceErrorBits, true, "", HEX);
-    logger_.println(probe.flowSampleValid
-                        ? F(" (flow sample valid)")
-                        : F(" (flow sample INVALID)"),
-                    true);
+    printTuf2000mErrorBits(F("[FLOW][PROBE] TUF-2000M: "),
+                            probe.deviceErrorBits, probe.flowSampleValid);
   } else {
     logger_.println(
         F("[FLOW][PROBE] TUF-2000M error bits unavailable; this probe cannot "

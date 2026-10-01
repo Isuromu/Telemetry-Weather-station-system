@@ -50,6 +50,32 @@ inline constexpr uint8_t FLOW_TOTALS_BYTE_COUNT = 12;
 // reading but do not invalidate flow by themselves.
 inline constexpr uint16_t FLOW_VALIDITY_ERROR_MASK = 0x4F3FU;
 
+constexpr const char *errorBitMeaning(uint8_t bit) {
+  switch (bit) {
+    case 0: return "no received signal";
+    case 1: return "low received signal";
+    case 2: return "poor received signal";
+    case 3: return "empty pipe";
+    case 4: return "hardware failure";
+    case 5: return "receiver gain adjusting";
+    case 6: return "frequency output overflow";
+    case 7: return "4-20 mA output overflow";
+    case 8: return "RAM checksum error";
+    case 9: return "main/timer clock error";
+    case 10: return "parameter checksum error";
+    case 11: return "ROM checksum error";
+    case 12: return "temperature circuit error";
+    case 13: return "reserved bit 13";
+    case 14: return "internal timer overflow";
+    case 15: return "analog input over range";
+    default: return "unknown TUF-2000M error bit";
+  }
+}
+
+constexpr bool flowSampleValid(uint16_t errorBits) {
+  return (errorBits & FLOW_VALIDITY_ERROR_MASK) == 0;
+}
+
 struct ReadHoldingRegistersRequest {
   uint8_t bytes[READ_REQUEST_LENGTH_WITHOUT_CRC]{};
 };

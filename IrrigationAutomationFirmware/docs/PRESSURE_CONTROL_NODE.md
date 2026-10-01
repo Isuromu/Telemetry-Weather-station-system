@@ -67,7 +67,9 @@ setting deployment intervals.
 
 The supplied technical manual confirms function 03, zero-based Modbus start
 addresses, factory 9600 8N1 framing, REG0001-0002 flow rate in m3/h,
-REG0005-0006 velocity in m/s, and REG0072 error bits. These reads and the
+REG0005-0006 velocity in m/s, and REG0072 error bits. `flow` and `flow probe`
+print each active M08 bit's readable meaning followed by the retained raw
+16-bit value, for example `poor received signal [0x0004]`. These reads and the
 manual's example-frame CRC are implemented and covered by compile tests.
 
 GPIO16/GPIO17 are assigned to UART2 for the automatic-direction RS-485

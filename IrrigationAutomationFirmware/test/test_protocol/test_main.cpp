@@ -38,6 +38,10 @@ static_assert(tuf::ERROR_CODE_REGISTER == 0x0047,
               "REG0072 must map to Modbus address 0x0047.");
 static_assert(tuf::FLOW_TOTALS_REGISTER == 0x0070,
               "REG0113 must map to Modbus address 0x0070.");
+static_assert(tuf::flowSampleValid(0x0000),
+              "A clear TUF error register must validate a flow sample.");
+static_assert(!tuf::flowSampleValid(0x0004),
+              "Poor TUF received signal must invalidate a flow sample.");
 
 void test_manual_forward_command_crc() {
   const uint8_t request[] = {0x01, 0x06, 0xA0, 0x00, 0x00, 0x01};
@@ -118,6 +122,20 @@ void test_tuf_low_word_first_flow_totals_decode() {
   TEST_ASSERT_FLOAT_WITHIN(0.0001F, 1.0F, negative);
 }
 
+void test_tuf_error_bit_meanings_and_flow_validity() {
+  TEST_ASSERT_EQUAL_STRING("no received signal", tuf::errorBitMeaning(0));
+  TEST_ASSERT_EQUAL_STRING("low received signal", tuf::errorBitMeaning(1));
+  TEST_ASSERT_EQUAL_STRING("poor received signal", tuf::errorBitMeaning(2));
+  TEST_ASSERT_EQUAL_STRING("empty pipe", tuf::errorBitMeaning(3));
+  TEST_ASSERT_EQUAL_STRING("internal timer overflow",
+                           tuf::errorBitMeaning(14));
+  TEST_ASSERT_EQUAL_STRING("analog input over range",
+                           tuf::errorBitMeaning(15));
+  TEST_ASSERT_TRUE(tuf::flowSampleValid(0x0000));
+  TEST_ASSERT_FALSE(tuf::flowSampleValid(0x0005));
+  TEST_ASSERT_TRUE(tuf::flowSampleValid(0x00C0));
+}
+
 void setup() {
   UNITY_BEGIN();
   RUN_TEST(test_manual_forward_command_crc);
@@ -127,6 +145,7 @@ void setup() {
   RUN_TEST(test_tuf_real4_word_orders);
   RUN_TEST(test_tuf_flow_and_velocity_decode);
   RUN_TEST(test_tuf_low_word_first_flow_totals_decode);
+  RUN_TEST(test_tuf_error_bit_meanings_and_flow_validity);
   UNITY_END();
 }
 

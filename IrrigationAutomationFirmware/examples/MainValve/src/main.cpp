@@ -33,6 +33,8 @@
 #include <HardwareSerial.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <RadioErrorMeaning.h>
+#include <ModbusErrorMeaning.h>
 #include <SerialAccess.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -338,8 +340,9 @@ bool readModbusFrame(uint8_t *frame, size_t capacity, size_t &length) {
     return false;
   }
   if ((frame[1] & 0x80U) != 0) {
-    Serial.printf("Actuator Modbus exception: function=0x%02X code=0x%02X\n",
-                  frame[1], frame[2]);
+    Serial.printf("Actuator Modbus exception: %s [0x%02X], function [0x%02X]\n",
+                  irrigation::diagnostics::modbusExceptionMeaning(frame[2]),
+                  frame[2], frame[1]);
     return false;
   }
   return true;
@@ -763,7 +766,8 @@ bool sendStatusUplink(bool confirmed) {
   lastStatusUplinkMs = millis();
 
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("LoRaWAN status uplink failed: %d\n", state);
+    Serial.printf("LoRaWAN status uplink failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   if (event) {
@@ -785,7 +789,8 @@ bool setupLoRaWAN() {
     868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
     10, 8, 0.0, false);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("SX1262 initialization failed: %d\n", state);
+    Serial.printf("SX1262 initialization failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   radio.setRfSwitchPins(LORA_RXEN_PIN, LORA_TXEN_PIN);
@@ -797,7 +802,8 @@ bool setupLoRaWAN() {
   state = lorawan.beginOTAA(LORAWAN_JOIN_EUI, LORAWAN_DEV_EUI,
                             nullptr, LORAWAN_APP_KEY);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("beginOTAA failed: %d\n", state);
+    Serial.printf("beginOTAA failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   lorawan.setADR(true);
@@ -810,7 +816,8 @@ bool setupLoRaWAN() {
   if (state != RADIOLIB_LORAWAN_NEW_SESSION &&
       state != RADIOLIB_LORAWAN_SESSION_RESTORED) {
     (void)saveNoncesToNvs();
-    Serial.printf("OTAA activation failed: %d\n", state);
+    Serial.printf("OTAA activation failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     rtcSessionMagic = 0;
     return false;
   }
@@ -825,7 +832,8 @@ bool setupLoRaWAN() {
 
   state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_C);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Could not request Class C: %d\n", state);
+    Serial.printf("Could not request Class C: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return true;  // Class-A fallback.
   }
 
@@ -848,10 +856,12 @@ void printStatus() {
   readActuatorStatus();
   if (actuator.communicationValid) {
     Serial.printf("Actuator: actual %.1f deg (%.1f%%), target %.1f deg (%.1f%%), "
-                  "mode=%s, fault=0x%04X\n",
+                  "mode=%s, fault=%s [0x%04X]\n",
                   actuator.actualDegrees, actuator.actualPercent,
                   actuator.targetDegrees, actuator.targetPercent,
                   actuator.mode == 1 ? "RS485 bus" : "analog",
+                  actuator.faultCode == 0 ? "no actuator fault"
+                                         : "actuator-reported fault",
                   actuator.faultCode);
   } else {
     Serial.println("Actuator: communication unavailable.");
@@ -989,7 +999,8 @@ void loop() {
       processRemoteCommand(downlink, downlinkLength, event.fPort);
       saveSessionToRtc();
     } else if (state < RADIOLIB_ERR_NONE) {
-      Serial.printf("Class-C receive error: %d\n", state);
+      Serial.printf("Class-C receive error: %s [%d]\n",
+                    irrigation::diagnostics::radioErrorMeaning(state), state);
     }
   }
 

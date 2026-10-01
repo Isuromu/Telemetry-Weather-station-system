@@ -3,6 +3,7 @@
 #include <BatteryMonitor.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <RadioErrorMeaning.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <esp_sleep.h>
@@ -315,7 +316,8 @@ bool setupLoRaWan(bool wokeFromDeepSleep) {
       868.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 14, 8, 0.0,
       false);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] SX1262 initialization failed: %d\n", state);
+    Serial.printf("[LORAWAN] SX1262 initialization failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   radioInitialized = true;
@@ -325,7 +327,8 @@ bool setupLoRaWan(bool wokeFromDeepSleep) {
   state = lorawan.beginOTAA(secrets::JOIN_EUI, secrets::DEV_EUI, nullptr,
                             secrets::APP_KEY);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] beginOTAA failed: %d\n", state);
+    Serial.printf("[LORAWAN] beginOTAA failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   lorawan.setADR(true);
@@ -344,7 +347,8 @@ bool setupLoRaWan(bool wokeFromDeepSleep) {
       return false;
     }
     if (state != RADIOLIB_LORAWAN_NEW_SESSION) {
-      Serial.printf("[LORAWAN] OTAA activation failed: %d\n", state);
+      Serial.printf("[LORAWAN] OTAA activation failed: %s [%d]\n",
+                    irrigation::diagnostics::radioErrorMeaning(state), state);
       rtcSessionMagic = 0;
       return false;
     }
@@ -389,7 +393,8 @@ void sendTelemetry(const protocol::Telemetry &telemetry) {
       &downlinkLength, false, nullptr, &downlinkEvent);
   saveSessionToRtc();
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("[LORAWAN] Uplink failed: %d\n", state);
+    Serial.printf("[LORAWAN] Uplink failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
   } else {
     Serial.println("[LORAWAN] Uplink sent; RX1/RX2 completed.");
     if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
@@ -408,7 +413,8 @@ void sendTelemetry(const protocol::Telemetry &telemetry) {
             ignoredDownlink, &ignoredLength, false, nullptr, &ignoredEvent);
         saveSessionToRtc();
         if (ackState < RADIOLIB_ERR_NONE) {
-          Serial.printf("[LORAWAN] Application acknowledgement failed: %d\n",
+          Serial.printf("[LORAWAN] Application acknowledgement failed: %s [%d]\n",
+                        irrigation::diagnostics::radioErrorMeaning(ackState),
                         ackState);
         } else {
           Serial.println("[LORAWAN] Application acknowledgement sent.");

@@ -5,6 +5,8 @@
 #include <Preferences.h>
 #include <RadioLib.h>
 #include <SerialAccess.h>
+#include <RadioErrorMeaning.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 
 #if __has_include("PumpControlLoRaSecrets.h")
@@ -86,21 +88,6 @@ uint16_t get16(const uint8_t *source) {
   return (static_cast<uint16_t>(source[0]) << 8) | source[1];
 }
 
-const char *radioErrorMeaning(int16_t state) {
-  switch (state) {
-    case RADIOLIB_ERR_NONE: return "no error";
-    case RADIOLIB_ERR_CHIP_NOT_FOUND: return "radio chip not found";
-    case RADIOLIB_ERR_TX_TIMEOUT: return "radio transmit timeout";
-    case RADIOLIB_ERR_RX_TIMEOUT: return "radio receive timeout";
-    case RADIOLIB_ERR_INVALID_FREQUENCY: return "invalid radio frequency";
-    case RADIOLIB_ERR_SPI_WRITE_FAILED: return "radio SPI write failed";
-    case RADIOLIB_ERR_NETWORK_NOT_JOINED: return "LoRaWAN network not joined";
-    case RADIOLIB_ERR_NO_JOIN_ACCEPT:
-      return "no OTAA JoinAccept received in RX1/RX2";
-    default: return "unclassified RadioLib error";
-  }
-}
-
 uint32_t statusSignature() {
   const PumpStatus &s = pump.status();
   uint32_t signature = s.communicationOk ? 1U : 0U;
@@ -129,8 +116,8 @@ void scheduleJoinRetry(int16_t state) {
   nextJoinAttemptMs = millis() + retryMs;
   lastJoinRetrySeconds = static_cast<uint16_t>((retryMs + 999) / 1000);
   Serial.printf(
-      "Pump LoRaWAN join attempt %u failed: %s (%d); next attempt in %u s.\n",
-      joinAttemptCount, radioErrorMeaning(state), state,
+      "Pump LoRaWAN join attempt %u failed: %s [%d]; next attempt in %u s.\n",
+      joinAttemptCount, irrigation::diagnostics::radioErrorMeaning(state), state,
       lastJoinRetrySeconds);
 }
 
@@ -333,8 +320,8 @@ bool sendStatus(bool confirmed) {
   lastStatusMs = millis();
   statusPending = false;
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("LoRaWAN status uplink failed: %s (%d)\n",
-                  radioErrorMeaning(state), state);
+    Serial.printf("LoRaWAN status uplink failed: %s [%d]\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   lastStatusSignature = statusSignature();
@@ -382,7 +369,8 @@ bool setupLoRaWAN() {
                 joinAttemptCount);
   state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_C);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Class C unavailable (%d); using Class A windows.\n", state);
+    Serial.printf("Class C unavailable: %s [%d]; using Class A windows.\n",
+                  irrigation::diagnostics::radioErrorMeaning(state), state);
     return true;
   }
   for (uint8_t attempt = 0; attempt < 3; ++attempt) {
@@ -501,7 +489,8 @@ void loop() {
     if (state > 0 && downlinkLength > 0) {
       (void)processRemoteCommand(downlink, downlinkLength, event.fPort);
     } else if (state < RADIOLIB_ERR_NONE) {
-      Serial.printf("Pump Class C receive error: %d\n", state);
+      Serial.printf("Pump Class C receive error: %s [%d]\n",
+                    irrigation::diagnostics::radioErrorMeaning(state), state);
     }
   }
   const uint32_t now = millis();

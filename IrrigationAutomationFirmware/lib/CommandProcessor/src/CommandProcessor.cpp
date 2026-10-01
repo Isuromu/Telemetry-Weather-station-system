@@ -120,10 +120,11 @@ void CommandProcessor::handlePump(int argc, char *argv[]) {
   } else if (strcmp(argv[1], "fault") == 0) {
     uint16_t code = 0;
     if (vfd_.readFaultCode(code)) {
-      logger_.print(F("[VFD] Fault "), true);
+      logger_.print(F("[VFD] Fault: "), true);
+      logger_.print(DelixiCDIE100::faultName(code), true);
+      logger_.print(F(" ["), true);
       logger_.print(static_cast<unsigned long>(code), true);
-      logger_.print(F(": "), true);
-      logger_.println(DelixiCDIE100::faultName(code), true);
+      logger_.println(F("]"), true);
     } else {
       logger_.println(F("[VFD][ERROR] Fault read failed."), true);
     }
@@ -152,9 +153,10 @@ void CommandProcessor::printPumpStatus(bool telemetry) {
   logger_.print(status.actualFrequencyHz, true, "", 2);
   logger_.println(F(" Hz"), true);
   logger_.print(F("[PUMP] Fault: "), true);
+  logger_.print(DelixiCDIE100::faultName(status.vfdFaultCode), true);
+  logger_.print(F(" ["), true);
   logger_.print(static_cast<unsigned long>(status.vfdFaultCode), true);
-  logger_.print(F(" - "), true);
-  logger_.println(DelixiCDIE100::faultName(status.vfdFaultCode), true);
+  logger_.println(F("]"), true);
   if (!telemetry) return;
   logger_.print(F("[PUMP] Reference frequency: "), true);
   logger_.print(status.referenceFrequencyHz, true, "", 2);
