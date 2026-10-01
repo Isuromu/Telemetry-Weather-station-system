@@ -1,0 +1,7 @@
+{
+  "name": "SerialDebugMode",
+  "version": "1.0.0",
+  "description": "Shared runtime verbosity mode for authenticated serial diagnostics.",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
