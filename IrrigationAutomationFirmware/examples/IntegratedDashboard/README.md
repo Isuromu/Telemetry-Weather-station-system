@@ -139,27 +139,16 @@ low-power builds (`pio run -e pcv_low_power_class_a` and
 timer to match, which is what makes the change matter for the battery-powered
 valves.
 
-PumpControl needs three limits rather than two, because its stopped state is asked
-two different questions. `pumpOnlineMaxAgeSec: 180` is the liveness one — *is the
-pump talking to us at all?* — and it is what the Start gate and the card read. At
-the 60-second stopped heartbeat (`STATUS_INTERVAL_STOPPED_MS` in
-`examples/PumpControl/src/main.cpp`) that is three uplinks, so one lost heartbeat
-no longer refuses Start with *Pump offline, running or faulted*, or flickers the
-card stale. `pumpStoppedMaxAgeSec: 75` is the tighter one and belongs to a single
-question: *may the stop sequence believe this "stopped" report and close the
-valves?* Being wrong there means closing the field valves and then the main valve
-onto a pump that is actually running, so it stays tight at 1.25 intervals.
-`pumpRunningMaxAgeSec: 45` has both jobs while the pump runs — three of its
-15-second running cadence, and running is the state worth knowing about. The two
-stopped limits bracket each other deliberately: `pumpOnlineMaxAgeSec` sits above
-`pumpStopTimeoutSec`, so a stop confirmation that has aged out is judged against
-the same clock as its own deadline instead of stalling between the two.
+PumpControl reports every 60 seconds while stopped and every 15 seconds while
+running. `pumpOnlineMaxAgeSec: 180` is the Start-gate and card liveness limit;
+`pumpStoppedMaxAgeSec: 75` is the tighter limit used before the stop sequence may
+trust a stopped report and close valves; `pumpRunningMaxAgeSec: 45` covers the
+running state. The 150-second command timeouts still exceed PumpControl's
+120-second final-condition timeout.
 
-One consequence is worth knowing before it is seen. A stopped report 76–180 s old
-is now fresh enough to start from but too old to close the valves on, so a stop
-pressed at that moment sends a stop command and waits for the acknowledgement
-rather than going straight to closing. That is the intended trade: the extra round
-trip is cheap, and it is the case where the pump's own radio has gone quiet.
+A stopped report 76–180 seconds old is fresh enough to start from but too old to
+close valves on. A stop at that point sends a stop command and waits for a fresh
+acknowledgement rather than moving directly to valve closure.
 
 `waterMaxAgeSec` is not a free choice, and it is not display-only: the sequencer
 reads it through `fresh('water', …)`, so too tight a limit refuses to start a run

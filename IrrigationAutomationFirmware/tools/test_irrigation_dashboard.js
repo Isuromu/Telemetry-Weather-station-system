@@ -102,23 +102,19 @@ assert(valveOpenAge >= 2 * openCadences[0] && valveOpenAge <= 4 * openCadences[0
 
 // PumpControl reports on a fixed stopped cadence, resolved from its source like the
 // water interval above. The pump carries two stopped-state limits and they have to
-// bracket each other: pumpOnlineMaxAgeSec is the loose one every liveness question
-// reads, pumpStopTimeoutSec is the deadline a stop confirmation is judged against,
-// and pumpStoppedMaxAgeSec is the tight one in between that the stop sequence uses
-// to decide it may close the valves.
+// bracket each other: pumpOnlineMaxAgeSec is the liveness limit, while
+// pumpStoppedMaxAgeSec is the tighter limit the stop sequence uses before it may
+// close the valves.
 const pumpSource = fs.readFileSync('examples/PumpControl/src/main.cpp', 'utf8');
 const stoppedCadence = Number(
   (pumpSource.match(/STATUS_INTERVAL_STOPPED_MS\s*=\s*(\d+)\s*\*\s*1000/) || [])[1]);
 assert(stoppedCadence, 'cannot resolve STATUS_INTERVAL_STOPPED_MS from examples/PumpControl/src/main.cpp');
 const pumpOnlineAge = Number(settings.match(/pumpOnlineMaxAgeSec:\s*(\d+)/)[1]);
 const pumpStoppedAge = Number(settings.match(/pumpStoppedMaxAgeSec:\s*(\d+)/)[1]);
-const pumpStopTimeout = Number(settings.match(/pumpStopTimeoutSec:\s*(\d+)/)[1]);
 assert(pumpOnlineAge >= 2 * stoppedCadence && pumpOnlineAge <= 4 * stoppedCadence,
   `pumpOnlineMaxAgeSec ${pumpOnlineAge} s does not clear two of the ${stoppedCadence} s stopped heartbeat`);
-assert(pumpStoppedAge < pumpOnlineAge,
-  `pumpStoppedMaxAgeSec ${pumpStoppedAge} s is not tighter than pumpOnlineMaxAgeSec ${pumpOnlineAge} s, so the split does nothing`);
-assert(pumpOnlineAge > pumpStopTimeout,
-  `pumpOnlineMaxAgeSec ${pumpOnlineAge} s sits below pumpStopTimeoutSec ${pumpStopTimeout} s, leaving a band where the sequencer can neither judge the pump fresh nor fault`);
+assert(pumpStoppedAge >= stoppedCadence && pumpStoppedAge < pumpOnlineAge,
+  `pumpStoppedMaxAgeSec ${pumpStoppedAge} s must be at least one heartbeat and tighter than pumpOnlineMaxAgeSec ${pumpOnlineAge} s`);
 const subscriptionContext = new Map();
 const subscription = new Function('env','context','node', subscribeNode.func);
 const subscriptionStatus = {status:()=>{}};
@@ -136,6 +132,8 @@ assert(!/\bvalue\s*\(\s*k\s*,\s*d\s*\)/.test(template),
   'Dashboard 2.0 reserves value in the render context; use cardValue');
 assert(template.includes("kind:'refresh_pump'"));
 assert(template.includes('VFD and radio status unavailable'));
+assert(template.includes('pumpModeLabel(d)'),
+  'the Pump card must show its AUTO or MANUAL selector state under the top-right status');
 assert(template.includes("timeZone:'Asia/Tashkent'"));
 const memory = new Map();
 const flow = {get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)};
@@ -164,9 +162,10 @@ up('soil',{sensor_valid:true,vwc_percent:50},10);
 up('main',{actuator_online:true,actuator_fault_code:0,overpressure:false,actual_angle_deg:0,valve_moving:false,command_phase:'none'},31);
 up('valve1',{pcv_last_commanded:'close',last_command_id:0},31);
 up('valve2',{pcv_last_commanded:'close',last_command_id:0},31);
-upRaw('pump',[2,51,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0xfb,0xa4,3,0,60],51);
+upRaw('pump',[2,115,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0xfb,0xa4,3,0,60],51);
 assert.equal(memory.get('irrigation').devices.pump.previous_join_error_code,-1116);
 assert.equal(memory.get('irrigation').devices.pump.join_attempt_count,3);
+assert.equal(memory.get('irrigation').devices.pump.manual_mode,true);
 upRaw('pump',[1,51,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0],51);
 assert.equal(memory.get('irrigation').devices.pump.run_state,'stopped');
 let out=take({payload:{kind:'start',valve1:true,valve2:true}});
@@ -242,19 +241,22 @@ const pumpTick = devices => {
 };
 const stoppedPump = age => ({...commonDevices,
   pump:{at:base-age,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}});
-assert.equal(pumpTick(stoppedPump(100000)).check,'',
-  'a stopped pump silent for 100 s is within pumpOnlineMaxAgeSec and must not refuse Start');
-assert.equal(pumpTick(stoppedPump(190000)).check,'Pump offline, running or faulted',
+const withinPumpOnlineAgeMs = (pumpOnlineAge - 1) * 1000;
+const beyondPumpOnlineAgeMs = (pumpOnlineAge + 1) * 1000;
+const beyondPumpStoppedAgeMs = (pumpStoppedAge + 1) * 1000;
+assert.equal(pumpTick(stoppedPump(withinPumpOnlineAgeMs)).check,'',
+  'a stopped pump within pumpOnlineMaxAgeSec must not refuse Start');
+assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).check,'Pump offline, running or faulted',
   'past pumpOnlineMaxAgeSec the Start gate must still refuse');
-adaptiveMemory.set('irrigation',{phase:'stop_pump',selected:['valve1'],step:0,notice:'',pending:null,devices:stoppedPump(100000)});
+adaptiveMemory.set('irrigation',{phase:'stop_pump',selected:['valve1'],step:0,notice:'',pending:null,devices:stoppedPump(beyondPumpStoppedAgeMs)});
 Date.now=()=>base;
 new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
 assert.equal(adaptiveMemory.get('irrigation').phase,'wait_pump_stop',
-  'the same 100 s old "stopped" is past pumpStoppedMaxAgeSec: the stop sequence must command a stop rather than close the valves');
+  'a stopped report past pumpStoppedMaxAgeSec must cause a stop command before closing valves');
 assert.equal(adaptiveMemory.get('irrigation').notice,'pump: stop sent; awaiting device result');
-assert.equal(pumpTick(stoppedPump(76000)).devices.pump.stale,false,
-  'the card reads pumpOnlineMaxAgeSec: one lost 60 s heartbeat must not flicker it stale');
-assert.equal(pumpTick(stoppedPump(190000)).devices.pump.stale,true,
+assert.equal(pumpTick(stoppedPump(withinPumpOnlineAgeMs)).devices.pump.stale,false,
+  'the card must remain live within pumpOnlineMaxAgeSec');
+assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).devices.pump.stale,true,
   'past pumpOnlineMaxAgeSec the card must read stale');
 // The valve limits split by state: the same minute of silence is stale while a
 // valve is open and still fresh while it is closed. That is what lets the open

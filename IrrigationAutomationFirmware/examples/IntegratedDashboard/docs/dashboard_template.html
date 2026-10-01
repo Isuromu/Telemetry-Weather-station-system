@@ -26,7 +26,11 @@
           <div class="ir-card-title"><span class="ir-icon" :class="'ir-icon-' + k">{{ icons[k] }}</span><b>{{ names[k] }}</b></div>
           <div class="ir-card-actions">
             <button v-if="k === 'pump'" class="ir-refresh" :class="{'ir-refresh-spinning':pumpRefreshing}" :disabled="pumpRefreshing || pumpCooldown > 0" :title="pumpRefreshTitle" aria-label="Refresh Pump status" @click="requestPumpStatus">&#8635;</button>
-            <span class="ir-state" :class="statusClass(k,d)">{{ statusLabel(k,d) }}</span>
+            <div v-if="k === 'pump'" class="ir-pump-statuses">
+              <span class="ir-state" :class="statusClass(k,d)">{{ statusLabel(k,d) }}</span>
+              <span class="ir-pump-mode" :class="pumpModeClass(d)">{{ pumpModeLabel(d) }}</span>
+            </div>
+            <span v-else class="ir-state" :class="statusClass(k,d)">{{ statusLabel(k,d) }}</span>
           </div>
         </div>
         <div class="ir-reading">{{ cardValue(k,d) }}</div>
@@ -98,6 +102,8 @@ export default {
     },
     statusLabel(k,d) { return !d.last_seen ? 'NO DATA' : d.stale ? 'STALE' : this.invalid(k,d) ? 'FAULT' : 'LIVE' },
     statusClass(k,d) { return !d.last_seen ? 'ir-no-data' : d.stale ? 'ir-stale' : this.invalid(k,d) ? 'ir-fault' : 'ir-live' },
+    pumpModeLabel(d) { return d.stale || typeof d.manual_mode !== 'boolean' ? 'MODE UNKNOWN' : d.manual_mode ? 'MANUAL' : 'AUTO' },
+    pumpModeClass(d) { return d.stale || typeof d.manual_mode !== 'boolean' ? 'ir-pump-mode-unknown' : d.manual_mode ? 'ir-pump-mode-manual' : 'ir-pump-mode-auto' },
     cardClass(k,d) { return !d.last_seen ? 'ir-card-empty' : d.stale ? 'ir-card-stale' : this.invalid(k,d) ? 'ir-card-fault' : 'ir-card-live' },
     cardValue(k,d) {
       if (!d.last_seen) return 'Waiting for uplink';
@@ -197,7 +203,7 @@ export default {
 .ir-card{min-height:188px;padding:17px 18px 13px;border:1px solid #dbe5ed;border-radius:13px;background:white;box-shadow:0 4px 14px rgba(24,57,80,.035);display:flex;flex-direction:column}
 .ir-card-live{border-color:#c8dfd4}.ir-card-stale,.ir-card-empty{border-color:#e6d9d1}.ir-card-fault{border-color:#e8adad}
 .ir-card-top,.ir-card-title,.ir-card-footer{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.ir-card-actions{display:flex;align-items:center;gap:6px}.ir-refresh{width:28px;height:28px;border:1px solid #cbdbe5;border-radius:50%;background:#f5f9fb;color:#2b6788;font-size:20px;line-height:1;cursor:pointer}.ir-refresh:disabled{cursor:not-allowed;opacity:.48}.ir-refresh-spinning{animation:ir-refresh-spin 1s linear infinite}@keyframes ir-refresh-spin{to{transform:rotate(360deg)}}
+.ir-card-actions{display:flex;align-items:center;gap:6px}.ir-pump-statuses{display:flex;flex-direction:column;align-items:flex-end;gap:4px}.ir-pump-mode{padding:3px 6px;border-radius:6px;font-size:9px;font-weight:800;letter-spacing:.05em;white-space:nowrap}.ir-pump-mode-auto{background:#dbf3e6;color:#1a7046}.ir-pump-mode-manual{background:#fff0dd;color:#9b5b15}.ir-pump-mode-unknown{background:#edf1f5;color:#596b78}.ir-refresh{width:28px;height:28px;border:1px solid #cbdbe5;border-radius:50%;background:#f5f9fb;color:#2b6788;font-size:20px;line-height:1;cursor:pointer}.ir-refresh:disabled{cursor:not-allowed;opacity:.48}.ir-refresh-spinning{animation:ir-refresh-spin 1s linear infinite}@keyframes ir-refresh-spin{to{transform:rotate(360deg)}}
 .ir-card-title{justify-content:flex-start;font-size:16px;color:#1b3445}.ir-card-title b{font-weight:750}
 .ir-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:#e7f2f8;color:#29729b;font-size:21px;line-height:1;font-weight:900}
 .ir-icon-soil{background:#e8f4e7}.ir-icon-valve1,.ir-icon-valve2{background:#e8f0f2;font-size:23px}

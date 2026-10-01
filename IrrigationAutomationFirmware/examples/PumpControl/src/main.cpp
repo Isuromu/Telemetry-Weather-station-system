@@ -51,6 +51,12 @@ constexpr int LORA_MISO_PIN = 19;
 constexpr int LORA_MOSI_PIN = 23;
 constexpr int LORA_TXEN_PIN = 32;
 constexpr int LORA_RXEN_PIN = 33;
+
+// AUTO/MANUAL selector input. The switch connects GPIO27 to ESP32 GND.
+// INPUT_PULLUP means HIGH = AUTO and LOW = MANUAL.
+constexpr int MANUAL_MODE_PIN = 27;
+constexpr uint32_t MANUAL_DEBOUNCE_MS = 50;
+
 constexpr uint8_t COMMAND_FPORT = 50;
 constexpr uint8_t STATUS_FPORT = 51;
 constexpr uint32_t STATUS_INTERVAL_STOPPED_MS = 60 * 1000;
@@ -76,6 +82,12 @@ Preferences preferences;
 bool lorawanActive = false;
 bool classCActive = false;
 bool statusPending = false;
+
+// Debounced AUTO/MANUAL selector state. It is telemetry-only; the selector
+// does not yet block local or LoRaWAN pump commands.
+bool manualMode = false;
+bool manualModeRaw = false;
+uint32_t manualModeRawChangedMs = 0;
 uint32_t lastStatusMs = 0;
 uint32_t nextJoinAttemptMs = 0;
 uint32_t lastStatusSignature = 0;
@@ -98,6 +110,28 @@ void put16(uint8_t *destination, uint16_t value) {
 
 uint16_t get16(const uint8_t *source) {
   return (static_cast<uint16_t>(source[0]) << 8) | source[1];
+}
+
+bool readManualModePin() {
+  return digitalRead(MANUAL_MODE_PIN) == LOW;
+}
+
+void updateManualMode() {
+  const bool raw = readManualModePin();
+  const uint32_t now = millis();
+
+  if (raw != manualModeRaw) {
+    manualModeRaw = raw;
+    manualModeRawChangedMs = now;
+  }
+
+  if (manualMode != manualModeRaw &&
+      now - manualModeRawChangedMs >= MANUAL_DEBOUNCE_MS) {
+    manualMode = manualModeRaw;
+    Serial.printf("[CONTROL] Mode changed to %s\n",
+                  manualMode ? "MANUAL" : "AUTO");
+    statusPending = true;
+  }
 }
 
 uint32_t statusSignature() {
@@ -229,6 +263,7 @@ void buildStatus(uint8_t (&payload)[22]) {
   if (s.frequencyArmed) flags |= 0x08;
   if (lorawanActive) flags |= 0x10;
   if (classCActive) flags |= 0x20;
+  if (manualMode) flags |= 0x40;
   payload[0] = 2;
   payload[1] = flags;
   payload[2] = lastCommandResult;
@@ -455,6 +490,11 @@ void setup() {
   serialAccess.begin(irrigation::ActiveBoard.debugBaud);
   delay(300);
 
+  pinMode(MANUAL_MODE_PIN, INPUT_PULLUP);
+  manualMode = readManualModePin();
+  manualModeRaw = manualMode;
+  manualModeRawChangedMs = millis();
+
   // Start the wireless console before the USB authentication wait so the node
   // is discoverable during that 30-second window.
   startBluetoothConsole();
@@ -508,6 +548,7 @@ void setup() {
 void loop() {
   serialAccess.poll();
   wirelessConsole.poll();
+  updateManualMode();
   serialCommands.poll(serialAccess);
   serialCommands.poll(wirelessConsole);
   pump.poll();

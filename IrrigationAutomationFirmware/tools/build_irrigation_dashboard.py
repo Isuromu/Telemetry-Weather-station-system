@@ -43,11 +43,9 @@ const settings = {
   // cost of being wrong is closing the main valve onto a running pump. Everywhere that
   // only asks whether the pump is alive -- the Start gate and the card -- reads
   // pumpOnlineMaxAgeSec instead. While stopped the node reports once a minute
-  // (STATUS_INTERVAL_STOPPED_MS in examples/PumpControl/src/main.cpp), so 75 s is only
-  // 1.25 intervals and one lost uplink refuses Start with "Pump offline, running or
-  // faulted" or flickers the card stale; 180 s is three. It is also above
-  // pumpStopTimeoutSec, so a stop confirmation that has aged out is judged against the
-  // same clock as its own deadline rather than sitting between the two.
+  // (STATUS_INTERVAL_STOPPED_MS in examples/PumpControl/src/main.cpp), so 75 s is
+  // 1.25 intervals and one lost uplink sends a fresh stop command before valve closure;
+  // 180 s is three intervals for the Start gate and card.
   pumpRunningMaxAgeSec: 45, pumpStoppedMaxAgeSec: 75, pumpOnlineMaxAgeSec: 180,
   // The field valves split by state, like the pump above: 45 s is three of the
   // 15 s cadence a PCV uses while its valve is open
@@ -133,7 +131,7 @@ function decodePump(e) {
   const s16=i=>{const v=u16(i);return v>=32768?v-65536:v;};
   const results=['none','accepted','failed','duplicate','invalid','storage_error','in_progress'];
   const states=['unknown','forward','reverse','stopped'];
-  const d={communication_ok:!!(b[1]&1),configuration_valid:!!(b[1]&2),running:!!(b[1]&4),frequency_armed:!!(b[1]&8),lorawan_active:!!(b[1]&16),class_c_active:!!(b[1]&32),command_result:results[b[2]]||'unknown',last_command_id:u16(3)===65535?null:u16(3),commanded_frequency_hz:u16(5)/100,actual_frequency_hz:u16(7)/100,motor_current_a:u16(9)/100,vfd_fault_code:u16(11),output_voltage_v:u16(13)/10,run_state:states[b[15]]||'unknown',communication_error_code:b[16]};
+  const d={communication_ok:!!(b[1]&1),configuration_valid:!!(b[1]&2),running:!!(b[1]&4),frequency_armed:!!(b[1]&8),lorawan_active:!!(b[1]&16),class_c_active:!!(b[1]&32),manual_mode:!!(b[1]&64),command_result:results[b[2]]||'unknown',last_command_id:u16(3)===65535?null:u16(3),commanded_frequency_hz:u16(5)/100,actual_frequency_hz:u16(7)/100,motor_current_a:u16(9)/100,vfd_fault_code:u16(11),output_voltage_v:u16(13)/10,run_state:states[b[15]]||'unknown',communication_error_code:b[16]};
   if (b[0]===2) {const joinError=s16(17);d.previous_join_error_code=joinError;d.previous_join_error=joinError===-1116?'No OTAA JoinAccept received in RX1/RX2':joinError===0?'None':'RadioLib error '+joinError;d.join_attempt_count=b[19];d.previous_join_retry_seconds=u16(20);}
   return d;
 }

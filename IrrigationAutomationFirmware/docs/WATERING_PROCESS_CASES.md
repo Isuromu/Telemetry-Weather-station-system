@@ -85,7 +85,7 @@ settings.
 | valve_1 / valve_2, commanded CLOSED | 10 s in the present commissioning builds; use at least 60 s in the field | Class A node wakes, reports, receives one queued command, then sleeps. |
 | valve_1 / valve_2, last commanded OPEN | 15 s effective cadence | The firmware shortens Class A deep sleep to improve close-command latency. A configured interval below 15 s remains shorter. |
 | MainValve | Awake; 60 s heartbeat | Class C normally receives commands without waiting for an uplink. Movement status is also sent promptly. |
-| PumpControl, stopped / running | Awake; 60 s / 15 s heartbeat | The running cadence is intentionally tighter. |
+| PumpControl, stopped / running | Awake; 60 s / 15 s heartbeat | GPIO27 AUTO/MANUAL state is also reported. |
 | Dashboard safety tick | 5 s | Checks freshness and advances or stops a run. |
 
 ## Basic cases

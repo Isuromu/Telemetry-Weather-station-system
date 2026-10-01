@@ -25,6 +25,7 @@ function decodeUplink(input) {
     frequency_armed: !!(f & 8),
     lorawan_active: !!(f & 16),
     class_c_active: !!(f & 32),
+    manual_mode: !!(f & 64),
     command_result: results[b[2]] || "unknown",
     last_command_id: id === 65535 ? null : id,
     commanded_frequency_hz: readU16(b, 5) / 100,

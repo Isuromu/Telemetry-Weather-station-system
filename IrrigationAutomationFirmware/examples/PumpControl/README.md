@@ -91,6 +91,15 @@ The user confirmed the Pump radio pinout: NSS 5, DIO1 26, RESET 14, BUSY 25,
 SCK 18, MISO 19, MOSI 23, TXEN 32, RXEN 33. It matches MainValve. RS485
 remains RX 16 / TX 17.
 
+## AUTO/MANUAL selector
+
+Project configuration from the supplied PumpControl source update assigns GPIO27
+to an AUTO/MANUAL selector. GPIO27 uses `INPUT_PULLUP`: an open switch is AUTO,
+and a switch closed to ESP32 ground is MANUAL. Firmware debounces the input for
+50 ms and reports its state in status-protocol-v2 flag bit 6 as `manual_mode`.
+This state is telemetry-only: it does not block local Serial or LoRaWAN pump
+commands.
+
 RadioLib error `-1116` means the node did not receive a JoinAccept. The example
 prints a readable meaning for common RadioLib errors, the join-attempt number,
 and the scheduled retry delay. Retries start near 60 seconds and use randomized
@@ -127,7 +136,7 @@ different command is rejected. IDs can wrap from 65534 to 0. Uplink FPort 51
 uses a 22-byte protocol-v2 status containing communication/configuration/running flags,
 command result and ID, commanded/actual frequency, current, VFD fault,
 output voltage, run state, communication error, previous join error, join
-attempt count, and previous retry delay. The codec also accepts the older
+attempt count, previous retry delay, and AUTO/MANUAL state. The codec also accepts the older
 17-byte protocol-v1 status. A two-byte FPort 50 payload `01 05` requests status
 without consuming a pump command ID or operating the VFD. Status is sent every
 15 seconds while running, every 60 seconds while stopped, and promptly after a
@@ -212,7 +221,7 @@ profile for named uplink fields. The flow decodes the raw protocol-v2 payload
 if ChirpStack does not include an `object`, while retaining protocol-v1 support.
 
 The dashboard shows pump state, frequency, current, fault, radio connection,
-and last uplink. A compact colored LoRaWAN state and icon-only refresh control
+AUTO/MANUAL selector state, and last uplink. A compact colored LoRaWAN state and icon-only refresh control
 sit below the Pump subtitle. Refresh sends the non-actuating `01 05` request,
 uses a loading spinner, and is protected by a 10-second UI and Node-RED rate
 limit. Commands use binary FPort 50 downlinks and one pending command
