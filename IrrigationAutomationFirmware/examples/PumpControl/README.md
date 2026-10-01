@@ -345,3 +345,39 @@ power-reference wiring, then evaluate a dedicated high-common-mode-transient,
 galvanically isolated RS-485 transceiver installed beside PumpNode. A USB
 isolator remains useful for laptop commissioning but does not replace field-bus
 isolation.
+
+### Oscilloscope capture of the RS-485-side disturbance (2026-10-01)
+
+A bench capture was taken while the motor ran. Scope state and readouts:
+
+- timebase 5.00 ms/div, acquisition stopped, 1 MSa/s, 700 kpoints;
+- trigger frequency counter `f = 4.99955 kHz` on CH1;
+- cursor pair `ΔX = 5.100 ms`, `1/ΔX = 196.1 Hz`;
+- CH1 and CH2 both DC coupled, 1X probe, 5.00 V/div, vertical offsets -5.4 V
+  and -11.3 V;
+- `Pk-Pk[1] = 7.80 V`.
+
+The trace holds a quiet, stable baseline and then steps to a new DC level
+carrying a dense burst of high-frequency pulses. The ~5 kHz trigger counter
+reading is the order expected of the VFD IGBT carrier; the 196.1 Hz cursor
+interval is an order of magnitude lower, so the cursor pair sits on a slower
+envelope rather than on the carrier itself. The step in DC level alongside the
+burst is the common-mode disturbance the earlier notes attributed to the
+RS-485 environment.
+
+Two limits apply to these numbers. The 1X probe setting limits bandwidth to a
+few MHz while VFD edges are on the order of 100 ns, so 7.80 V is a lower bound
+on the true peak; repeat the capture at 10X. The probed node was not recorded,
+so the capture supports the common-mode mechanism but does not by itself
+identify the coupling path.
+
+**Project implication.** The capture is consistent with the documented
+mechanism and adds a measured amplitude, but it does not change the conclusion
+or the remedy: isolation must be added at the ESP32-side RS-485 interface. To
+make the capture conclusive, repeat it with a differential probe on the A/B
+pair referenced to the ESP32's USB ground, and separately measure the
+high-frequency voltage between ESP32 ground and protective earth while the
+motor runs. Clamp a current probe on the RS-485 cable and on the USB cable. If
+a common-mode choke snapped onto the RS-485 cable at the ESP32 end clears the
+USB fault, the coupling is common-mode on that cable and an isolated
+transceiver with isolated power will address it.
