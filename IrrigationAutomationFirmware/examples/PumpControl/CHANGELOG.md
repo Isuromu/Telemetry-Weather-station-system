@@ -1,5 +1,24 @@
 # PumpControl changelog
 
+## 2026-10-01
+
+### Added
+
+- Bluetooth Classic Serial (SPP) console for USB-free diagnostics while the pump
+  runs. It carries the same log stream and command set as USB Serial, reuses the
+  shared password, and prompts on every client connection so a deployed node
+  needs no reset to unlock. Enabled with `PUMP_BT_CONSOLE=1` in `platformio.ini`;
+  set to 0 to compile the wireless channel out.
+
+### Notes
+
+- The wireless console is not a substitute for the hardwired stop and safe
+  isolation arrangement. Verbose Modbus tracing (`debug full`) over Bluetooth
+  can stall the control loop while the pump runs.
+- Build cost with the console enabled: flash 89.0% (1,165,998 B of 1,310,720 B),
+  RAM 14.2%. Disabled (`PUMP_BT_CONSOLE=0`): flash 29.8%, RAM 8.2%.
+
+
 ## 2026-09-24
 
 ### Added

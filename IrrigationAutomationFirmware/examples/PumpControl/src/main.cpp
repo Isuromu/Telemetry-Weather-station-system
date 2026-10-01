@@ -1,13 +1,19 @@
 #include <Arduino.h>
 #include <cmath>
+#include <cstdio>
 #include <CommandProcessor.h>
 #include <ProjectConfig.h>
 #include <Preferences.h>
 #include <RadioLib.h>
-#include <SerialAccess.h>
 #include <RadioErrorMeaning.h>
 #include <SerialAccess.h>
 #include <SPI.h>
+
+// PlatformIO's dependency finder only scans src/, so the framework
+// BluetoothSerial library is pulled in here rather than only from the project
+// header. Including it does not use the deprecated type, so it warns nothing.
+#include <BluetoothSerial.h>
+#include "BluetoothConsole.h"
 
 #if __has_include("PumpControlLoRaSecrets.h")
 #include "PumpControlLoRaSecrets.h"
@@ -19,10 +25,16 @@ namespace {
 
 irrigation::SerialAccess serialAccess(Serial);
 #undef Serial
-#define Serial serialAccess
+
+// Logs fan out to USB and to the password-gated Bluetooth console. Each channel
+// gates itself, so a locked or absent one discards its copy rather than
+// stalling the other. Commands are polled from each channel separately below.
+WirelessConsole wirelessConsole;
+LogTee logTee(serialAccess, wirelessConsole);
+#define Serial logTee
 
 HardwareSerial vfdSerial(2);
-PrintController logger(Serial, true);
+PrintController logger(logTee, true);
 RS485Bus rs485;
 DelixiCDIE100 vfd(rs485, logger, irrigation::ActiveInverter);
 PumpController pump(vfd, logger, irrigation::ActiveMotor);
@@ -400,6 +412,23 @@ uint32_t arduinoSerialFrame(irrigation::SerialFrame frame) {
   }
 }
 
+void startBluetoothConsole() {
+  const uint64_t mac = ESP.getEfuseMac();
+  char name[24];
+  snprintf(name, sizeof(name), "PumpNode-%02X%02X",
+           static_cast<unsigned>((mac >> 8) & 0xFF),
+           static_cast<unsigned>(mac & 0xFF));
+  if (wirelessConsole.begin(name)) {
+    logger.print(F("[SYSTEM] Bluetooth console "), true);
+    logger.print(name, true);
+    logger.println(F(" ready; enter the password over the wireless stream."),
+                   true);
+  } else {
+    logger.println(
+        F("[SYSTEM] Bluetooth console unavailable; USB Serial only."), true);
+  }
+}
+
 void printBootProfile() {
   logger.println(F("[SYSTEM] IrrigationAutomationFirmware"), true);
   logger.print(F("[BOARD] "), true);
@@ -423,9 +452,14 @@ void printBootProfile() {
 }  // namespace
 
 void setup() {
-  Serial.begin(irrigation::ActiveBoard.debugBaud);
+  serialAccess.begin(irrigation::ActiveBoard.debugBaud);
   delay(300);
-  (void)Serial.waitForAuthentication();
+
+  // Start the wireless console before the USB authentication wait so the node
+  // is discoverable during that 30-second window.
+  startBluetoothConsole();
+  (void)serialAccess.waitForAuthentication();
+
   printBootProfile();
 
   const Rs485DirectionMode directionMode =
@@ -472,8 +506,10 @@ void setup() {
 }
 
 void loop() {
-  Serial.poll();
-  serialCommands.poll(Serial);
+  serialAccess.poll();
+  wirelessConsole.poll();
+  serialCommands.poll(serialAccess);
+  serialCommands.poll(wirelessConsole);
   pump.poll();
   updateRemoteCompletion();
   if (lorawanActive && hasLastStatusSignature &&

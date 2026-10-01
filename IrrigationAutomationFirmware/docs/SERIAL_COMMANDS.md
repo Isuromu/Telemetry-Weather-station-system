@@ -33,6 +33,25 @@ The shared flags are in `include/SerialAuthConfig.h`:
 PlatformIO build flags for a controlled bench build. Do not enable unrestricted
 Serial output on a deployed controller.
 
+## Wireless access
+
+The PumpNode (`pump_control`) target also exposes the same diagnostics and
+commands over a Bluetooth Classic Serial (SPP) console, for use when the pump's
+electrical noise drops the USB link. The device advertises as `PumpNode-XXXX`,
+derived from the ESP32 MAC.
+
+On connect it prints `[WIRELESS AUTH] Diagnostics locked. Enter password:` and
+accepts the shared `config/SerialAuthSecrets.h` password at any time, then
+prints `[WIRELESS AUTH] unlocked for this connection.` Unlike the USB window,
+there is no boot-time deadline and no reset is needed. Disconnecting relocks the
+console, so every connection authenticates again. The unlock is per connection
+and is held in RAM only.
+
+This console exists only on PumpNode; the battery nodes keep Wi-Fi/BLE disabled.
+Compile it out of PumpNode with `PUMP_BT_CONSOLE=0`. Keep verbose modes (`debug
+full`, `modbus debug on`) off while the pump runs: the frame flood can fill the
+SPP transmit queue and stall the control loop.
+
 ## Diagnostic verbosity
 
 After authentication, interactive pump and pressure-node targets accept:

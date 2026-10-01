@@ -244,7 +244,37 @@ stopped. Once offline, cached Class C, VFD communication, and VFD fault values
 are shown as unavailable. Dashboard commands other than Stop are blocked until
 a fresh status arrives; Stop remains available as a safety action.
 
+## Wireless (Bluetooth) console
+
+PumpNode also runs a Bluetooth Classic Serial (SPP) console, so diagnostics stay
+reachable when VFD/motor noise drops the USB link (see the deferred issue
+below). The firmware advertises as `PumpNode-XXXX`, where `XXXX` comes from the
+ESP32 MAC, so several units are distinguishable.
+
+Pair with any SPP-capable terminal on a phone or PC, open its serial connection,
+and enter the same password used for USB (`config/SerialAuthSecrets.h`). On
+connect the console prints
+`[WIRELESS AUTH] Diagnostics locked. Enter password:` and accepts the password
+at any time, unlike the USB boot window, so a deployed node never needs a reset
+to unlock. After `[WIRELESS AUTH] unlocked for this connection.` the full
+command set (`help`, `pump`, `vfd`, `debug`, `modbus`) and the same log stream
+are available. Disconnecting relocks the console; the next connection must
+authenticate again.
+
+The wireless console reuses the USB logs, password, and commands; it is not a
+separate control path and not a substitute for the hardwired stop and safe
+isolation arrangement. Keep the verbose modes (`debug full`, `modbus debug on`)
+off while the pump runs: the frame flood can fill the SPP transmit queue and
+stall the control loop.
+
+Bluetooth is enabled only for PumpNode, which is mains-powered; battery nodes
+keep Wi-Fi/BLE disabled. Set `PUMP_BT_CONSOLE=0` in `platformio.ini` to compile
+the wireless channel out, returning the image to its USB-only size.
+
 ## Deferred commissioning issue: USB disconnect when the motor starts
+
+The Bluetooth console above keeps diagnostics reachable while this USB fault
+persists. It does not change the fault or the required isolation fix.
 
 During the 2026-09-24 commissioning test, the VFD acknowledged an 18 Hz
 frequency command and the forward-run command. Serial printed
