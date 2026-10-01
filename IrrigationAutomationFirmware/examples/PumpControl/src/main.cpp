@@ -4,6 +4,7 @@
 #include <ProjectConfig.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 
 #if __has_include("PumpControlLoRaSecrets.h")
@@ -13,6 +14,10 @@
 #endif
 
 namespace {
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 HardwareSerial vfdSerial(2);
 PrintController logger(Serial, true);
@@ -432,6 +437,7 @@ void printBootProfile() {
 void setup() {
   Serial.begin(irrigation::ActiveBoard.debugBaud);
   delay(300);
+  (void)Serial.waitForAuthentication();
   printBootProfile();
 
   const Rs485DirectionMode directionMode =
@@ -478,6 +484,7 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   serialCommands.poll(Serial);
   pump.poll();
   updateRemoteCompletion();

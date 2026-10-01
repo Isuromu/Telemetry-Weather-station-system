@@ -9,6 +9,7 @@
 
 #include "SoilNodeConfig.h"
 #include "SoilNodeLoRaProtocol.h"
+#include <SerialAccess.h>
 
 #if __has_include("SoilNodeLoRaSecrets.h")
 #include "SoilNodeLoRaSecrets.h"
@@ -17,6 +18,10 @@
 #endif
 
 namespace {
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 namespace config = irrigation::soil_node::config;
 namespace protocol = irrigation::soil_node::lorawan_protocol;
@@ -428,6 +433,7 @@ void setup() {
 
   Serial.begin(115200);
   delay(300);
+  (void)Serial.waitForAuthentication();
   const bool wokeFromDeepSleep =
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
   rtcWakeCount = wokeFromDeepSleep ? rtcWakeCount + 1 : 0;
@@ -472,5 +478,6 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   delay(1000);
 }

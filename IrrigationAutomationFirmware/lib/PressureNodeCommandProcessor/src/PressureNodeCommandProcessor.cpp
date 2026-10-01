@@ -1,5 +1,7 @@
 #include "PressureNodeCommandProcessor.h"
 
+#include <SerialDebugMode.h>
+
 #include <ctype.h>
 #include <string.h>
 
@@ -31,6 +33,18 @@ void PressureNodeCommandProcessor::processLine(const char *line) {
 
   if (strcmp(start, "help") == 0 || strcmp(start, "?") == 0) {
     printHelp();
+  } else if (strcmp(start, "debug simple") == 0) {
+    irrigation::serial_debug::setMode(
+        irrigation::serial_debug::Mode::Simple);
+    logger_.println(F("[DEBUG] Simple serial diagnostics enabled."), true);
+  } else if (strcmp(start, "debug full") == 0) {
+    irrigation::serial_debug::setMode(irrigation::serial_debug::Mode::Full);
+    logger_.println(
+        F("[DEBUG] Full serial diagnostics enabled; Modbus frames will print."),
+        true);
+  } else if (strcmp(start, "debug status") == 0) {
+    logger_.print(F("[DEBUG] Mode: "), true);
+    logger_.println(irrigation::serial_debug::modeName(), true);
   } else if (strcmp(start, "status") == 0) {
     printStatus(node_.refreshStatus());
   } else if (strcmp(start, "battery") == 0) {
@@ -60,6 +74,7 @@ void PressureNodeCommandProcessor::processLine(const char *line) {
 void PressureNodeCommandProcessor::printHelp() {
   logger_.println(F("Commands:"), true);
   logger_.println(F("  help"), true);
+  logger_.println(F("  debug simple | full | status"), true);
   logger_.println(F("  status"), true);
   logger_.println(F("  battery"), true);
   logger_.println(F("  pressure"), true);

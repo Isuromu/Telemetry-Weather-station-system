@@ -33,6 +33,7 @@
 #include <HardwareSerial.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -46,6 +47,10 @@
 
 namespace config = irrigation::main_valve::config;
 namespace secrets = irrigation::main_valve::lorawan_secrets;
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 // ----------------------- User configuration -----------------------
 constexpr bool LORAWAN_CREDENTIALS_CONFIGURED = secrets::CONFIGURED;
@@ -935,6 +940,7 @@ void setup() {
   Serial.begin(115200);
   Serial.setTimeout(100);
   delay(1200);
+  (void)Serial.waitForAuthentication();
   Serial.println("\nESP32 main butterfly-valve controller");
   Serial.println("FOSD-05E Modbus RTU: 9600 baud, 8N1, address 1");
 
@@ -952,6 +958,7 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   const uint32_t now = millis();
 
   if (Serial.available()) {

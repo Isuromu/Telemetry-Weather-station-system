@@ -10,6 +10,7 @@
 #include <PressureSensorXDB401.h>
 #include <PrintController.h>
 #include <RadioLib.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <esp_sleep.h>
@@ -24,6 +25,10 @@
 #endif
 
 namespace {
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 namespace config = irrigation::pressure_node::valve_2;
 namespace lora_protocol = irrigation::pressure_node::lorawan_protocol;
@@ -767,6 +772,7 @@ void setup() {
 
   Serial.begin(config::DEBUG_BAUD);
   delay(300);
+  (void)Serial.waitForAuthentication();
 
   const bool wokeFromDeepSleep =
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
@@ -799,6 +805,7 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   if (runtime::SERIAL_COMMANDS_ENABLED) {
     (void)serialCommands.poll(Serial);
     persistLocalStateIfChanged();

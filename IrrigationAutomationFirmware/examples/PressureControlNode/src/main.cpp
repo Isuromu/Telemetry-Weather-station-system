@@ -11,6 +11,7 @@
 #include <PrintController.h>
 #include <RS485ModBus.h>
 #include <RadioLib.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 #include <Tuf2000mFlowMeter.h>
 #include <Wire.h>
@@ -26,6 +27,10 @@
 #endif
 
 namespace {
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 namespace config = irrigation::pressure_node::valve_1;
 namespace lora_protocol = irrigation::pressure_node::lorawan_protocol;
@@ -304,6 +309,7 @@ void initializeFlowTransportIfConfigured() {
         Rs485DirectionMode::Manual, config::flow_meter::DE_RE,
         config::flow_meter::DE_RE_ACTIVE_HIGH_TX);
   }
+  flowTransport.setDebug(&logger);
   flowTransport.begin(Serial2, config::flow_meter::BAUD,
                       config::flow_meter::UART_RX,
                       config::flow_meter::UART_TX, SERIAL_8N1);
@@ -820,6 +826,7 @@ void setup() {
 
   Serial.begin(config::DEBUG_BAUD);
   delay(300);
+  (void)Serial.waitForAuthentication();
 
   const bool wokeFromDeepSleep =
       esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
@@ -857,6 +864,7 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   if (runtime::SERIAL_COMMANDS_ENABLED) {
     (void)serialCommands.poll(Serial);
     persistLocalStateIfChanged();

@@ -2,6 +2,7 @@
 #include <BatteryMonitor.h>
 #include <Preferences.h>
 #include <RadioLib.h>
+#include <SerialAccess.h>
 #include <SPI.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
@@ -16,6 +17,10 @@
 #endif
 
 namespace {
+
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
 
 namespace config = irrigation::water_level::config;
 namespace lora_protocol = irrigation::water_level::lorawan_protocol;
@@ -403,6 +408,7 @@ void setup() {
 
   Serial.begin(115200);
   delay(300);
+  (void)Serial.waitForAuthentication();
   Serial.println("====================================");
   Serial.println("ESP32 WaterLevel Class A cycle started");
   Serial.println("====================================");
@@ -433,5 +439,6 @@ void setup() {
 }
 
 void loop() {
+  Serial.poll();
   delay(1000);
 }

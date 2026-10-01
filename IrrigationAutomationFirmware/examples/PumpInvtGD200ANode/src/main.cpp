@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <InvtGD200AProtocol.h>
+#include <SerialAccess.h>
 
 namespace protocol = invt::gd200a::protocol;
 
@@ -12,6 +13,10 @@ static_assert(protocol::EXPECTED_DEVICE_CODE == 0x0107,
 
 namespace {
 
+irrigation::SerialAccess serialAccess(Serial);
+#undef Serial
+#define Serial serialAccess
+
 void printAddress(const __FlashStringHelper *name, uint16_t address) {
   Serial.print(name);
   Serial.print(F(": 0x"));
@@ -23,6 +28,7 @@ void printAddress(const __FlashStringHelper *name, uint16_t address) {
 void setup() {
   Serial.begin(115200);
   delay(300);
+  (void)Serial.waitForAuthentication();
 
   Serial.println(F("[INVT] GD200A staging example"));
   Serial.println(F("[INVT] Read-only placeholder; RS-485 is not initialized."));
@@ -36,4 +42,7 @@ void setup() {
       F("[INVT] Answer the questions in examples/InvtGD200A/README.md before live communication."));
 }
 
-void loop() { delay(1000); }
+void loop() {
+  Serial.poll();
+  delay(1000);
+}

@@ -24,6 +24,7 @@ class CommandProcessor {
   void handlePump(int argc, char *argv[]);
   void handleVfd(int argc, char *argv[]);
   void handleModbus(int argc, char *argv[]);
+  void handleDebug(int argc, char *argv[]);
   void printPumpStatus(bool telemetry);
   void printRawResponse(const Rs485Result &result);
   static bool parseUInt16(const char *text, uint16_t &value);
@@ -43,4 +44,3 @@ class SerialCommandSource {
   size_t length_;
   bool overflow_;
 };
-

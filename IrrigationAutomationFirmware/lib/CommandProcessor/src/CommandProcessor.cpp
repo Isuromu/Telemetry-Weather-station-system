@@ -1,6 +1,7 @@
 #include "CommandProcessor.h"
 
 #include <ProjectConfig.h>
+#include <SerialDebugMode.h>
 
 #include <errno.h>
 #include <stdlib.h>
@@ -34,6 +35,8 @@ void CommandProcessor::processLine(const char *line) {
     handleVfd(argc, argv);
   } else if (strcmp(argv[0], "modbus") == 0) {
     handleModbus(argc, argv);
+  } else if (strcmp(argv[0], "debug") == 0) {
+    handleDebug(argc, argv);
   } else {
     logger_.println(F("[CMD][ERROR] Unknown command. Type: help"), true);
   }
@@ -49,9 +52,34 @@ void CommandProcessor::printHelp() {
   logger_.println(F("  vfd config apply CONFIRM"), true);
   logger_.println(F("  vfd read <0x0000..0xFFFF>"), true);
   logger_.println(F("  vfd param read <P0.0.17>"), true);
+  logger_.println(F("  debug simple | full | status"), true);
   logger_.println(F("  modbus debug on | off"), true);
   logger_.println(F("  modbus raw <hex bytes without CRC>"), true);
   logger_.println(F("  modbus rawcrc <complete hex frame including CRC>"), true);
+}
+
+void CommandProcessor::handleDebug(int argc, char *argv[]) {
+  if (argc != 2) {
+    logger_.println(F("[CMD][ERROR] Use: debug simple|full|status"), true);
+    return;
+  }
+
+  if (strcmp(argv[1], "simple") == 0) {
+    irrigation::serial_debug::setMode(irrigation::serial_debug::Mode::Simple);
+    vfd_.setDebug(false);
+    logger_.println(F("[DEBUG] Simple serial diagnostics enabled."), true);
+  } else if (strcmp(argv[1], "full") == 0) {
+    irrigation::serial_debug::setMode(irrigation::serial_debug::Mode::Full);
+    vfd_.setDebug(true);
+    logger_.println(
+        F("[DEBUG] Full serial diagnostics enabled; Modbus frames will print."),
+        true);
+  } else if (strcmp(argv[1], "status") == 0) {
+    logger_.print(F("[DEBUG] Mode: "), true);
+    logger_.println(irrigation::serial_debug::modeName(), true);
+  } else {
+    logger_.println(F("[CMD][ERROR] Use: debug simple|full|status"), true);
+  }
 }
 
 void CommandProcessor::handlePump(int argc, char *argv[]) {
@@ -226,11 +254,14 @@ void CommandProcessor::handleModbus(int argc, char *argv[]) {
   }
   if (strcmp(argv[1], "debug") == 0) {
     if (strcmp(argv[2], "on") == 0) {
+      irrigation::serial_debug::setMode(irrigation::serial_debug::Mode::Full);
       vfd_.setDebug(true);
-      logger_.println(F("[MODBUS] Debug enabled."), true);
+      logger_.println(F("[MODBUS] Full debug enabled."), true);
     } else if (strcmp(argv[2], "off") == 0) {
+      irrigation::serial_debug::setMode(
+          irrigation::serial_debug::Mode::Simple);
       vfd_.setDebug(false);
-      logger_.println(F("[MODBUS] Debug disabled."), true);
+      logger_.println(F("[MODBUS] Full debug disabled."), true);
     } else {
       logger_.println(F("[CMD][ERROR] Use: modbus debug on|off"), true);
     }
@@ -351,4 +382,3 @@ void SerialCommandSource::poll(Stream &stream) {
     buffer_[length_++] = character;
   }
 }
-

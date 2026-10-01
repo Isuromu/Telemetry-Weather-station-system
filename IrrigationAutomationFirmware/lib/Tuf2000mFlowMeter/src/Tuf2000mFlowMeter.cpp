@@ -1,5 +1,7 @@
 #include "Tuf2000mFlowMeter.h"
 
+#include <SerialDebugMode.h>
+
 #include <math.h>
 
 namespace irrigation::pressure_node {
@@ -42,9 +44,10 @@ bool Tuf2000mFlowMeter::readRegisters(uint16_t startAddress,
   const auto request =
       tuf2000m::protocol::makeReadHoldingRegistersRequest(
           configuration_.slaveAddress, startAddress, registerCount);
+  const bool debug = configuration_.debug || irrigation::serial_debug::full();
   const Rs485Result result = transport_.transact(
       request.bytes, sizeof(request.bytes), configuration_.responseTimeoutMs,
-      configuration_.debug);
+      debug);
   if (!result.ok()) {
     failureStatus = mapTransportStatus(result.status);
     return false;

@@ -3,6 +3,52 @@
 Open the Serial Monitor at 115200 baud with newline line endings. Commands are
 lowercase and whitespace-separated.
 
+## Serial access
+
+All normal firmware targets emit only boot ROM output and the
+`[SERIAL AUTH] Diagnostics locked. Enter password:` prompt before local Serial
+access is authenticated. Firmware startup then waits for the password or for
+the 30-second authentication window to expire. Enter the configured password
+and send a newline.
+
+For low-power targets, an unauthenticated timer wake does not reopen the
+window or delay the next telemetry cycle. Reset or power-cycle the ESP32 to
+open a new window.
+
+Only after `[SERIAL AUTH] unlocked for this boot; debug=simple.` appears do
+diagnostics and local commands pass through. The unlock is retained across ESP32 timer deep
+sleep and is cleared by a non-deep-sleep reset or power loss. The shared initial
+password is loaded from the Git-ignored `config/SerialAuthSecrets.h`. Create it
+by copying `include/SerialAuthSecrets.example.h`, then replace `CHANGE_ME`.
+The shared flags are in `include/SerialAuthConfig.h`:
+
+- `ENABLE_SERIAL_AUTH_GATE=1` keeps the password gate enabled for field builds.
+- `SERIAL_DEBUG_DEFAULT=0` keeps a build that deliberately disables the gate
+  quiet by default.
+- `SERIAL_AUTH_TIMEOUT_MS=30000` is the bounded startup authentication window;
+  reset the ESP32 to retry after it expires. Set it to `0` only for a controlled
+  bench build.
+
+`ENABLE_SERIAL_AUTH_GATE` and `SERIAL_DEBUG_DEFAULT` can be overridden with
+PlatformIO build flags for a controlled bench build. Do not enable unrestricted
+Serial output on a deployed controller.
+
+## Diagnostic verbosity
+
+After authentication, interactive pump and pressure-node targets accept:
+
+```text
+debug simple
+debug full
+debug status
+```
+
+`debug simple` is the default and keeps the normal status and error messages. `debug full` also
+prints Modbus TX/RX frames, CRC results, and transport status for VFD and
+TUF-2000M transactions. The selected mode is held in RAM for the current boot;
+it is never written to an SD card or sent to a server. Pump targets continue to
+support `modbus debug on|off` as aliases for full/simple mode.
+
 ## Pump
 
 ```text
