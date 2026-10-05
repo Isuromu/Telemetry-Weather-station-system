@@ -125,6 +125,10 @@ constexpr uint8_t PRESSURE_CONTROL_REGISTER = 0x30;
 constexpr uint8_t PRESSURE_START_COMMAND = 0x0A;
 constexpr uint8_t PRESSURE_BUSY_MASK = 0x08;
 constexpr float PRESSURE_FULL_SCALE_KPA = 1000.0f;  // 0-1 MPa sensor
+constexpr uint32_t PRESSURE_I2C_CLOCK_HZ = 100000;
+// A transient can leave the ESP32 I2C driver in an invalid state. Restart it
+// only between complete pressure samples and rate-limit repeated attempts.
+constexpr uint32_t PRESSURE_I2C_RECOVERY_MIN_INTERVAL_MS = 5000;
 
 // ---------------------------- LoRaWAN -----------------------------
 constexpr uint8_t COMMAND_FPORT = 30;
@@ -134,12 +138,19 @@ constexpr uint8_t STATUS_FPORT = 31;
 constexpr uint32_t STATUS_INTERVAL_MS = 60UL * 1000UL;
 constexpr uint32_t SENSOR_INTERVAL_MS = 1000;
 constexpr uint32_t ACTUATOR_STATUS_INTERVAL_MS = 2000;
+// Retry the same non-actuating control-mode check performed at boot when the
+// actuator starts late or leaves RS485 bus mode. This is intentionally much
+// slower than status polling so an unplugged actuator does not get hammered.
+constexpr uint32_t ACTUATOR_BUS_MODE_RETRY_INTERVAL_MS = 10UL * 1000UL;
 // Commissioning value: verify against measured full-travel time before field use.
 constexpr uint32_t MOVEMENT_TIMEOUT_MS = 180000;
+constexpr uint32_t CALIBRATION_STATUS_POLL_INTERVAL_MS = 2000;
+constexpr uint32_t CALIBRATION_MAX_DURATION_MS = 120UL * 1000UL;
 constexpr float MOVEMENT_START_DELTA_DEGREES = 0.5f;
 constexpr float TARGET_TOLERANCE_DEGREES = 1.0f;
 constexpr uint8_t TARGET_STABLE_POLLS = 2;
 constexpr uint32_t CLASS_C_ACTIVATION_RETRY_MS = 3000;
+constexpr uint32_t LORAWAN_SESSION_RECOVERY_RETRY_MS = 60UL * 1000UL;
 
 constexpr char NVS_NAMESPACE[] = "main_valve";
 constexpr char NVS_NONCES_KEY[] = "nonces";
@@ -225,10 +236,18 @@ bool pressureAlarm = false;
 bool lorawanActive = false;
 bool classCActive = false;
 bool statusPending = false;
+bool lorawanSessionRecoveryPending = false;
 uint32_t lastModbusTransactionMs = 0;
 uint32_t lastPressureMs = 0;
+uint32_t lastPressureI2cRecoveryMs = 0;
 uint32_t lastActuatorStatusMs = 0;
+uint32_t lastActuatorBusModeAttemptMs = 0;
 uint32_t lastStatusUplinkMs = 0;
+bool calibrationActive = false;
+bool calibrationDurationExceeded = false;
+uint32_t calibrationStartedMs = 0;
+uint32_t nextCalibrationStatusPollMs = 0;
+uint32_t nextLoRaWanSessionRecoveryMs = 0;
 MovementTracking movement = {};
 constexpr uint8_t STATUS_EVENT_CAPACITY = 16;
 StatusEvent statusEvents[STATUS_EVENT_CAPACITY] = {};
@@ -433,6 +452,7 @@ bool readActuatorStatus() {
 }
 
 bool ensureBusMode() {
+  lastActuatorBusModeAttemptMs = millis();
   uint16_t mode = 0xFFFF;
   if (!readHoldingRegisters(REG_CONTROL_MODE, 1, &mode)) {
     return false;
@@ -447,6 +467,169 @@ bool ensureBusMode() {
   actuator.mode = 1;
   Serial.println("Actuator changed to RS485 bus mode.");
   return true;
+}
+
+bool calibrationCommandActive() {
+  return calibrationActive;
+}
+
+bool readCalibrationState(uint16_t &state) {
+  return readHoldingRegisters(REG_RESET_CALIBRATION, 1, &state);
+}
+
+void beginCalibrationMonitoring() {
+  calibrationActive = true;
+  calibrationDurationExceeded = false;
+  calibrationStartedMs = millis();
+  nextCalibrationStatusPollMs = calibrationStartedMs +
+    CALIBRATION_STATUS_POLL_INTERVAL_MS;
+  actuator.communicationValid = false;
+  statusReason = REASON_ACTUATOR_BUSY;
+  statusPending = true;
+}
+
+void serviceCalibration() {
+  if (!calibrationActive) return;
+
+  const uint32_t now = millis();
+  if (!calibrationDurationExceeded &&
+      now - calibrationStartedMs >= CALIBRATION_MAX_DURATION_MS) {
+    calibrationDurationExceeded = true;
+    Serial.println("Calibration exceeded 120 seconds; waiting for locator completion status.");
+  }
+  if (static_cast<int32_t>(now - nextCalibrationStatusPollMs) < 0) return;
+  nextCalibrationStatusPollMs = now + CALIBRATION_STATUS_POLL_INTERVAL_MS;
+
+  uint16_t state = 0;
+  if (!readCalibrationState(state)) return;
+  if (state == 0x000A) return;
+  if (state != 0x0000) {
+    Serial.printf("Unexpected calibration status 0x%04X; target commands remain blocked.\n",
+                  state);
+    return;
+  }
+
+  calibrationActive = false;
+  Serial.println("Calibration complete.");
+  statusPending = true;
+}
+
+bool forceBusMode() {
+  lastActuatorBusModeAttemptMs = millis();
+  if (!writeSingleRegister(REG_CONTROL_MODE, 0x0001)) {
+    return false;
+  }
+  actuator.mode = 1;
+  return true;
+}
+
+bool primeActuatorStatus() {
+  uint16_t actualRaw = 0;
+  if (!readHoldingRegisters(REG_ACTUAL_POSITION, 1, &actualRaw)) {
+    Serial.println("Actuator actual-position probe unavailable; safe target not written.");
+    return false;
+  }
+  if (actualRaw < POSITION_MIN_RAW || actualRaw > POSITION_MAX_RAW) {
+    Serial.printf("Actuator actual-position value %u is invalid; safe target not written.\n",
+                  actualRaw);
+    return false;
+  }
+
+  // FC11R requires a new set value after power-on. Rewriting its observed
+  // physical position as the target initializes the locator without asking the
+  // valve to travel.
+  if (!writeSingleRegister(REG_TARGET_POSITION, actualRaw)) {
+    Serial.println("Actuator safe target write failed.");
+    return false;
+  }
+  if (readActuatorStatus()) {
+    Serial.println("Actuator full status recovered after safe target write.");
+    return true;
+  }
+  Serial.println("Actuator safe target acknowledged, but full status remains unavailable.");
+  return false;
+}
+
+void serviceActuatorBusMode(bool fullStatusAvailable) {
+  if (calibrationCommandActive()) return;
+  if (fullStatusAvailable && actuator.mode == 1) return;
+  if (millis() - lastActuatorBusModeAttemptMs <
+      ACTUATOR_BUS_MODE_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  if (!ensureBusMode()) return;
+  if (!fullStatusAvailable) {
+    primeActuatorStatus();
+  }
+}
+
+bool beginPressureI2c() {
+  return Wire.begin(PRESSURE_SDA_PIN, PRESSURE_SCL_PIN,
+                    PRESSURE_I2C_CLOCK_HZ);
+}
+
+uint8_t clearPressureI2cBus(bool &sdaHighBefore, bool &sclHighBefore) {
+  // Run only after Wire.end(): GPIO output must never contend with an active
+  // hardware I2C transaction. A slave interrupted mid-byte can hold SDA low;
+  // up to nine clocks followed by STOP are the standard bus-release sequence.
+  pinMode(PRESSURE_SDA_PIN, INPUT_PULLUP);
+  pinMode(PRESSURE_SCL_PIN, INPUT_PULLUP);
+  delayMicroseconds(5);
+  sdaHighBefore = digitalRead(PRESSURE_SDA_PIN) == HIGH;
+  sclHighBefore = digitalRead(PRESSURE_SCL_PIN) == HIGH;
+
+  uint8_t clocks = 0;
+  if (sclHighBefore) {
+    pinMode(PRESSURE_SCL_PIN, OUTPUT_OPEN_DRAIN);
+    digitalWrite(PRESSURE_SCL_PIN, HIGH);
+    while (clocks < 9 && digitalRead(PRESSURE_SDA_PIN) != HIGH) {
+      digitalWrite(PRESSURE_SCL_PIN, LOW);
+      delayMicroseconds(5);
+      digitalWrite(PRESSURE_SCL_PIN, HIGH);
+      delayMicroseconds(5);
+      ++clocks;
+    }
+
+    // End any partial frame with a STOP condition when SCL is released.
+    if (digitalRead(PRESSURE_SCL_PIN) == HIGH) {
+      pinMode(PRESSURE_SDA_PIN, OUTPUT_OPEN_DRAIN);
+      digitalWrite(PRESSURE_SDA_PIN, LOW);
+      delayMicroseconds(5);
+      digitalWrite(PRESSURE_SCL_PIN, HIGH);
+      delayMicroseconds(5);
+      digitalWrite(PRESSURE_SDA_PIN, HIGH);
+      delayMicroseconds(5);
+    }
+  }
+
+  pinMode(PRESSURE_SDA_PIN, INPUT_PULLUP);
+  pinMode(PRESSURE_SCL_PIN, INPUT_PULLUP);
+  return clocks;
+}
+
+bool recoverPressureI2c(const char *reason) {
+  const uint32_t now = millis();
+  if (lastPressureI2cRecoveryMs != 0 &&
+      now - lastPressureI2cRecoveryMs <
+        PRESSURE_I2C_RECOVERY_MIN_INTERVAL_MS) {
+    return false;
+  }
+  lastPressureI2cRecoveryMs = now;
+
+  const bool stopped = Wire.end();
+  bool sdaHighBefore = false;
+  bool sclHighBefore = false;
+  const uint8_t clocks = clearPressureI2cBus(sdaHighBefore, sclHighBefore);
+  delay(2);
+  const bool started = beginPressureI2c();
+  Serial.printf("Pressure I2C bus %s %s; lines before recovery SDA=%s SCL=%s, "
+                "clock pulses=%u%s.\n",
+                started ? "reinitialized" : "reinitialization failed",
+                reason, sdaHighBefore ? "high" : "low",
+                sclHighBefore ? "high" : "low", clocks,
+                stopped ? "" : "; prior shutdown failed");
+  return started;
 }
 
 bool pressureWriteRegister(uint8_t reg, uint8_t value) {
@@ -481,12 +664,13 @@ int32_t decodeSigned24(uint8_t msb, uint8_t mid, uint8_t lsb) {
   return static_cast<int32_t>(value);
 }
 
-bool readPressure() {
+bool readPressureSample(bool &transportFailure) {
+  transportFailure = false;
   pressure.valid = false;
   pressureAlarm = false;
   if (!pressureWriteRegister(PRESSURE_CONTROL_REGISTER,
                              PRESSURE_START_COMMAND)) {
-    statusReason = REASON_PRESSURE_SENSOR_ERROR;
+    transportFailure = true;
     return false;
   }
 
@@ -495,7 +679,7 @@ bool readPressure() {
   while (millis() - started < 200) {
     uint8_t control = 0;
     if (!pressureReadRegisters(PRESSURE_CONTROL_REGISTER, &control, 1)) {
-      statusReason = REASON_PRESSURE_SENSOR_ERROR;
+      transportFailure = true;
       return false;
     }
     if ((control & PRESSURE_BUSY_MASK) == 0) {
@@ -506,13 +690,13 @@ bool readPressure() {
   }
   if (!conversionComplete) {
     Serial.println("Pressure conversion timed out.");
-    statusReason = REASON_PRESSURE_SENSOR_ERROR;
+    transportFailure = true;
     return false;
   }
 
   uint8_t data[5] = {};
   if (!pressureReadRegisters(PRESSURE_DATA_REGISTER, data, sizeof(data))) {
-    statusReason = REASON_PRESSURE_SENSOR_ERROR;
+    transportFailure = true;
     return false;
   }
   pressure.rawPressure = decodeSigned24(data[0], data[1], data[2]);
@@ -527,6 +711,30 @@ bool readPressure() {
                    pressure.bar >= -0.2f && pressure.bar <= 10.5f;
   pressureAlarm = pressure.valid && pressure.bar > MAX_PRESSURE_BAR;
   return pressure.valid;
+}
+
+bool readPressure() {
+  bool transportFailure = false;
+  if (readPressureSample(transportFailure)) {
+    return true;
+  }
+  if (!transportFailure) {
+    statusReason = REASON_PRESSURE_SENSOR_ERROR;
+    return pressure.valid;
+  }
+
+  if (!recoverPressureI2c("after failed pressure sample")) {
+    statusReason = REASON_PRESSURE_SENSOR_ERROR;
+    return false;
+  }
+
+  if (readPressureSample(transportFailure)) {
+    Serial.println("Pressure sample recovered after I2C reinitialization.");
+    return true;
+  }
+  Serial.println("Pressure sample remains unavailable after I2C reinitialization.");
+  statusReason = REASON_PRESSURE_SENSOR_ERROR;
+  return false;
 }
 
 bool movementAllowed(float requestedDegrees, bool remoteCommand) {
@@ -554,8 +762,17 @@ bool setValveAngle(float degrees, bool remoteCommand) {
     statusReason = REASON_INVALID_COMMAND;
     return false;
   }
+  if (calibrationCommandActive()) {
+    Serial.println("Movement rejected: actuator calibration is in progress.");
+    statusReason = REASON_ACTUATOR_BUSY;
+    return false;
+  }
   readPressure();
-  readActuatorStatus();
+  const bool statusAvailableBeforeCommand = readActuatorStatus();
+  if (!statusAvailableBeforeCommand) {
+    Serial.println("Actuator full status unavailable before target command; "
+                   "checking control mode.");
+  }
   if (!movementAllowed(degrees, remoteCommand)) {
     return false;
   }
@@ -569,6 +786,13 @@ bool setValveAngle(float degrees, bool remoteCommand) {
   if (!writeSingleRegister(REG_TARGET_POSITION, raw)) {
     statusReason = REASON_MODBUS_ERROR;
     return false;
+  }
+  if (!statusAvailableBeforeCommand) {
+    if (readActuatorStatus()) {
+      Serial.println("Actuator full status recovered after target write.");
+    } else {
+      Serial.println("Target write acknowledged, but full actuator status remains unavailable.");
+    }
   }
   const float commandedPercent = rawPositionToPercent(raw);
   Serial.printf("Target set: %.1f degrees (%.1f%%, raw=%u).\n",
@@ -696,6 +920,25 @@ bool saveNoncesToNvs() {
   return written == RADIOLIB_LORAWAN_NONCES_BUF_SIZE;
 }
 
+void scheduleLoRaWanSessionRecovery(const char *reason) {
+  if (lorawanSessionRecoveryPending) return;
+
+  // A MIC mismatch identifies a downlink for this DevAddr that cannot be
+  // authenticated by the current session. Keep the persisted OTAA nonces, but
+  // discard the RTC-only session so the next attempt performs a fresh join.
+  lorawan.clearSession();
+  rtcSessionMagic = 0;
+  lorawanActive = false;
+  classCActive = false;
+  statusPending = false;
+  lorawanSessionRecoveryPending = true;
+  nextLoRaWanSessionRecoveryMs = millis() + LORAWAN_SESSION_RECOVERY_RETRY_MS;
+  Serial.printf("LoRaWAN session cleared after %s; rejoining in %lu seconds.\n",
+                reason,
+                static_cast<unsigned long>(
+                    LORAWAN_SESSION_RECOVERY_RETRY_MS / 1000UL));
+}
+
 bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
   if (fPort != COMMAND_FPORT || length != 6 || data[0] != 1 || data[1] != 1) {
     Serial.printf("Invalid downlink: FPort=%u length=%u.\n",
@@ -750,7 +993,11 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
 bool sendStatusUplink(bool confirmed) {
   if (!lorawanActive) return false;
   readPressure();
-  readActuatorStatus();
+  if (calibrationCommandActive()) {
+    serviceCalibration();
+  } else {
+    readActuatorStatus();
+  }
   const StatusEvent *event = statusEventCount ? &statusEvents[statusEventHead] : nullptr;
   uint8_t uplink[18] = {};
   buildStatusPayload(uplink, event);
@@ -768,6 +1015,9 @@ bool sendStatusUplink(bool confirmed) {
   if (state < RADIOLIB_ERR_NONE) {
     Serial.printf("LoRaWAN status uplink failed: %s [%d]\n",
                   irrigation::diagnostics::radioErrorMeaning(state), state);
+    if (state == RADIOLIB_ERR_MIC_MISMATCH) {
+      scheduleLoRaWanSessionRecovery("MIC mismatch [-1112]");
+    }
     return false;
   }
   if (event) {
@@ -826,6 +1076,7 @@ bool setupLoRaWAN() {
   }
   saveSessionToRtc();
   lorawanActive = true;
+  lorawanSessionRecoveryPending = false;
   Serial.println(state == RADIOLIB_LORAWAN_NEW_SESSION
     ? "New LoRaWAN session established."
     : "LoRaWAN session restored.");
@@ -853,8 +1104,14 @@ bool setupLoRaWAN() {
 
 void printStatus() {
   readPressure();
-  readActuatorStatus();
-  if (actuator.communicationValid) {
+  if (calibrationCommandActive()) {
+    serviceCalibration();
+  } else {
+    readActuatorStatus();
+  }
+  if (calibrationCommandActive()) {
+    Serial.println("Actuator: calibration in progress.");
+  } else if (actuator.communicationValid) {
     Serial.printf("Actuator: actual %.1f deg (%.1f%%), target %.1f deg (%.1f%%), "
                   "mode=%s, fault=%s [0x%04X]\n",
                   actuator.actualDegrees, actuator.actualPercent,
@@ -866,7 +1123,6 @@ void printStatus() {
   } else {
     Serial.println("Actuator: communication unavailable.");
   }
-
   if (pressure.valid) {
     Serial.printf("Pressure: %.3f bar, temperature %.2f C%s\n",
                   pressure.bar, pressure.temperatureC,
@@ -886,6 +1142,7 @@ void printHelp() {
   Serial.println("  percent 50      set 50% travel (=45 degrees)");
   Serial.println("  close / open    set 0 / 90 degrees");
   Serial.println("  bus             select RS485 bus mode");
+  Serial.println("  bus force       repeat bus-mode write; test status without moving");
   Serial.println("  clear           clear actuator faults");
   Serial.println("  calibrate CONFIRM  start 30-120 second calibration");
   Serial.println("  reset CONFIRM      reset the positioner");
@@ -929,16 +1186,43 @@ void processSerialCommand(String command) {
       setValveAngle(percentToDegrees(percent), false);
     }
   } else if (command == "bus") {
-    Serial.println(ensureBusMode() ? "RS485 bus mode ready." : "Bus mode failed.");
+    Serial.println(calibrationCommandActive()
+      ? "Bus-mode command rejected: calibration is in progress."
+      : (ensureBusMode() ? "RS485 bus mode ready." : "Bus mode failed."));
+  } else if (command == "bus force") {
+    if (calibrationCommandActive()) {
+      Serial.println("Bus-mode write rejected: calibration is in progress.");
+    } else if (!forceBusMode()) {
+      Serial.println("RS485 bus-mode write failed.");
+    } else if (readActuatorStatus()) {
+      Serial.println("RS485 bus mode re-applied; full actuator status is available.");
+    } else {
+      Serial.println("RS485 bus mode re-applied; full actuator status remains unavailable.");
+    }
   } else if (command == "clear") {
-    Serial.println(writeSingleRegister(REG_FAULT_CODE, 0)
-      ? "Actuator faults cleared." : "Could not clear faults.");
+    Serial.println(calibrationCommandActive()
+      ? "Fault-clear command rejected: calibration is in progress."
+      : (writeSingleRegister(REG_FAULT_CODE, 0)
+        ? "Actuator faults cleared." : "Could not clear faults."));
   } else if (command == "calibrate confirm") {
-    Serial.println(writeSingleRegister(REG_RESET_CALIBRATION, 0x000A)
-      ? "Calibration started; allow 30-120 seconds." : "Calibration command failed.");
+    if (calibrationCommandActive()) {
+      Serial.println("Calibration is already in progress.");
+    } else if (movement.active) {
+      Serial.println("Calibration rejected: a remote movement is active.");
+    } else if (writeSingleRegister(REG_RESET_CALIBRATION, 0x000A)) {
+      beginCalibrationMonitoring();
+      Serial.println("Calibration command acknowledged; polling locator completion status.");
+    } else {
+      Serial.println("Calibration command failed.");
+    }
   } else if (command == "reset confirm") {
-    Serial.println(writeSingleRegister(REG_RESET_CALIBRATION, 0x0F30)
-      ? "Positioner reset command accepted." : "Reset command failed.");
+    if (calibrationCommandActive()) {
+      Serial.println("Positioner reset rejected: calibration is in progress.");
+    } else if (writeSingleRegister(REG_RESET_CALIBRATION, 0x0F30)) {
+      Serial.println("Positioner reset command accepted.");
+    } else {
+      Serial.println("Reset command failed.");
+    }
   } else if (command == "help") {
     printHelp();
   } else if (command.length() > 0) {
@@ -955,16 +1239,32 @@ void setup() {
   Serial.println("FOSD-05E Modbus RTU: 9600 baud, 8N1, address 1");
 
   rs485.begin(MODBUS_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
-  Wire.begin(PRESSURE_SDA_PIN, PRESSURE_SCL_PIN, 100000);
+  if (!beginPressureI2c()) {
+    Serial.println("WARNING: pressure I2C bus initialization failed.");
+  }
   delay(500);
 
   printHelp();
-  printStatus();
   if (!ensureBusMode()) {
     Serial.println("WARNING: actuator is not responding or bus mode could not be selected.");
+  } else {
+    uint16_t calibrationState = 0;
+    if (!readCalibrationState(calibrationState)) {
+      Serial.println("Calibration state unavailable after bus-mode setup; safe startup priming withheld.");
+    } else if (calibrationState != 0x0000) {
+      beginCalibrationMonitoring();
+      Serial.printf("Locator task 0x%04X detected at startup; target commands are blocked.\n",
+                    calibrationState);
+    } else if (!readActuatorStatus()) {
+      Serial.println("Actuator full status unavailable after bus-mode setup; priming locator.");
+      primeActuatorStatus();
+    }
   }
-  setupLoRaWAN();
+  if (!setupLoRaWAN() && LORAWAN_CREDENTIALS_CONFIGURED) {
+    scheduleLoRaWanSessionRecovery("initial activation failure");
+  }
   statusPending = lorawanActive;
+  printStatus();
 }
 
 void loop() {
@@ -975,6 +1275,17 @@ void loop() {
     processSerialCommand(Serial.readStringUntil('\n'));
   }
 
+  if (lorawanSessionRecoveryPending &&
+      static_cast<int32_t>(now - nextLoRaWanSessionRecoveryMs) >= 0) {
+    Serial.println("Retrying LoRaWAN OTAA after session recovery.");
+    lorawanSessionRecoveryPending = false;
+    if (setupLoRaWAN()) {
+      statusPending = true;
+    } else {
+      scheduleLoRaWanSessionRecovery("OTAA retry failure");
+    }
+  }
+
   if (now - lastPressureMs >= SENSOR_INTERVAL_MS) {
     lastPressureMs = now;
     const bool wasAlarm = pressureAlarm;
@@ -982,9 +1293,15 @@ void loop() {
     if (pressureAlarm != wasAlarm) statusPending = true;
   }
 
-  if (now - lastActuatorStatusMs >= ACTUATOR_STATUS_INTERVAL_MS) {
+  if (calibrationCommandActive()) {
+    serviceCalibration();
+  }
+
+  if (!calibrationCommandActive() &&
+      now - lastActuatorStatusMs >= ACTUATOR_STATUS_INTERVAL_MS) {
     lastActuatorStatusMs = now;
-    readActuatorStatus();
+    const bool fullStatusAvailable = readActuatorStatus();
+    serviceActuatorBusMode(fullStatusAvailable);
     trackMovement();
   }
 
@@ -1001,6 +1318,9 @@ void loop() {
     } else if (state < RADIOLIB_ERR_NONE) {
       Serial.printf("Class-C receive error: %s [%d]\n",
                     irrigation::diagnostics::radioErrorMeaning(state), state);
+      if (state == RADIOLIB_ERR_MIC_MISMATCH) {
+        scheduleLoRaWanSessionRecovery("MIC mismatch [-1112]");
+      }
     }
   }
 
