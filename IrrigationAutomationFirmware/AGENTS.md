@@ -114,9 +114,9 @@ All three parts are required:
   placeholder that asks the user to hand-edit the flow after import.
 
 `node tools/test_flow_ids.js` enforces all of it across every flow — no literal
-UUID, DevEUI or placeholder, dynamic subscription, and the subscribe function
-executed both with and without the variables. Run it before committing a flow
-change.
+UUID, DevEUI or placeholder, dynamic subscription, the subscribe function
+executed both with and without the variables, and no runaway message loop (see
+below). Run it before committing a flow change.
 
 Imports must need no hand cleanup. The user imports these into a live
 workspace, so the file has to land cleanly the first time:
@@ -182,3 +182,35 @@ null because `ui_group.js` threw first on its own
 `RED.nodes.getNode(config.page)`. The missing or orphaned node is the
 `ui-page`, usually after a duplicate import was deleted. Fix the page and its
 groups, and the chart recovers untouched.
+
+### A cycle of function nodes re-fires itself
+
+Wiring a card back into the logic that feeds it is normal here: a `ui-template`
+emits only when the browser calls `this.send()`, so the template-to-logic-to-
+template cycle in `MainValve`, `SoilNode`, `WaterLevel`, `PressureControlNode`,
+`PressureControlNode2` and `IntegratedDashboard` is inert. A cycle closed
+entirely by **function nodes** is not. Each hop re-emits on its own, so a single
+message spins the runtime through thousands of synchronous hops — pushing a state
+message into the card on every hop — and then dies with `RangeError: Maximum call
+stack size exceeded`.
+
+`PumpControl` had one. `Apply Pump offline state` (`df64fcde3620f686`) drove both
+the card `0c603e4589d33b7b` and the router `Require fresh Pump status`
+(`84eb32fbb3476ea8`), which re-entered `Present Pump status` (`17e332db168dc0e5`)
+and so back to `Apply Pump offline state`. The `inject` "Refresh status and
+timeout" (`repeat: "15"`) drove it whether or not the pump reported, so the pump
+card flickered and the whole Node-RED instance lagged every 15 seconds; running
+the three function bodies against the flow's real wire list measured 5,206
+iterations and a state message each time before the stack overflow. The fix is
+one wire — `Apply Pump offline state` now feeds only the card. Nothing else was
+lost: the router is still entered by the card's own output, and every return path
+(command, refresh, refusal, completion, and the staleness tick) still ends at the
+card.
+
+`tools/flow_test_common.js` exposes `findRunawayLoop(flow)`, and both
+`tools/test_flow_ids.js` (all seven flows) and `checkImportInvariants` (the
+per-flow tests) fail on any cycle that survives removing the `ui-*` nodes from
+the graph. When a loop is suspected, confirm it on the real thing as well: the
+per-flow tests execute a single function body and never route a message along a
+wire, so only a re-import with the debug sidebar open shows the `RangeError` and
+its cadence.

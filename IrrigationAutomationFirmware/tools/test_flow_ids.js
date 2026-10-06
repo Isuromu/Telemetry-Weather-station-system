@@ -20,6 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const c = require('./flow_test_common.js');
 
 const APP_ID = '12345678-1234-1234-1234-123456789abc';
 
@@ -87,6 +88,15 @@ for (const spec of FLOWS) {
       fail(name + ' ' + node.id + ' builds an application topic without IRRIGATION_APP_ID');
     }
   }
+
+  // --- the wiring carries no loop that re-fires itself ----------------------
+  // Checked for every flow, including the two the per-flow tests do not cover,
+  // and before the `continue`s below so a structural failure cannot hide it.
+  const cycle = c.findRunawayLoop(flow);
+  if (cycle) {
+    fail(name + ': runaway loop of function nodes: ' + c.describeLoop(flow, cycle));
+  }
+  done(name + ': no runaway loop of function nodes');
 
   // --- the mqtt in node takes its topic from the subscribe function ---------
   const mqtt = flow.filter(n => n.type === 'mqtt in');
