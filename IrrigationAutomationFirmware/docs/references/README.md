@@ -24,11 +24,15 @@ revision has not been established, not that all editions are equivalent.
 | DELIXI CDI-E family | [Operating manual](DelixiCDIE100/delixi-instrukciya-po-ekspluatacii.pdf) | Russian; revision not identified; 269 pages | [CDI-E100 notes](../DELIXI_CDI_E100.md); P4.1 pp. 174-175; chapter 8, especially pp. 235-240 |
 | INVT GD200A | [Manual 2](INVT_GD200A/invt-gd200a-user-manual2.pdf) | English; 201908 (V2.4), document 66001-00342; 179 pages | [GD200A notes](../INVT_GD200A.md); chapter 9; control/status/register tables pp. 143-146 |
 | INVT Goodrive200, different model family | [Manual 1](INVT_GD200A/invt-gd200a-user-manual1.pdf) | English; revision not identified; 252 pages | Preface p. 2 identifies **Goodrive200**, despite the GD200A filename. Related reference only; do not substitute its parameters for GD200A |
+| XDB401/S1204 installed unit | [Supplied label photo](XDB401/XDB401_installed_sensor_label.jpg) | Photo supplied 2026-10-06; printed `SUP: 3.3 VDC`, `OUT: I2C`, `RANGE: 0-1 Mpa`, `S/N 202607…` | [Pressure-node doc](../PRESSURE_CONTROL_NODE.md); hardware-confirmed range (0-1 MPa) and output interface (I2C). A supplied 485-variant protocol document was rejected: it had no I2C content and no model name, so it is not filed here |
 
 Supporting images: the [TUF source list](../TUF_2000M_TS2.md#preserved-sources)
 links the module, transducer and range images. The RD-RWG-01
 [usage illustration](RD-RWG-01/usage.jpg) is a supplied product/application
 illustration, not a photograph or commissioning record of the installed unit.
+The XDB401 [installed-unit label](XDB401/XDB401_installed_sensor_label.jpg) is a
+photograph of the supplied sensor's printed label, so its `SUP`/`OUT`/`RANGE`
+text is hardware evidence for that unit rather than catalogue data.
 
 ## Supplied hardware requirements
 

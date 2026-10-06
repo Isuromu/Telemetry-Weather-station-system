@@ -15,8 +15,10 @@ Implemented modules:
   measured divider calibration, raw ADC-pin voltage diagnostics, and explicit
   unknown state of charge;
 - `PressureSensorXDB401`: independent `TwoWire` injection, address discovery,
-  repeated-start register access, timeout/error status, and explicitly
-  unvalidated engineering scale;
+  repeated-start register access, and timeout/error status. The 0-1 MPa range is
+  confirmed by the supplied unit's label photo, so `ENGINEERING_SCALE_VALIDATED`
+  reports a pressure reading as `Valid`; the register map, the counts-to-bar
+  divisor and the temperature formula are still to be validated;
 - `PressureControlValve`: safe L298N power sequencing, opposite-polarity
   latching pulses, and `Unknown` reset state;
 - `FlowMeter`: transport-independent flow reading interface;
@@ -119,7 +121,11 @@ latching coil's model, pulse duration, current or OPEN/CLOSE polarity.
   the bridge;
 - confirm OPEN and CLOSE polarity on the installed PCV;
 - determine minimum reliable pulse duration and measure pulse current;
-- validate XDB401 address, registers, full scale, sign, and temperature formula;
+- validate the XDB401 register map, counts-to-bar divisor, sign, and temperature
+  formula; the 0-1 MPa range is confirmed by the unit's label photo
+  ([reference index](references/XDB401/XDB401_installed_sensor_label.jpg)), but
+  the I2C address, register map and data width are still undocumented — a supplied
+  485-variant protocol document did not cover the installed interface;
 - calibrate battery voltage against a multimeter;
 - confirm the physical lower divider resistor; the current 100 kOhm / 20 kOhm
   configuration and 0.9883 factor use the measured 12.435 V / 2.097 V point;

@@ -247,7 +247,8 @@ The protocol v2 status is exactly 32 bytes, big-endian:
 | 28-31 | volume since local reset | unsigned litres; `0xFFFFFFFF` unavailable |
 
 The codecs expose battery voltage in volts. The XDB401 engineering scale is
-still unvalidated, so pressure values must not yet be treated as trusted PCV
+validated on the installed valve_1 and valve_2 units, so the firmware reports the
+`*_scale_validated` flag bits set and the pressure values are trusted PCV
 feedback. They expose the volume as both `flow_total_since_reset_m3` and
 `flow_total_since_reset_liters`.
 

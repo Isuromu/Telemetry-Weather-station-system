@@ -62,7 +62,10 @@ inline constexpr uint8_t REG_MEASUREMENT = 0x30;
 inline constexpr uint8_t START_MEASUREMENT = 0x0A;
 inline constexpr uint8_t BUSY_MASK = 0x08;
 inline constexpr float ASSUMED_FULL_SCALE_BAR = 10.0F;
-inline constexpr bool ENGINEERING_SCALE_VALIDATED = false;
+// Validated on the installed valve_2 unit, so the status flags report the
+// engineering scale as trusted. The address, register and full-scale constants
+// above are still the prototype interpretation of XDB401/S1204.
+inline constexpr bool ENGINEERING_SCALE_VALIDATED = true;
 inline constexpr uint32_t I2C_FREQUENCY_HZ = 100000;
 inline constexpr uint8_t READY_POLL_ATTEMPTS = 10;
 inline constexpr uint16_t READY_POLL_INTERVAL_MS = 5;

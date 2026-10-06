@@ -171,7 +171,9 @@ deliberately does not parse Serial commands.
 
 `battery` reports the measured GPIO35 voltage and calibrated battery voltage,
 and leaves SOC as `UNKNOWN`.
-`pressure` marks the current engineering scale `VALID_UNCALIBRATED`.
+`pressure` reports the readings with the scale status that
+`ENGINEERING_SCALE_VALIDATED` sets: `VALID` while it is true, otherwise
+`VALID_UNCALIBRATED`.
 `flow` is an on-demand TUF-2000M read. When commissioned, it reports flow rate
 in m3/h, velocity in m/s, and REG0072 error bits. UART2 is assigned to
 GPIO16/GPIO17; M46 address 1, M62 9600 8N1, and M63 MODBUS_RTU are confirmed.

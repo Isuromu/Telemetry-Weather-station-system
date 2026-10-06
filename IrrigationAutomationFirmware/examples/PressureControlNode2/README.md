@@ -118,6 +118,12 @@ time-zoom buttons (30 minutes to 24 hours). The flow has no flow-meter display
 because this device has no flow meter. Commands go to `.../command/down` with the codec's `object`
 input, the same path as the manual JSON above.
 
+The flow subscribes dynamically and reads `IRRIGATION_APP_ID` (the shared
+ChirpStack application ID) and `VALVE2_DEV_EUI` (this node's DevEUI) from the
+Node-RED environment at run time, so the export stores no identifiers of its
+own. Set both before deploying; with either missing, the card reports it and no
+command is sent.
+
 The dashboard export contains the replacement chart group created in Node-RED
 and confirmed by the user to appear on the right of the Valve 2 page. The
 status/control group uses eight columns and the chart group uses four; on

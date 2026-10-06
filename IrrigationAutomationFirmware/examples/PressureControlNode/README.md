@@ -92,9 +92,11 @@ reset command. The reset changes only the ESP32 baseline; it does not clear
 the meter's accumulated registers. The dashboard uses the Class A FPort 30/31
 codec and queues downlinks until the next uplink receive window.
 
-Before deploying the imported flow, replace `SET_VALVE1_APP_ID` and
-`SET_VALVE1_DEV_EUI` in the MQTT-in topic and both Function nodes with this
-device's ChirpStack application ID and DevEUI. Use the valve_1 device profile
+The flow subscribes dynamically and reads its identifiers from the Node-RED
+environment at run time: set `IRRIGATION_APP_ID` to the shared ChirpStack
+application ID and `VALVE1_DEV_EUI` to this device's DevEUI before deploying.
+Nothing is hardcoded in the flow and no placeholder needs replacing by hand.
+With either variable missing, the card reports it and no command is sent. Use the valve_1 device profile
 with `pcv_low_power_class_a_codec.js` and check that the shared `localhost:1883`
 MQTT broker and Dashboard 2.0 base match your Node-RED installation. Do not
 use the valve_2 topic or its credentials for valve_1. The sleep-interval input

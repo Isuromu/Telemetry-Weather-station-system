@@ -128,7 +128,12 @@ void PressureNodeCommandProcessor::printPressurePair(
     logger_.print(readings.upstream.pressureBar -
                       readings.downstream.pressureBar,
                   true, "", 3);
-    logger_.println(F(" bar (scale not yet validated)"), true);
+    // Follow the reading status rather than asserting the scale either way:
+    // ENGINEERING_SCALE_VALIDATED is what decides whether these units hold.
+    const bool validated = readings.upstream.engineeringUnitsValidated() &&
+                           readings.downstream.engineeringUnitsValidated();
+    logger_.println(validated ? F(" bar") : F(" bar (scale not yet validated)"),
+                    true);
   }
 }
 
