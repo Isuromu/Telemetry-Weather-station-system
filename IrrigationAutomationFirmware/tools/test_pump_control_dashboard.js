@@ -15,8 +15,10 @@ const EUI = '0000000000000006';
 const ENV = { IRRIGATION_APP_ID: APP, PUMP_DEV_EUI: EUI };
 const UP = 'application/' + APP + '/device/' + EUI + '/event/up';
 
-const DECODE = byId.get('3feff66c35d116bc');
-const SEND = byId.get('379f6c997142081b');
+// Node ids are the live Node-RED workspace's, so an import updates these nodes
+// in place instead of appending a second copy of the flow.
+const DECODE = byId.get('5dda9abcb9fba621');
+const SEND = byId.get('0f9e522f0e8d897a');
 
 c.checkImportInvariants(flow, { name: 'pump_control' });
 
@@ -80,6 +82,35 @@ if (decode(statusEvent({ object: { command_result: 'accepted' } }), UP.replace('
   c.fail('a non-uplink event reached the card');
 }
 c.done('pump_control: another DevEUI and a non-uplink event are filtered out');
+
+// --- nothing stateless may reach Present Pump status ------------------------
+// Present Pump status reads msg.payload.state, and Apply Pump offline state takes
+// a state with no last_seen_ms as "the node is offline" and blanks every tile.
+// Require fresh Pump status hands on the original command or refresh message,
+// which carries no state at all, so its first two outputs must stay clear of
+// this node. The live flow routes them past it; this pins that wiring, and the
+// paths that do carry a state.
+const PRESENT = byId.get('828a34a9ad1a8fe9');
+const ROUTER = byId.get('c46819060b51b164');
+const out = (node, index) => ((node.wires || [])[index] || []);
+
+if (out(ROUTER, 0).includes(PRESENT.id) || out(ROUTER, 1).includes(PRESENT.id)) {
+  c.fail('Require fresh Pump status hands a stateless command or refresh to ' +
+    'Present Pump status, which blanks the card until the next uplink');
+}
+if (!out(ROUTER, 2).includes(PRESENT.id)) {
+  c.fail('the stale refusal no longer reaches Present Pump status');
+}
+for (const [id, index] of [['0f9e522f0e8d897a', 1], ['0776bf5a0d917ed8', 1]]) {
+  if (!out(byId.get(id), index).includes(PRESENT.id)) {
+    c.fail(byId.get(id).name + ' output ' + (index + 1) +
+      ' no longer feeds Present Pump status, so its state cannot reach the card');
+  }
+}
+if (!out(byId.get('901b9f75f8165690'), 0).includes(PRESENT.id)) {
+  c.fail('Check stale status no longer feeds Present Pump status');
+}
+c.done('pump_control: no stateless message reaches Present Pump status');
 
 // --- commands --------------------------------------------------------------
 function send(action, state, pending) {

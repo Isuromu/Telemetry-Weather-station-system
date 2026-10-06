@@ -253,6 +253,18 @@ stopped. Once offline, cached Class C, VFD communication, and VFD fault values
 are shown as unavailable. Dashboard commands other than Stop are blocked until
 a fresh status arrives; Stop remains available as a safety action.
 
+**Commanded frequency** is the frequency this node last wrote. `setSpeedHz()`
+stores the accepted value in NVS (`pump-cmd`, key `hz`, hundredths of a hertz)
+and `setup()` restores it, so it survives a restart instead of falling back to a
+default the drive never received. Until a frequency has been requested — or one
+is restored from NVS — the status prints `-` rather than a number, and the boot
+log says which of the two it is: `[PUMP] Restored commanded frequency: 22.00 Hz`,
+or `[PUMP] No commanded frequency stored yet.` A restored value is not armed:
+`frequencyArmed` stays false until an explicit frequency command, so Start
+remains blocked after a restart as the boot policy intends. The node does not
+report when it restarted, so confirm that with `pump status`, which prints
+`[PUMP] Uptime:`.
+
 ## Wireless (Bluetooth) console
 
 PumpNode also runs a Bluetooth Classic Serial (SPP) console, so diagnostics stay

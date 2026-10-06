@@ -10,6 +10,9 @@ struct PumpStatus {
   bool configurationValid{false};
   bool running{false};
   bool frequencyArmed{false};
+  // True once a frequency has been written or restored, so the minRunFrequencyHz
+  // seed begin() reports can be told from a frequency this node actually set.
+  bool commandedSet{false};
   DelixiRunState runState{DelixiRunState::Unknown};
   float commandedFrequencyHz{0.0f};
   float actualFrequencyHz{0.0f};
@@ -35,6 +38,10 @@ class PumpController {
   bool setSpeedHz(float hz);
 
   void setConfigurationValid(bool valid);
+  // Reports a frequency written before this boot so the status does not fall back
+  // to minRunFrequencyHz. Deliberately leaves frequencyArmed alone: starting still
+  // needs an explicit frequency command after boot.
+  void restoreCommandedFrequency(float hz);
   bool poll(bool force = false);
   const PumpStatus &status() const { return status_; }
   const irrigation::MotorProfile &motor() const { return motor_; }

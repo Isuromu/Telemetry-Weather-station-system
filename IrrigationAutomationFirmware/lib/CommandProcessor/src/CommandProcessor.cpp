@@ -147,8 +147,12 @@ void CommandProcessor::printPumpStatus(bool telemetry) {
   logger_.print(F("[PUMP] Configuration: "), true);
   logger_.println(status.configurationValid ? "valid" : "blocked", true);
   logger_.print(F("[PUMP] Commanded frequency: "), true);
-  logger_.print(status.commandedFrequencyHz, true, "", 2);
-  logger_.println(F(" Hz"), true);
+  if (status.commandedSet) {
+    logger_.print(status.commandedFrequencyHz, true, "", 2);
+    logger_.println(F(" Hz"), true);
+  } else {
+    logger_.println(F("-"), true);
+  }
   logger_.print(F("[PUMP] Actual frequency: "), true);
   logger_.print(status.actualFrequencyHz, true, "", 2);
   logger_.println(F(" Hz"), true);

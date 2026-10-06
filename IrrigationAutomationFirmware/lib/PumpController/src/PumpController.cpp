@@ -12,13 +12,25 @@ PumpController::PumpController(DelixiCDIE100 &vfd, PrintController &logger,
 
 bool PumpController::begin() {
   status_ = {};
-  status_.commandedFrequencyHz = motor_.minRunFrequencyHz;
+  // No seed for commandedFrequencyHz: a frequency this node never wrote is not a
+  // command. commandedSet stays false until setSpeedHz() or
+  // restoreCommandedFrequency() supplies one, and until then "no frequency
+  // requested" is what the status should say.
   status_.lastCommunicationError = Rs485Status::NotInitialized;
   return true;
 }
 
 void PumpController::setConfigurationValid(bool valid) {
   status_.configurationValid = valid;
+}
+
+void PumpController::restoreCommandedFrequency(float hz) {
+  if (!std::isfinite(hz) || hz < motor_.minRunFrequencyHz ||
+      hz > motor_.maxRunFrequencyHz) {
+    return;
+  }
+  status_.commandedFrequencyHz = hz;
+  status_.commandedSet = true;
 }
 
 void PumpController::updateCommunicationState(bool success) {
@@ -46,6 +58,7 @@ bool PumpController::setSpeedHz(float hz) {
   if (success) {
     status_.commandedFrequencyHz = hz;
     status_.frequencyArmed = true;
+    status_.commandedSet = true;
   } else {
     logger_.print(F("[PUMP][ERROR] Frequency write failed; Modbus status: "),
                   true);
@@ -129,6 +142,7 @@ bool PumpController::emergencyStop() {
   updateCommunicationState(success);
   status_.running = false;
   status_.frequencyArmed = false;
+  // commandedSet stays true: the drive still holds the frequency this node wrote.
   if (success) status_.runState = DelixiRunState::Stopped;
   logger_.println(
       F("[PUMP] Software emergency stop uses CDI-E free stop. It is not a physical emergency-stop circuit."),

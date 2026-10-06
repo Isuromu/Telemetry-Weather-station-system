@@ -102,6 +102,11 @@ uint8_t lastCommandResult = 0;
 PendingRemoteCompletion pendingRemoteCompletion =
     PendingRemoteCompletion::None;
 uint32_t remoteCompletionStartedMs = 0;
+// The last frequency this node wrote, in hundredths of a hertz, remembered so a
+// restart reports it instead of the minRunFrequencyHz seed from pump.begin().
+// Zero means nothing has been written yet, which 0 Hz cannot be: the profile's
+// minimum run frequency is 10 Hz (config/motors/Grandfar_2CP50_160B.h).
+uint16_t persistedFrequencyHz100 = 0;
 
 void put16(uint8_t *destination, uint16_t value) {
   destination[0] = static_cast<uint8_t>(value >> 8);
@@ -211,6 +216,22 @@ bool saveLastCommand() {
   const bool ok = preferences.putBytes("last", saved, sizeof(saved)) == sizeof(saved);
   preferences.end();
   return ok;
+}
+
+// Store the frequency a later boot should report, in hundredths of a hertz.
+bool saveCommandedFrequency(float hz) {
+  const uint16_t stored = static_cast<uint16_t>(hz * 100.0f + 0.5f);
+  if (!preferences.begin("pump-cmd", false)) return false;
+  const bool ok = preferences.putUShort("hz", stored) == sizeof(stored);
+  preferences.end();
+  return ok;
+}
+
+uint16_t loadCommandedFrequencyHz100() {
+  if (!preferences.begin("pump-cmd", false)) return 0;
+  const uint16_t stored = preferences.getUShort("hz", 0);
+  preferences.end();
+  return stored;
 }
 
 void beginRemoteCompletion(PendingRemoteCompletion completion) {
@@ -520,6 +541,18 @@ void setup() {
   vfd.setDebug(DEBUG_MODBUS != 0);
   vfd.begin();
   pump.begin();
+  persistedFrequencyHz100 = loadCommandedFrequencyHz100();
+  pump.restoreCommandedFrequency(
+      static_cast<float>(persistedFrequencyHz100) / 100.0f);
+  // Say which of the two the status is about to report, so a boot log shows
+  // whether NVS still holds a frequency.
+  if (pump.status().commandedSet) {
+    logger.print(F("[PUMP] Restored commanded frequency: "), true);
+    logger.print(pump.status().commandedFrequencyHz, true, "", 2);
+    logger.println(F(" Hz"), true);
+  } else {
+    logger.println(F("[PUMP] No commanded frequency stored yet."), true);
+  }
 
   if (vfd.ping()) {
     // Boot policy: issue only a stop command; never send a run command.
@@ -553,6 +586,18 @@ void loop() {
   serialCommands.poll(wirelessConsole);
   pump.poll();
   updateRemoteCompletion();
+  // Persist the frequency this node writes, from a LoRaWAN command or the
+  // console, so the next boot reports it rather than the begin() seed. Both
+  // paths end at PumpController::setSpeedHz.
+  const PumpStatus &pumpStatus = pump.status();
+  if (pumpStatus.commandedSet) {
+    const uint16_t writtenHz100 =
+        static_cast<uint16_t>(pumpStatus.commandedFrequencyHz * 100.0f + 0.5f);
+    if (writtenHz100 != persistedFrequencyHz100 &&
+        saveCommandedFrequency(pumpStatus.commandedFrequencyHz)) {
+      persistedFrequencyHz100 = writtenHz100;
+    }
+  }
   if (lorawanActive && hasLastStatusSignature &&
       statusSignature() != lastStatusSignature) {
     statusPending = true;

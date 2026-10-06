@@ -149,17 +149,17 @@ Every flow now reads its ChirpStack identifiers from the environment, and
 
 | Flow | Shipped broker | Tab node |
 | --- | --- | --- |
-| `WaterLevel`, `IntegratedDashboard` | none (borrows `ae0178f3742ff530`) | no |
-| `SoilNode`, `MainValve`, `PumpControl`, `PressureControlNode`, `PressureControlNode2` | own node, shared id `ae0178f3742ff530` | no |
+| `WaterLevel`, `IntegratedDashboard`, `PumpControl` | none (borrows `ae0178f3742ff530`) | no |
+| `SoilNode`, `MainValve`, `PressureControlNode`, `PressureControlNode2` | own node, shared id `ae0178f3742ff530` | no |
 
 The second row reuses the shared broker id, so the editor reuses that node
-rather than adding a second server, but those five files still re-declare the
+rather than adding a second server, but those four files still re-declare the
 server's settings and can overwrite the user's host, port and TLS on import.
 Configure the server once, in the flow that already owns it, and confirm each
 row against the files before relying on it — this table is a snapshot.
 
-`global-config` is a config node too, and each flow ships one with its own id, so
-an import can add a second. Page and group ids need the same care: `SoilNode`
+`global-config` is a config node too, and the other six flows ship one with its
+own id, so an import can add a second. Page and group ids need the same care: `SoilNode`
 still carries builder-minted `sc_soil_ui_page`, `sc_soil_graph_group` and
 `sc_soil_ui_group` ids, and an id the workspace does not already own is imported
 as-is, which leaves a second page and a second pair of groups. `WaterLevel` uses
