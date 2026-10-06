@@ -11,3 +11,4 @@ config/PumpControlLoRaSecrets.h
 /tools/__pycache__/
 /tools/USB_RS485_Sensor_Tool_v0_9_2/USB_RS485_Sensor_Tool/__pycache__/
 /.codex/
+/tmp/
