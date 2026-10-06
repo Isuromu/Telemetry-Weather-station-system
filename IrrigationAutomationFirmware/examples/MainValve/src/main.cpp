@@ -36,6 +36,7 @@
 #include <RadioLib.h>
 #include <RadioErrorMeaning.h>
 #include <ModbusErrorMeaning.h>
+#include <PressureSensorXDB401.h>
 #include <SerialAccess.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -50,6 +51,7 @@
 
 namespace config = irrigation::main_valve::config;
 namespace secrets = irrigation::main_valve::lorawan_secrets;
+namespace pressure_node = irrigation::pressure_node;
 
 irrigation::SerialAccess serialAccess(Serial);
 #undef Serial
@@ -72,7 +74,7 @@ constexpr float VALVE_TRAVEL_DEGREES = 90.0f;
 
 // The pressure sensor is before (upstream of) the main valve in this system.
 constexpr bool PRESSURE_IS_UPSTREAM_OF_VALVE = true;
-constexpr float MAX_PRESSURE_BAR = 2.0f;
+constexpr float MAX_PRESSURE_BAR = 4.0f;
 
 // With upstream overpressure, closing farther can dead-head the pump and raise
 // pressure. This protection rejects only commands that reduce the opening.
@@ -119,13 +121,25 @@ constexpr uint16_t POSITION_MIN_RAW = 1999;  // 0.0%
 constexpr uint16_t POSITION_MAX_RAW = 2999;  // 100.0%
 
 // ----------------------- Pressure protocol ------------------------
-// Manual gives 8-bit addresses FE(write)/FF(read); Wire uses 7-bit 0x7F.
-constexpr uint8_t PRESSURE_I2C_ADDRESS = 0x7F;
-constexpr uint8_t PRESSURE_DATA_REGISTER = 0x06;
-constexpr uint8_t PRESSURE_CONTROL_REGISTER = 0x30;
-constexpr uint8_t PRESSURE_START_COMMAND = 0x0A;
-constexpr uint8_t PRESSURE_BUSY_MASK = 0x08;
-constexpr float PRESSURE_FULL_SCALE_KPA = 1000.0f;  // 0-1 MPa sensor
+// The same XDB401 sensor and register map as the valve_1/valve_2 PCV nodes.
+// The read goes through lib/PressureSensorXDB401 instead of a local copy, so a
+// register-map or scaling correction lands once for all three sensors. The
+// manual gives 8-bit addresses FE(write)/FF(read); Wire uses 7-bit 0x7F.
+constexpr pressure_node::Xdb401Configuration PRESSURE_SENSOR_CONFIGURATION{
+    0x7F,   // primaryAddress
+    0x6D,   // alternateAddress, as the PCV nodes also probe
+    0x06,   // pressureRegister
+    0x09,   // temperatureRegister
+    0x30,   // measurementRegister
+    0x0A,   // startMeasurementCommand
+    0x08,   // busyMask
+    10.0f,  // fullScaleBar (0-1 MPa sensor, label-confirmed)
+    true,   // engineeringScaleValidated
+    // This board waits up to 200 ms for a conversion; the PCV nodes accept 50
+    // ms. Reproduce the longer window rather than shortening it.
+    100,  // readyPollAttempts
+    2,    // readyPollIntervalMs
+};
 constexpr uint32_t PRESSURE_I2C_CLOCK_HZ = 100000;
 // A transient can leave the ESP32 I2C driver in an invalid state. Restart it
 // only between complete pressure samples and rate-limit repeated attempts.
@@ -227,11 +241,16 @@ struct PressureStatus {
   bool valid;
   float bar;
   float temperatureC;
-  int32_t rawPressure;
 };
 
 ActuatorStatus actuator = {};
 PressureStatus pressure = {};
+pressure_node::PressureSensorXDB401 pressureSensor(
+    Wire, PRESSURE_SENSOR_CONFIGURATION);
+// Last status the pressure read reported, so a fault that persists does not
+// reprint at the 1 Hz sampling rate.
+pressure_node::ReadingStatus lastPressureReadStatus =
+    pressure_node::ReadingStatus::NotSampled;
 uint8_t statusReason = REASON_STARTUP;
 bool pressureAlarm = false;
 bool lorawanActive = false;
@@ -624,6 +643,11 @@ bool recoverPressureI2c(const char *reason) {
   const uint8_t clocks = clearPressureI2cBus(sdaHighBefore, sclHighBefore);
   delay(2);
   const bool started = beginPressureI2c();
+  if (started) {
+    // The driver caches the discovered address and its initialized flag, so
+    // re-probe the restarted bus instead of trusting a stale result.
+    (void)pressureSensor.begin();
+  }
   Serial.printf("Pressure I2C bus %s %s; lines before recovery SDA=%s SCL=%s, "
                 "clock pulses=%u%s.\n",
                 started ? "reinitialized" : "reinitialization failed",
@@ -633,81 +657,39 @@ bool recoverPressureI2c(const char *reason) {
   return started;
 }
 
-bool pressureWriteRegister(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(PRESSURE_I2C_ADDRESS);
-  Wire.write(reg);
-  Wire.write(value);
-  return Wire.endTransmission(true) == 0;
-}
-
-bool pressureReadRegisters(uint8_t firstReg, uint8_t *data, size_t length) {
-  Wire.beginTransmission(PRESSURE_I2C_ADDRESS);
-  Wire.write(firstReg);
-  if (Wire.endTransmission(false) != 0) {
-    return false;
-  }
-  const size_t received = Wire.requestFrom(
-    static_cast<uint8_t>(PRESSURE_I2C_ADDRESS), length, true);
-  if (received != length) {
-    while (Wire.available()) (void)Wire.read();
-    return false;
-  }
-  for (size_t i = 0; i < length; ++i) {
-    data[i] = static_cast<uint8_t>(Wire.read());
-  }
-  return true;
-}
-
-int32_t decodeSigned24(uint8_t msb, uint8_t mid, uint8_t lsb) {
-  uint32_t value = (static_cast<uint32_t>(msb) << 16) |
-                   (static_cast<uint32_t>(mid) << 8) | lsb;
-  if ((value & 0x00800000UL) != 0) value |= 0xFF000000UL;
-  return static_cast<int32_t>(value);
-}
-
 bool readPressureSample(bool &transportFailure) {
   transportFailure = false;
   pressure.valid = false;
   pressureAlarm = false;
-  if (!pressureWriteRegister(PRESSURE_CONTROL_REGISTER,
-                             PRESSURE_START_COMMAND)) {
-    transportFailure = true;
+
+  const pressure_node::PressureReading reading = pressureSensor.read();
+  // Print only on a change of state. Sampling runs at 1 Hz, so an unrepeated
+  // fault must not print every second.
+  if (reading.status != lastPressureReadStatus) {
+    lastPressureReadStatus = reading.status;
+    if (!reading.hasSample()) {
+      Serial.printf("Pressure read unavailable: %s.\n",
+                    pressure_node::readingStatusName(reading.status));
+    }
+  }
+  // All three statuses are recoverable here. NotFound is the one that matters:
+  // PressureSensorXDB401::begin() clears its cached address before probing, so
+  // once a re-probe fails the driver returns NotFound without touching the bus
+  // again. A recovery interrupted by pump EMI lands in exactly that state, so
+  // excluding NotFound latches the node until reboot. Including it lets the
+  // rate-limited recovery keep re-probing until the bus answers.
+  transportFailure =
+    reading.status == pressure_node::ReadingStatus::ReadError ||
+    reading.status == pressure_node::ReadingStatus::Timeout ||
+    reading.status == pressure_node::ReadingStatus::NotFound;
+  if (!reading.hasSample()) {
     return false;
   }
 
-  const uint32_t started = millis();
-  bool conversionComplete = false;
-  while (millis() - started < 200) {
-    uint8_t control = 0;
-    if (!pressureReadRegisters(PRESSURE_CONTROL_REGISTER, &control, 1)) {
-      transportFailure = true;
-      return false;
-    }
-    if ((control & PRESSURE_BUSY_MASK) == 0) {
-      conversionComplete = true;
-      break;
-    }
-    delay(2);
-  }
-  if (!conversionComplete) {
-    Serial.println("Pressure conversion timed out.");
-    transportFailure = true;
-    return false;
-  }
-
-  uint8_t data[5] = {};
-  if (!pressureReadRegisters(PRESSURE_DATA_REGISTER, data, sizeof(data))) {
-    transportFailure = true;
-    return false;
-  }
-  pressure.rawPressure = decodeSigned24(data[0], data[1], data[2]);
-  const int16_t rawTemperature = static_cast<int16_t>(
-    (static_cast<uint16_t>(data[3]) << 8) | data[4]);
-  const float kPa =
-    static_cast<float>(pressure.rawPressure) / 8388608.0f *
-    PRESSURE_FULL_SCALE_KPA;
-  pressure.bar = kPa / 100.0f;
-  pressure.temperatureC = static_cast<float>(rawTemperature) / 256.0f;
+  pressure.bar = reading.pressureBar;
+  pressure.temperatureC = reading.temperatureC;
+  // pressure_valid keeps its v3 meaning: a -0.2..10.5 bar plausibility gate,
+  // not a calibration claim (see XDB401_NOTES.md).
   pressure.valid = isfinite(pressure.bar) &&
                    pressure.bar >= -0.2f && pressure.bar <= 10.5f;
   pressureAlarm = pressure.valid && pressure.bar > MAX_PRESSURE_BAR;
@@ -1254,6 +1236,16 @@ void setup() {
   rs485.begin(MODBUS_BAUD, SERIAL_8N1, RS485_RX_PIN, RS485_TX_PIN);
   if (!beginPressureI2c()) {
     Serial.println("WARNING: pressure I2C bus initialization failed.");
+  } else {
+    const pressure_node::ReadingStatus sensorStatus = pressureSensor.begin();
+    if (sensorStatus == pressure_node::ReadingStatus::NotSampled) {
+      Serial.printf("Pressure sensor found at 0x%02X.\n",
+                    pressureSensor.address());
+    } else {
+      Serial.printf("WARNING: pressure sensor not found (%s); probed 0x7F and "
+                    "0x6D.\n",
+                    pressure_node::readingStatusName(sensorStatus));
+    }
   }
   delay(500);
 

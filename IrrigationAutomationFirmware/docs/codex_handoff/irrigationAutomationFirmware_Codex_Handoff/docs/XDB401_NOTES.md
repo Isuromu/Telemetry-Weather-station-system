@@ -11,17 +11,62 @@ Prototype Rev A places them on two independent ESP32 I2C controllers because ide
 
 Target Rev B should use an I2C multiplexer.
 
-MainValve carries the same sensor and the same assumptions, implemented inline
-rather than through `lib/PressureSensorXDB401`
-(`examples/MainValve/src/main.cpp`: address 0x7F, data register 0x06, control
-register 0x30 with start command 0x0A and busy mask 0x08, signed 24-bit pressure
-plus signed 16-bit temperature, `raw / 8388608 * 1000 kPa` and `raw / 256`,
-0-1 MPa full scale). It has no scale-validated flag — its `pressure_valid` status
-bit is a -0.2 to 10.5 bar plausibility gate, not a calibration claim, and its
-0x10 overpressure bit plus the closing interlock on `MAX_PRESSURE_BAR = 2.0` are
-the first things a mis-scaled pressure would disturb. The register map and
-counts-to-bar questions below therefore cover MainValve as well, and one register
-read settles all three sensors.
+MainValve carries the same sensor and the same assumptions, and reads it through
+the same `lib/PressureSensorXDB401` driver
+(`examples/MainValve/src/main.cpp`): address 0x7F with the 0x6D alternate probe,
+register 0x06 pressure and 0x09 temperature, control register 0x30 with start
+command 0x0A and busy mask 0x08, signed 24-bit pressure plus signed 16-bit
+temperature, `raw / 8388608 * full scale` and `raw / 256`, 0-1 MPa full scale.
+It has no scale-validated flag — its `pressure_valid` status bit is a -0.2 to
+10.5 bar plausibility gate, not a calibration claim, and its 0x10 overpressure
+bit plus the closing interlock on `MAX_PRESSURE_BAR = 4.0` are the first things
+a mis-scaled pressure would disturb. The register map and counts-to-bar questions
+below therefore cover MainValve as well, and one register read settles all three
+sensors.
+
+MainValve's conversion poll budget and its I2C bus recovery are the two places
+where it does not behave like the PCV nodes; both are in the next section.
+
+## MainValve read timing and bus recovery
+
+The driver is shared, but the timing and the fault response are not, and neither
+is settable through the sensor's register map.
+
+**Poll budget.** The driver waits for a conversion by polling the control register
+`readyPollAttempts` times with `readyPollIntervalMs` between attempts, so the
+window is their product. The PCV nodes accept 50 ms (10 attempts at 5 ms);
+MainValve waits up to 200 ms, matching the window its pre-driver code used, and
+so sets 100 attempts at 2 ms. Narrowing it to the PCV values is a one-line
+`Xdb401Configuration` change, deliberately not taken: nothing measured on this
+board justifies accepting a shorter window.
+
+**Bus recovery.** `lib/PressureSensorXDB401` has no recovery path. On a failed
+register transaction it returns `ReadError`, and on an unconverted sample
+`Timeout`, and stops. MainValve wraps the read with `recoverPressureI2c()`
+(`examples/MainValve/src/main.cpp`), which on a recoverable status calls
+`Wire.end()`, clocks SDA free with up to nine SCL pulses and a STOP
+(`clearPressureI2cBus`), restarts the bus with `beginPressureI2c()`, and
+re-probes with `pressureSensor.begin()`. Recovery is rate-limited to one attempt
+per `PRESSURE_I2C_RECOVERY_MIN_INTERVAL_MS` (5000 ms), and the failure is logged
+once per change of status rather than once per sample. The PCV nodes have no
+equivalent and report a bus-level failure only as a reading with no sample.
+
+`NotFound` is recoverable too, and that is not optional. `begin()` clears its
+cached address before probing (`PressureSensorXDB401.cpp:19`) and only restores
+it on a successful probe, and `read()` returns `NotFound` without touching the
+bus whenever the address is zero (`:75-78`). So a re-probe that fails — exactly
+what pump EMI produces when it wedges the bus mid-recovery — erases the known
+address and leaves the node reporting `NOT_FOUND` forever, recoverable only by
+power cycle. Measured 2026-10-06: after a pump start the node logged
+`i2c_master_transmit_receive failed: [259] ESP_ERR_INVALID_STATE`, then
+`Pressure read unavailable: NOT_FOUND` indefinitely; stopping the pump did not
+clear it and only an ESP32 restart restored the 0x7F probe. Treating `NotFound`
+as recoverable lets the rate-limited path keep re-probing until the bus answers.
+
+That fix removes the latch, not the EMI. The pump start itself is still what
+breaks the bus, so the I2C wiring (`PRESSURE_SDA_PIN` 21 / `PRESSURE_SCL_PIN`
+22), its pull-ups and its routing relative to the pump cabling remain the
+underlying item.
 
 ## Current trainee register assumptions
 
