@@ -142,8 +142,8 @@ the Dashboard UI with Valve and Pump pages, import
 `../PumpControl/include/dashboard2_shared_sidebar_width.json` into that Node-RED instance.
 It targets the shared `My Dashboard` UI shown in the supplied flow. To change
 the width, edit both `220px` declarations, then deploy and refresh.
-Configure the imported MQTT broker too; `SOIL_APP_ID` and `SOIL_DEV_EUI` are
-Node-RED environment variables.
+Configure the imported MQTT broker too; `IRRIGATION_APP_ID` and `SOIL_DEV_EUI`
+are Node-RED environment variables.
 
 Configure the imported **ChirpStack MQTT** broker for the Mosquitto host,
 port, authentication, and TLS used by your ChirpStack installation. Set these
@@ -151,12 +151,14 @@ Node-RED environment variables before deploying:
 
 | Variable | Value |
 | --- | --- |
-| `SOIL_APP_ID` | ChirpStack application UUID |
+| `IRRIGATION_APP_ID` | The shared ChirpStack application ID |
 | `SOIL_DEV_EUI` | This SoilNode's 16-hex-digit DevEUI |
 
-The MQTT input subscribes to `application/+/device/+/event/+`, then filters
-both IDs in the flow. Give its broker credentials access only to the intended
-application where possible. The flow does not contain OTAA credentials.
+The MQTT input subscribes dynamically to
+`application/<IRRIGATION_APP_ID>/device/<SOIL_DEV_EUI>/event/+`; the subscribe,
+decode and interval functions read both at run time, so nothing is hardcoded in
+the flow. Give its broker credentials access only to the intended application
+where possible. The flow does not contain OTAA credentials.
 
 Set `include/soil_node_class_a_codec.js` as the device-profile codec in
 ChirpStack. The flow accepts its decoded FPort 10 object and can decode the

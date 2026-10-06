@@ -11,6 +11,18 @@ Prototype Rev A places them on two independent ESP32 I2C controllers because ide
 
 Target Rev B should use an I2C multiplexer.
 
+MainValve carries the same sensor and the same assumptions, implemented inline
+rather than through `lib/PressureSensorXDB401`
+(`examples/MainValve/src/main.cpp`: address 0x7F, data register 0x06, control
+register 0x30 with start command 0x0A and busy mask 0x08, signed 24-bit pressure
+plus signed 16-bit temperature, `raw / 8388608 * 1000 kPa` and `raw / 256`,
+0-1 MPa full scale). It has no scale-validated flag — its `pressure_valid` status
+bit is a -0.2 to 10.5 bar plausibility gate, not a calibration claim, and its
+0x10 overpressure bit plus the closing interlock on `MAX_PRESSURE_BAR = 2.0` are
+the first things a mis-scaled pressure would disturb. The register map and
+counts-to-bar questions below therefore cover MainValve as well, and one register
+read settles all three sensors.
+
 ## Current trainee register assumptions
 
 Candidate addresses:

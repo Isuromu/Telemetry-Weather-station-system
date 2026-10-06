@@ -18,7 +18,8 @@
  *   [version=1, command=1, angle_x10_MSB, angle_x10_LSB,
  *    command_id_MSB, command_id_LSB]
  *
- * Status uplink, FPort 31, 15 bytes. Install the matching ChirpStack codec.
+ * Status uplink, FPort 31, protocol v3, 18 bytes. Install matching
+ * ChirpStack codec before flashing firmware that emits v3 frames.
  *
  * RadioLib 7.7.1, LoRaWAN 1.0.x. This mains-powered controller requests
  * Class C. If the confirmed Class-C activation uplink is not acknowledged,
@@ -849,13 +850,24 @@ uint16_t scaledOrFFFF(float value, float multiplier) {
     static_cast<int32_t>(lroundf(scaled)), 0L, 65534L));
 }
 
+// Protocol v3 reserves INT16_MIN for an unavailable pressure sample. Unlike
+// actuator positions, a pressure sample can be negative near atmospheric
+// pressure, so it must not use the unsigned 0xFFFF sentinel.
+int16_t scaledPressureCentibarOrUnavailable(float pressureBar) {
+  if (!isfinite(pressureBar)) return INT16_MIN;
+  const int32_t scaled = static_cast<int32_t>(lroundf(pressureBar * 100.0f));
+  return static_cast<int16_t>(constrain(
+    scaled, static_cast<int32_t>(INT16_MIN) + 1,
+    static_cast<int32_t>(INT16_MAX)));
+}
+
 void buildStatusPayload(uint8_t payload[18], const StatusEvent *event) {
   const uint16_t actualAngle10 = actuator.communicationValid
     ? scaledOrFFFF(actuator.actualDegrees, 10.0f) : 0xFFFF;
   const uint16_t targetAngle10 = actuator.communicationValid
     ? scaledOrFFFF(actuator.targetDegrees, 10.0f) : 0xFFFF;
-  const uint16_t pressure100 = pressure.valid
-    ? scaledOrFFFF(pressure.bar, 100.0f) : 0xFFFF;
+  const int16_t pressure100 = pressure.valid
+    ? scaledPressureCentibarOrUnavailable(pressure.bar) : INT16_MIN;
 
   uint8_t flags = 0;
   if (actuator.communicationValid) flags |= 0x01;
@@ -867,15 +879,16 @@ void buildStatusPayload(uint8_t payload[18], const StatusEvent *event) {
   if (lorawanActive) flags |= 0x20;
   if (classCActive) flags |= 0x40;
 
-  payload[0] = 2;
+  payload[0] = 3;
   payload[1] = flags;
   payload[2] = event ? event->reason : statusReason;
   payload[3] = static_cast<uint8_t>(actualAngle10 >> 8);
   payload[4] = static_cast<uint8_t>(actualAngle10);
   payload[5] = static_cast<uint8_t>(targetAngle10 >> 8);
   payload[6] = static_cast<uint8_t>(targetAngle10);
-  payload[7] = static_cast<uint8_t>(pressure100 >> 8);
-  payload[8] = static_cast<uint8_t>(pressure100);
+  const uint16_t pressureBits = static_cast<uint16_t>(pressure100);
+  payload[7] = static_cast<uint8_t>(pressureBits >> 8);
+  payload[8] = static_cast<uint8_t>(pressureBits);
   payload[9] = static_cast<uint8_t>(actuator.faultCode >> 8);
   payload[10] = static_cast<uint8_t>(actuator.faultCode);
   payload[11] = static_cast<uint8_t>(rtcLastCommandId >> 8);

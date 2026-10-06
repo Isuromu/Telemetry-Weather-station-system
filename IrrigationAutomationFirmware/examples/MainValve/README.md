@@ -45,25 +45,37 @@ Because they were shared in source form, rotate the AppKey before deployment.
 
 ## Node-RED Dashboard 2.0
 
-Import `include/main_valve_dashboard2_updated_flow.json` using Node-RED's **Import**
-menu. It is based on the supplied live flow and uses that flow's ChirpStack
-application, device EUI, MQTT broker, and Dashboard page. Remove the old
-MainValve flow nodes before importing it, so two copies do not send commands.
-It uses the existing `/dashboard/page1` page in the supplied flow. Check that
-the imported MQTT broker points to the broker
-used by ChirpStack. Do not put the AppKey in Node-RED. Deploy, then wait for
-an FPort 31 status uplink before sending the first command.
+Import `include/main_valve_dashboard_flow.json` using Node-RED's **Import**
+menu. Remove the old MainValve flow nodes before importing it, so two copies do
+not send commands. It uses the existing `/dashboard/page1` page in the supplied
+flow. Check that the imported MQTT broker points to the broker used by
+ChirpStack. Do not put the AppKey in Node-RED.
 
-The dashboard subscribes to ChirpStack MQTT events, filters by application and
-DevEUI, and displays FPort 31 status. It uses the ChirpStack decoded `object`
-when available and decodes the base64 payload itself otherwise.
+Set these Node-RED environment variables before deploying, the same way the
+integrated dashboard does:
+
+| Variable | Value |
+| --- | --- |
+| `IRRIGATION_APP_ID` | the shared ChirpStack application ID |
+| `MAIN_DEV_EUI` | this node's DevEUI, from `config/MainValveLoRaSecrets.h` |
+
+The MQTT input subscribes dynamically to
+`application/<IRRIGATION_APP_ID>/device/<MAIN_DEV_EUI>/event/+`. The subscribe,
+decode and command functions read both variables at run time, so the flow
+stores no identifiers of its own. With either variable missing, the card
+reports it and no command is sent. Deploy, then wait for an FPort 31 status
+uplink before sending the first command.
+
+The dashboard filters ChirpStack MQTT events by application and DevEUI and
+displays FPort 31 status. It uses the ChirpStack decoded `object` when available
+and decodes the base64 payload itself otherwise.
 Controls provide 0-degree close, 45-degree half, 90-degree open, custom angle,
 and percent travel. The first command becomes active; later commands wait in
 an ordered Node-RED queue (maximum 20). The dashboard shows the active command
 separately and gives each waiting item an X button. Removing a waiting item
 does not cancel a command already sent to ChirpStack. A command ID is assigned
 when an item becomes active, and the six-byte FPort 30 downlink is published.
-Only a matching FPort 31 v2 `finished` report automatically dispatches the
+Only a matching FPort 31 v2/v3 `finished` report automatically dispatches the
 next waiting item. `accepted` and `moving` do not advance the queue.
 
 A `rejected` report pauses the waiting queue until an operator resumes it.
@@ -78,11 +90,14 @@ context store. In Class A
 fallback, a queued downlink can wait until the next uplink; a dashboard
 timeout does not prove that the command will never execute.
 
-The uplink is protocol v2, 18 bytes on FPort 31. Bytes 0-14 retain the
-previous layout except for version=2. Bytes 15-16 carry the reported command
-ID, including a rejected attempted ID; byte 17 is command phase: 0 none,
-1 accepted, 2 moving, 3 finished, 4 rejected, 5 failed. The ChirpStack codec
-also decodes old v1 uplinks for display, but v1 cannot unlock a command.
+The uplink is protocol v3, 18 bytes on FPort 31. Bytes 0-14 retain the
+v2 layout except that bytes 7-8 are now a signed big-endian pressure in
+centibar; `INT16_MIN` (`0x8000`) means unavailable. This preserves valid
+negative gauge pressure, for example `-0.06 bar` is `0xFFFA`. Bytes 15-16
+carry the reported command ID, including a rejected attempted ID; byte 17 is
+command phase: 0 none, 1 accepted, 2 moving, 3 finished, 4 rejected,
+5 failed. The ChirpStack codec also decodes old v1/v2 uplinks for display,
+but v1 cannot unlock a command.
 The six-byte FPort 30 downlink remains protocol v1.
 
 Movement is inferred from the actuator's Modbus actual-position register.
@@ -100,7 +115,7 @@ dashboard does not send invented remote command bytes.
 
 Install `include/main_valve_class_c_codec.js` from this example directory in the
 ChirpStack v4 device profile. FPort 30 accepts a six-byte protocol-v1 target
-command and FPort 31 carries an 18-byte protocol-v2 status. Queue a command such as:
+command and FPort 31 carries an 18-byte protocol-v3 status. Queue a command such as:
 
 ```json
 {"angle_deg":45,"command_id":1}

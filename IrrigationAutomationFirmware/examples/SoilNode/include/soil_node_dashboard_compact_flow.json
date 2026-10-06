@@ -1,6 +1,6 @@
 [
     {
-        "id": "0213c819b759b29f",
+        "id": "6e97c77aaa496d62",
         "type": "group",
         "z": "soil_dashboard_tab",
         "style": {
@@ -13,110 +13,159 @@
             "color": "#767676"
         },
         "nodes": [
-            "0bc55b69be62b8af",
-            "479cf79265adf1b9",
-            "d0e32239fceb43ae",
-            "835a8e033ba9d61b",
-            "a11854339c685abb",
-            "d475c1626727312a",
-            "6d8f958c7fe37a0a",
-            "a684f5d7791f886b",
-            "58694589d0e88877",
-            "e4232b9edd0bafd0",
-            "c5a1919110f9cc40",
-            "470a0b307e8d7858",
-            "85bcffc571fa5084",
-            "16bf625eecb4e1cb"
+            "dd28f5e8f447dd88",
+            "0bd20843acf477b3",
+            "f87d4c5c13817987",
+            "f5cfea6505836f56",
+            "6e088ee63985651d",
+            "5fbd5cbbff7bdeb2",
+            "fbff2aaecefad608",
+            "96da356ad3e51a8f",
+            "19db8cbead5deb76",
+            "9dff79b98691a3cc",
+            "9b09b458f6a92cb2",
+            "d91b8a1b25c2c954",
+            "8956e58ce9c79806",
+            "a15396ed4d992509",
+            "dbb636acc2ac9826",
+            "e64987630f834543"
         ],
-        "x": 74,
-        "y": 99,
-        "w": 1352,
-        "h": 422
+        "x": 14,
+        "y": 19,
+        "w": 1812,
+        "h": 432
     },
     {
-        "id": "0bc55b69be62b8af",
-        "type": "mqtt in",
+        "id": "dd28f5e8f447dd88",
+        "type": "inject",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
-        "name": "ChirpStack events",
-        "topic": "application/f21e23b5-408b-455b-8ac1-7c755870970e/device/6c6a898e97099034/event/+",
-        "qos": "0",
-        "datatype": "json",
-        "broker": "sc_ae0178f3742ff530",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
+        "g": "6e97c77aaa496d62",
+        "name": "Refresh SoilNode subscription",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "0.5",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
         "x": 190,
-        "y": 180,
+        "y": 60,
         "wires": [
             [
-                "479cf79265adf1b9"
+                "0bd20843acf477b3"
             ]
         ]
     },
     {
-        "id": "479cf79265adf1b9",
+        "id": "0bd20843acf477b3",
         "type": "function",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
+        "name": "Subscribe SoilNode events",
+        "func": "// Subscribe dynamically so the application ID and DevEUI stay out of the flow export.\n// Set IRRIGATION_APP_ID and SOIL_DEV_EUI in this node's Environment tab,\n// or once in process env for the Node-RED service.\nconst app = String(env.get(\"IRRIGATION_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n    node.status({ fill: \"red\", shape: \"ring\", text: \"IRRIGATION_APP_ID / SOIL_DEV_EUI missing\" });\n    return null;\n}\nconst topic = \"application/\" + app + \"/device/\" + eui + \"/event/+\";\nnode.status({ fill: \"green\", shape: \"dot\", text: topic });\nreturn { action: \"subscribe\", topic: topic, qos: 0 };",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 190,
+        "y": 110,
+        "wires": [
+            [
+                "f87d4c5c13817987"
+            ]
+        ]
+    },
+    {
+        "id": "f87d4c5c13817987",
+        "type": "mqtt in",
+        "z": "soil_dashboard_tab",
+        "g": "6e97c77aaa496d62",
+        "name": "ChirpStack events",
+        "topic": "",
+        "qos": "0",
+        "datatype": "json",
+        "broker": "ae0178f3742ff530",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 1,
+        "x": 590,
+        "y": 110,
+        "wires": [
+            [
+                "f5cfea6505836f56"
+            ]
+        ]
+    },
+    {
+        "id": "f5cfea6505836f56",
+        "type": "function",
+        "z": "soil_dashboard_tab",
+        "g": "6e97c77aaa496d62",
         "name": "Filter and decode SoilNode",
-        "func": "const app = String(env.get(\"SOIL_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:\"red\",shape:\"ring\",text:\"set SOIL_APP_ID and SOIL_DEV_EUI\"});\n  return null;\n}\nconst parts = String(msg.topic || \"\").toLowerCase().split(\"/\");\nif (parts.length !== 6 || parts[0] !== \"application\" || parts[1] !== app ||\n    parts[2] !== \"device\" || parts[3] !== eui || parts[4] !== \"event\") return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (err) { node.warn(\"Invalid ChirpStack JSON: \" + err.message); return null; }\nif (!event || typeof event !== \"object\") return null;\nconst kind = parts[5];\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nconst num = v => typeof v === \"number\" && Number.isFinite(v) ? v : null;\nif (kind === \"up\") {\n  if (event.fPort === 11) {\n    let result = event.object;\n    if (!result || result.message_type !== \"command_ack\") {\n      let b;\n      try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n      if (!b || b.length !== 8 || b[0] !== 1 || b[3] > 2) {\n        s.decode_error = \"Invalid FPort 11 command result. Check SoilNode codec.\";\n        flow.set(\"soil_state\",s);\n        return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n      }\n      result = {\n        command_id:b.readUInt16BE(1) === 65535 ? null : b.readUInt16BE(1),\n        command_status:[\"applied\",\"invalid\",\"storage_failed\"][b[3]],\n        active_sleep_seconds:b.readUInt32BE(4)\n      };\n    }\n    s.last_ack_at = event.time || new Date().toISOString();\n    s.last_ack_id = Number.isInteger(result.command_id) ? result.command_id : null;\n    s.last_ack_status = result.command_status;\n    s.active_sleep_seconds = num(result.active_sleep_seconds);\n    s.decode_error = \"\";\n    if (s.pending_command_id != null && s.last_ack_id === s.pending_command_id) {\n      s.command_state = result.command_status === \"applied\"\n        ? \"Applied by node; active sleep \" + s.active_sleep_seconds + \" s.\"\n        : \"Node rejected command: \" + result.command_status + \". Active sleep \" +\n          s.active_sleep_seconds + \" s.\";\n      s.pending_command_id = null;\n    }\n    flow.set(\"soil_state\",s);\n    node.status({fill:result.command_status === \"applied\" ? \"green\" : \"red\",\n      shape:\"dot\",text:\"command result \" + result.command_status});\n    return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n  }\n  if (event.fPort !== 10) return null;\n  let d = event.object;\n  if (!d || typeof d !== \"object\" || typeof d.sensor_valid !== \"boolean\") {\n    let b;\n    try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n    if (!b || b.length !== 8) {\n      s.decode_error = \"FPort 10 needs decoded object or eight raw bytes. Check SoilNode codec.\";\n      flow.set(\"soil_state\", s);\n      return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n    }\n    const valid = !!(b[0] & 1);\n    d = {\n      sensor_valid: valid,\n      temperature_c: valid ? b.readInt16BE(1) / 100 : null,\n      vwc_percent: valid ? b.readUInt16BE(3) / 100 : null,\n      ec_ms_cm: valid ? b.readUInt16BE(5) / 1000 : null,\n      battery_voltage_v: 2 + b[7] / 100\n    };\n  }\n  s.decode_error = \"\";\n  s.sensor_valid = d.sensor_valid === true;\n  s.temperature_c = s.sensor_valid ? num(d.temperature_c) : null;\n  s.vwc_percent = s.sensor_valid ? num(d.vwc_percent) : null;\n  s.ec_ms_cm = s.sensor_valid ? num(d.ec_ms_cm) : null;\n  s.battery_voltage_v = num(d.battery_voltage_v);\n  s.last_seen = event.time || new Date().toISOString();\n  s.f_cnt = num(event.fCnt);\n  s.uplink_count = (s.uplink_count || 0) + 1;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) {\n    const best = rx.reduce((a,b) => Number(b.snr) > Number(a.snr) ? b : a);\n    s.rssi = num(best.rssi);\n    s.snr = num(best.snr);\n    s.gateway_id = best.gatewayId || \"\";\n  }\n  const lora = (((event.txInfo || {}).modulation || {}).lora || {});\n  s.sf = num(lora.spreadingFactor);\n  s.dr = num(event.dr);\n  s.frequency_hz = num((event.txInfo || {}).frequency);\n  if (s.command_queued_at && !s.first_uplink_after_queue &&\n      Date.parse(s.last_seen) > Date.parse(s.command_queued_at)) {\n    s.first_uplink_after_queue = s.last_seen;\n    s.command_state = \"Later uplink received; interval application still unconfirmed.\";\n  }\n  node.status({fill:s.sensor_valid ? \"green\" : \"yellow\",shape:\"dot\",\n    text:s.sensor_valid ? \"soil reading valid\" : \"soil sensor invalid\"});\n} else if (kind === \"join\") {\n  s.last_join = s.last_event_time;\n} else if (kind === \"txack\") {\n  s.last_txack = s.last_event_time;\n} else if (kind === \"ack\") {\n  s.last_network_ack = event.acknowledged === true ? \"Network ACK received\" : \"Network ACK absent\";\n} else if (kind === \"log\") {\n  s.last_log = event.description || event.code || \"Device log\";\n} else if (kind === \"status\") {\n  s.last_network_status = event.battery == null ? \"Device status received\" : \"Network battery level \" + event.battery;\n} else return null;\nflow.set(\"soil_state\", s);\nconst point = (metric,topic,value) => value === null ? null : {soilMetric:metric,topic:topic,payload:value};\nreturn [\n  {payload:{kind:\"state\",state:s}},\n  kind === \"up\" && s.sensor_valid ? point(\"temp\",\"Temperature\",s.temperature_c) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"vwc\",\"Water content\",s.vwc_percent) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"ec\",\"Conductivity\",s.ec_ms_cm) : null,\n  kind === \"up\" ? point(\"battery\",\"Battery\",s.battery_voltage_v) : null\n];",
+        "func": "const app = String(env.get(\"IRRIGATION_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:\"red\",shape:\"ring\",text:\"set IRRIGATION_APP_ID and SOIL_DEV_EUI\"});\n  return null;\n}\nconst parts = String(msg.topic || \"\").toLowerCase().split(\"/\");\nif (parts.length !== 6 || parts[0] !== \"application\" || parts[1] !== app ||\n    parts[2] !== \"device\" || parts[3] !== eui || parts[4] !== \"event\") return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString(\"utf8\"));\n  else if (typeof event === \"string\") event = JSON.parse(event);\n} catch (err) { node.warn(\"Invalid ChirpStack JSON: \" + err.message); return null; }\nif (!event || typeof event !== \"object\") return null;\nconst kind = parts[5];\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nconst num = v => typeof v === \"number\" && Number.isFinite(v) ? v : null;\nif (kind === \"up\") {\n  if (event.fPort === 11) {\n    let result = event.object;\n    if (!result || result.message_type !== \"command_ack\") {\n      let b;\n      try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n      if (!b || b.length !== 8 || b[0] !== 1 || b[3] > 2) {\n        s.decode_error = \"Invalid FPort 11 command result. Check SoilNode codec.\";\n        flow.set(\"soil_state\",s);\n        return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n      }\n      result = {\n        command_id:b.readUInt16BE(1) === 65535 ? null : b.readUInt16BE(1),\n        command_status:[\"applied\",\"invalid\",\"storage_failed\"][b[3]],\n        active_sleep_seconds:b.readUInt32BE(4)\n      };\n    }\n    s.last_ack_at = event.time || new Date().toISOString();\n    s.last_ack_id = Number.isInteger(result.command_id) ? result.command_id : null;\n    s.last_ack_status = result.command_status;\n    s.active_sleep_seconds = num(result.active_sleep_seconds);\n    s.decode_error = \"\";\n    if (s.pending_command_id != null && s.last_ack_id === s.pending_command_id) {\n      s.command_state = result.command_status === \"applied\"\n        ? \"Applied by node; active sleep \" + s.active_sleep_seconds + \" s.\"\n        : \"Node rejected command: \" + result.command_status + \". Active sleep \" +\n          s.active_sleep_seconds + \" s.\";\n      s.pending_command_id = null;\n    }\n    flow.set(\"soil_state\",s);\n    node.status({fill:result.command_status === \"applied\" ? \"green\" : \"red\",\n      shape:\"dot\",text:\"command result \" + result.command_status});\n    return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n  }\n  if (event.fPort !== 10) return null;\n  let d = event.object;\n  if (!d || typeof d !== \"object\" || typeof d.sensor_valid !== \"boolean\") {\n    let b;\n    try { b = Buffer.from(event.data || \"\", \"base64\"); } catch (_) { b = null; }\n    if (!b || b.length !== 8) {\n      s.decode_error = \"FPort 10 needs decoded object or eight raw bytes. Check SoilNode codec.\";\n      flow.set(\"soil_state\", s);\n      return [{payload:{kind:\"state\",state:s}},null,null,null,null];\n    }\n    const valid = !!(b[0] & 1);\n    d = {\n      sensor_valid: valid,\n      temperature_c: valid ? b.readInt16BE(1) / 100 : null,\n      vwc_percent: valid ? b.readUInt16BE(3) / 100 : null,\n      ec_ms_cm: valid ? b.readUInt16BE(5) / 1000 : null,\n      battery_voltage_v: 2 + b[7] / 100\n    };\n  }\n  s.decode_error = \"\";\n  s.sensor_valid = d.sensor_valid === true;\n  s.temperature_c = s.sensor_valid ? num(d.temperature_c) : null;\n  s.vwc_percent = s.sensor_valid ? num(d.vwc_percent) : null;\n  s.ec_ms_cm = s.sensor_valid ? num(d.ec_ms_cm) : null;\n  s.battery_voltage_v = num(d.battery_voltage_v);\n  s.last_seen = event.time || new Date().toISOString();\n  s.f_cnt = num(event.fCnt);\n  s.uplink_count = (s.uplink_count || 0) + 1;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) {\n    const best = rx.reduce((a,b) => Number(b.snr) > Number(a.snr) ? b : a);\n    s.rssi = num(best.rssi);\n    s.snr = num(best.snr);\n    s.gateway_id = best.gatewayId || \"\";\n  }\n  const lora = (((event.txInfo || {}).modulation || {}).lora || {});\n  s.sf = num(lora.spreadingFactor);\n  s.dr = num(event.dr);\n  s.frequency_hz = num((event.txInfo || {}).frequency);\n  if (s.command_queued_at && !s.first_uplink_after_queue &&\n      Date.parse(s.last_seen) > Date.parse(s.command_queued_at)) {\n    s.first_uplink_after_queue = s.last_seen;\n    s.command_state = \"Later uplink received; interval application still unconfirmed.\";\n  }\n  node.status({fill:s.sensor_valid ? \"green\" : \"yellow\",shape:\"dot\",\n    text:s.sensor_valid ? \"soil reading valid\" : \"soil sensor invalid\"});\n} else if (kind === \"join\") {\n  s.last_join = s.last_event_time;\n} else if (kind === \"txack\") {\n  s.last_txack = s.last_event_time;\n} else if (kind === \"ack\") {\n  s.last_network_ack = event.acknowledged === true ? \"Network ACK received\" : \"Network ACK absent\";\n} else if (kind === \"log\") {\n  s.last_log = event.description || event.code || \"Device log\";\n} else if (kind === \"status\") {\n  s.last_network_status = event.battery == null ? \"Device status received\" : \"Network battery level \" + event.battery;\n} else return null;\nflow.set(\"soil_state\", s);\nconst point = (metric,topic,value) => value === null ? null : {soilMetric:metric,topic:topic,payload:value};\nreturn [\n  {payload:{kind:\"state\",state:s}},\n  kind === \"up\" && s.sensor_valid ? point(\"temp\",\"Temperature\",s.temperature_c) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"vwc\",\"Water content\",s.vwc_percent) : null,\n  kind === \"up\" && s.sensor_valid ? point(\"ec\",\"Conductivity\",s.ec_ms_cm) : null,\n  kind === \"up\" ? point(\"battery\",\"Battery\",s.battery_voltage_v) : null\n];",
         "outputs": 5,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 440,
-        "y": 180,
+        "x": 840,
+        "y": 110,
         "wires": [
             [
-                "58694589d0e88877"
+                "9b09b458f6a92cb2"
             ],
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ],
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ],
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ],
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ]
         ]
     },
     {
-        "id": "d0e32239fceb43ae",
+        "id": "6e088ee63985651d",
         "type": "function",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "name": "Validate and queue interval",
-        "func": "const action = msg.payload || {};\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\nconst snapshot = () => ({payload:{kind:\"state\",state:s}});\nif (action.kind === \"refresh\") return [null,snapshot()];\nif (action.kind !== \"command\") return null;\nconst app = String(env.get(\"SOIL_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  s.ui_error = \"Set SOIL_APP_ID and SOIL_DEV_EUI in Node-RED environment.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nconst seconds = action.sleep_seconds;\nif (typeof seconds !== \"number\" || !Number.isInteger(seconds) ||\n    seconds < 10 || seconds > 86400) {\n  s.ui_error = \"Sleep interval must be a whole number from 10 to 86400 seconds.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nlet id = flow.get(\"soil_next_command_id\");\nif (!Number.isInteger(id) || id < 1 || id > 65534) id = 1;\nflow.set(\"soil_next_command_id\",id === 65534 ? 1 : id + 1);\ns.pending_command_id = id;\ns.ui_error = \"\";\ns.command_queued_at = new Date().toISOString();\ns.command_requested_seconds = seconds;\ns.first_uplink_after_queue = null;\ns.command_state = \"Downlink submitted to ChirpStack; waiting for next Class A receive window.\";\nflow.set(\"soil_state\",s);\nnode.status({fill:\"yellow\",shape:\"dot\",text:\"queued \" + seconds + \" s\"});\nreturn [{\n  topic:\"application/\" + app + \"/device/\" + eui + \"/command/down\",\n  payload:JSON.stringify({devEui:eui,confirmed:false,fPort:10,object:{sleep_seconds:seconds,command_id:id}}),\n  qos:\"0\",retain:false\n},snapshot()];",
+        "func": "const action = msg.payload || {};\nconst s = Object.assign({}, flow.get(\"soil_state\") || {});\nconst snapshot = () => ({payload:{kind:\"state\",state:s}});\nif (action.kind === \"refresh\") return [null,snapshot()];\nif (action.kind !== \"command\") return null;\nconst app = String(env.get(\"IRRIGATION_APP_ID\") || \"\").toLowerCase();\nconst eui = String(env.get(\"SOIL_DEV_EUI\") || \"\").toLowerCase();\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  s.ui_error = \"Set IRRIGATION_APP_ID and SOIL_DEV_EUI in Node-RED environment.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nconst seconds = action.sleep_seconds;\nif (typeof seconds !== \"number\" || !Number.isInteger(seconds) ||\n    seconds < 10 || seconds > 86400) {\n  s.ui_error = \"Sleep interval must be a whole number from 10 to 86400 seconds.\";\n  flow.set(\"soil_state\",s);\n  return [null,snapshot()];\n}\nlet id = flow.get(\"soil_next_command_id\");\nif (!Number.isInteger(id) || id < 1 || id > 65534) id = 1;\nflow.set(\"soil_next_command_id\",id === 65534 ? 1 : id + 1);\ns.pending_command_id = id;\ns.ui_error = \"\";\ns.command_queued_at = new Date().toISOString();\ns.command_requested_seconds = seconds;\ns.first_uplink_after_queue = null;\ns.command_state = \"Downlink submitted to ChirpStack; waiting for next Class A receive window.\";\nflow.set(\"soil_state\",s);\nnode.status({fill:\"yellow\",shape:\"dot\",text:\"queued \" + seconds + \" s\"});\nreturn [{\n  topic:\"application/\" + app + \"/device/\" + eui + \"/command/down\",\n  payload:JSON.stringify({devEui:eui,confirmed:false,fPort:10,object:{sleep_seconds:seconds,command_id:id}}),\n  qos:\"0\",retain:false\n},snapshot()];",
         "outputs": 2,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 1040,
-        "y": 140,
+        "x": 1440,
+        "y": 70,
         "wires": [
             [
-                "835a8e033ba9d61b"
+                "5fbd5cbbff7bdeb2"
             ],
             [
-                "58694589d0e88877"
+                "9b09b458f6a92cb2"
             ]
         ]
     },
     {
-        "id": "835a8e033ba9d61b",
+        "id": "5fbd5cbbff7bdeb2",
         "type": "mqtt out",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "name": "ChirpStack downlink",
         "topic": "",
         "qos": "0",
@@ -126,16 +175,16 @@
         "userProps": "",
         "correl": "",
         "expiry": "",
-        "broker": "sc_ae0178f3742ff530",
-        "x": 1300,
-        "y": 140,
+        "broker": "ae0178f3742ff530",
+        "x": 1700,
+        "y": 70,
         "wires": []
     },
     {
-        "id": "a11854339c685abb",
+        "id": "fbff2aaecefad608",
         "type": "ui-chart",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "name": "Temperature history",
         "label": "Temperature (°C)",
@@ -180,17 +229,17 @@
         "height": "4",
         "className": "",
         "interpolation": "linear",
-        "x": 940,
-        "y": 300,
+        "x": 1340,
+        "y": 230,
         "wires": [
             []
         ]
     },
     {
-        "id": "d475c1626727312a",
+        "id": "96da356ad3e51a8f",
         "type": "ui-chart",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "name": "Water content history",
         "label": "Water content (% VWC)",
@@ -235,17 +284,17 @@
         "height": "4",
         "className": "",
         "interpolation": "linear",
-        "x": 940,
-        "y": 360,
+        "x": 1340,
+        "y": 290,
         "wires": [
             []
         ]
     },
     {
-        "id": "6d8f958c7fe37a0a",
+        "id": "19db8cbead5deb76",
         "type": "ui-chart",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "name": "Conductivity history",
         "label": "Conductivity (mS/cm)",
@@ -290,17 +339,17 @@
         "height": "4",
         "className": "",
         "interpolation": "linear",
-        "x": 940,
-        "y": 420,
+        "x": 1340,
+        "y": 350,
         "wires": [
             []
         ]
     },
     {
-        "id": "a684f5d7791f886b",
+        "id": "9dff79b98691a3cc",
         "type": "ui-chart",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "name": "Battery history",
         "label": "Battery (V)",
@@ -345,17 +394,17 @@
         "height": "4",
         "className": "",
         "interpolation": "linear",
-        "x": 940,
-        "y": 480,
+        "x": 1340,
+        "y": 410,
         "wires": [
             []
         ]
     },
     {
-        "id": "58694589d0e88877",
+        "id": "9b09b458f6a92cb2",
         "type": "ui-template",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_ui_group",
         "page": "",
         "ui": "",
@@ -370,19 +419,19 @@
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 790,
-        "y": 140,
+        "x": 1190,
+        "y": 70,
         "wires": [
             [
-                "d0e32239fceb43ae"
+                "6e088ee63985651d"
             ]
         ]
     },
     {
-        "id": "e4232b9edd0bafd0",
+        "id": "d91b8a1b25c2c954",
         "type": "function",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "name": "Soil chart time zoom",
         "func": "// Per-chart time window. + shows a shorter span; - shows a longer span.\nconst windows = [\n  {label:\"30 min\",ms:1800000}, {label:\"1 h\",ms:3600000},\n  {label:\"3 h\",ms:10800000}, {label:\"6 h\",ms:21600000},\n  {label:\"12 h\",ms:43200000}, {label:\"24 h\",ms:86400000}\n];\nconst metrics = {temp:0,vwc:1,ec:2,battery:3};\nconst metric = msg.soilMetric || (msg.payload && msg.payload.metric);\nif (!Object.prototype.hasOwnProperty.call(metrics,metric)) return null;\nconst slot = metrics[metric];\nconst key = \"soil_zoom_\" + metric;\nlet index = Number(flow.get(key));\nif (!Number.isInteger(index) || index < 0 || index >= windows.length) index = 3;\nconst control = msg.payload && msg.payload.kind === \"zoom\";\nif (control) {\n  if (msg.payload.direction !== 1 && msg.payload.direction !== -1) return null;\n  index = Math.max(0,Math.min(windows.length-1,index - msg.payload.direction));\n  flow.set(key,index);\n} else if (typeof msg.payload !== \"number\" || !Number.isFinite(msg.payload)) return null;\nconst now = Date.now();\nconst axis = {ui_update:{chartOptions:{xAxis:{min:now-windows[index].ms,max:now}}}};\nconst out = Array(8).fill(null);\nout[slot] = control ? axis : [axis,{topic:msg.topic,payload:msg.payload}];\nif (control) out[slot+4] = {payload:{kind:\"zoom_state\",label:windows[index].label}};\nreturn out;",
         "outputs": 8,
@@ -391,40 +440,40 @@
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 670,
-        "y": 360,
+        "x": 1070,
+        "y": 290,
         "wires": [
             [
-                "a11854339c685abb"
+                "fbff2aaecefad608"
             ],
             [
-                "d475c1626727312a"
+                "96da356ad3e51a8f"
             ],
             [
-                "6d8f958c7fe37a0a"
+                "19db8cbead5deb76"
             ],
             [
-                "a684f5d7791f886b"
+                "9dff79b98691a3cc"
             ],
             [
-                "c5a1919110f9cc40"
+                "8956e58ce9c79806"
             ],
             [
-                "470a0b307e8d7858"
+                "a15396ed4d992509"
             ],
             [
-                "85bcffc571fa5084"
+                "dbb636acc2ac9826"
             ],
             [
-                "16bf625eecb4e1cb"
+                "e64987630f834543"
             ]
         ]
     },
     {
-        "id": "c5a1919110f9cc40",
+        "id": "8956e58ce9c79806",
         "type": "ui-template",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "page": "",
         "ui": "",
@@ -439,19 +488,19 @@
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 1150,
-        "y": 300,
+        "x": 1550,
+        "y": 230,
         "wires": [
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ]
         ]
     },
     {
-        "id": "470a0b307e8d7858",
+        "id": "a15396ed4d992509",
         "type": "ui-template",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "page": "",
         "ui": "",
@@ -466,19 +515,19 @@
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 1150,
-        "y": 360,
+        "x": 1550,
+        "y": 290,
         "wires": [
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ]
         ]
     },
     {
-        "id": "85bcffc571fa5084",
+        "id": "dbb636acc2ac9826",
         "type": "ui-template",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "page": "",
         "ui": "",
@@ -493,19 +542,19 @@
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 1140,
-        "y": 420,
+        "x": 1540,
+        "y": 350,
         "wires": [
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ]
         ]
     },
     {
-        "id": "16bf625eecb4e1cb",
+        "id": "e64987630f834543",
         "type": "ui-template",
         "z": "soil_dashboard_tab",
-        "g": "0213c819b759b29f",
+        "g": "6e97c77aaa496d62",
         "group": "sc_soil_graph_group",
         "page": "",
         "ui": "",
@@ -520,16 +569,16 @@
         "resendOnRefresh": true,
         "templateScope": "local",
         "className": "",
-        "x": 1140,
-        "y": 480,
+        "x": 1540,
+        "y": 410,
         "wires": [
             [
-                "e4232b9edd0bafd0"
+                "d91b8a1b25c2c954"
             ]
         ]
     },
     {
-        "id": "sc_ae0178f3742ff530",
+        "id": "ae0178f3742ff530",
         "type": "mqtt-broker",
         "name": "chirpstack_mosquito",
         "broker": "localhost",
@@ -621,10 +670,10 @@
                 "cols": "12"
             }
         ],
-        "order": 1,
+        "order": 3,
         "className": "",
-        "visible": "true",
-        "disabled": "false"
+        "visible": true,
+        "disabled": false
     },
     {
         "id": "f53e93e9ba219e63",
@@ -666,7 +715,7 @@
         }
     },
     {
-        "id": "337b48a10d0ffdab",
+        "id": "6f1540b3df81e984",
         "type": "global-config",
         "env": [],
         "modules": {

@@ -72,12 +72,51 @@ parsing alone is insufficient.
 
 ## Generated device dashboard flows
 
-Device flows (`WaterLevel`, `SoilNode`, `PressureControlNode*`) are generated,
-not hand-written. Never edit the importable JSON: change
-`tools/build_<name>_dashboard.py`, then run the builder **and**
-`tools/test_<name>_dashboard.js`. The check re-runs the decoder against a
-recorded uplink and asserts the import invariants below, so a mistake fails
-there instead of on the user's Node-RED.
+Every device flow is generated, not hand-written: `WaterLevel`, `SoilNode`,
+`MainValve`, `PumpControl`, `PressureControlNode`, `PressureControlNode2` and
+`IntegratedDashboard` each have `tools/build_<name>_dashboard.py` and
+`tools/test_<name>_dashboard.js`. **Never edit the importable JSON** under
+`examples/<flow>/include/`: change the builder, run it, then run its test. The
+five hand-authored builders carry the current Node-RED export as a node template
+and reproduce it byte for byte, so a flow edit starts with a re-export.
+`tools/flow_common.py` holds the shared writer, which refuses to write a flow
+that breaks the identifier rule below. The test
+executes the flow's own decode and command functions with a fake environment and
+asserts the import invariants below, so a mistake fails locally instead of on the
+user's Node-RED.
+
+### ChirpStack identifiers come from the environment
+
+**Never commit an application ID or DevEUI inside a flow.** Check it before 
+finishing rather than treating it as a style preference. The committed
+export is not the deployment: the identifiers belong to the user's ChirpStack
+registration and change when a device is re-registered.
+
+Read them at run time instead, as `PumpControl`, `IntegratedDashboard` and
+`WaterLevel` do:
+
+| Variable | Value |
+| --- | --- |
+| `IRRIGATION_APP_ID` | the one shared ChirpStack application ID |
+| `MAIN_DEV_EUI` / `VALVE1_DEV_EUI` / `VALVE2_DEV_EUI` / `WATER_DEV_EUI` / `SOIL_DEV_EUI` / `PUMP_DEV_EUI` | each node's own DevEUI |
+
+All three parts are required:
+
+- the `mqtt in` node has `"topic": ""` and `"inputs": 1` — dynamic subscription,
+  so it takes its topic from the message instead of a node property;
+- a subscribe function node (an inject with `once: true` triggers it) reads
+  `env.get('IRRIGATION_APP_ID')` and `env.get('<DEVICE>_DEV_EUI')`, validates
+  both, builds `'application/' + app + '/device/' + eui + '/event/+'`, and
+  returns `{action:'subscribe', topic:topic, qos:0}` — with a state snapshot
+  that puts a "set these variables" message on the card when they are missing;
+- every function that builds an `application/...` topic, the downlink senders
+  included, reads the same variables. No literals, and no `SET_*_DEV_EUI`
+  placeholder that asks the user to hand-edit the flow after import.
+
+`node tools/test_flow_ids.js` enforces all of it across every flow — no literal
+UUID, DevEUI or placeholder, dynamic subscription, and the subscribe function
+executed both with and without the variables. Run it before committing a flow
+change.
 
 Imports must need no hand cleanup. The user imports these into a live
 workspace, so the file has to land cleanly the first time:
@@ -103,35 +142,36 @@ workspace, so the file has to land cleanly the first time:
   a second pair of groups on every import. Use the workspace ids
   `334b707b21a5ce0a`, `0dcf231c222554fc`, `18fb832a66d8775e`.
 
-### Not yet brought in line
+### Shipped config nodes
 
-`WaterLevel` and `IntegratedDashboard` are the only flows that follow all of the
-above. The rest are hand-authored JSON, and only those two have a builder at
-all, so the others cannot simply be regenerated — fixing one means editing its
-JSON by hand, or introducing a builder for it.
+Every flow now reads its ChirpStack identifiers from the environment, and
+`tools/test_flow_ids.js` holds that line across all seven at once.
 
-| Flow | Shipped broker | Tab node | Builder |
-| --- | --- | --- | --- |
-| `WaterLevel` | none (borrows `ae0178f3742ff530`) | no | `build_water_level_dashboard.py` |
-| `SoilNode` | **own copy, id `sc_ae0178f3742ff530`** | no | none |
-| `MainValve`, `PumpControl`, `PressureControlNode`, `PressureControlNode2` | own node, shared id `ae0178f3742ff530` | no | none |
-| `IntegratedDashboard` | none (borrows `ae0178f3742ff530`) | no | `build_irrigation_dashboard.py` |
+| Flow | Shipped broker | Tab node |
+| --- | --- | --- |
+| `WaterLevel`, `IntegratedDashboard` | none (borrows `ae0178f3742ff530`) | no |
+| `SoilNode`, `MainValve`, `PumpControl`, `PressureControlNode`, `PressureControlNode2` | own node, shared id `ae0178f3742ff530` | no |
 
-`SoilNode` is the one with a live defect: its broker id is distinct from the
-shared one, so importing it adds a second `chirpstack_mosquito` server to
-delete by hand — exactly the chore `WaterLevel` no longer causes. The middle
-row reuses the shared id, so the editor reuses that node rather than
-duplicating it, but those files still re-declare the server settings and so can
-overwrite the user's host, port and TLS on import. Confirm each row against the
-files before relying on it; this table is a snapshot, not a guarantee.
+The second row reuses the shared broker id, so the editor reuses that node
+rather than adding a second server, but those five files still re-declare the
+server's settings and can overwrite the user's host, port and TLS on import.
+Configure the server once, in the flow that already owns it, and confirm each
+row against the files before relying on it — this table is a snapshot.
 
-`IntegratedDashboard` follows the same rules and adds one the others do not
-need: its *ordinary* nodes carry the canvas's ids too (`fd327e43632c19d6`,
-`0da71259acd21508`, `ed30a564d5bb461a`, …), because that flow is maintained by
-re-exporting it from Node-RED. A re-import then replaces each node in place
-instead of appending a second copy — a duplicate `mqtt in` would send every
-downlink twice. Re-export rather than hand-editing, and refresh the ids in
-`build_irrigation_dashboard.py` if the canvas ever changes.
+`global-config` is a config node too, and each flow ships one with its own id, so
+an import can add a second. Page and group ids need the same care: `SoilNode`
+still carries builder-minted `sc_soil_ui_page`, `sc_soil_graph_group` and
+`sc_soil_ui_group` ids, and an id the workspace does not already own is imported
+as-is, which leaves a second page and a second pair of groups. `WaterLevel` uses
+`sc_wl_*` ids for its ordinary nodes but the workspace's own page and group ids
+(`334b707b21a5ce0a`, `0dcf231c222554fc`, `18fb832a66d8775e`); do the same for any
+flow whose page the workspace already has.
+
+Every flow is maintained by re-exporting it from Node-RED, so its *ordinary*
+nodes carry the canvas's ids and a re-import replaces each node in place instead
+of appending a second copy — a duplicate `mqtt in` would send every downlink
+twice. When the canvas changes, re-export the flow and refresh the node template
+in its builder so the builder still reproduces the file.
 
 ### Diagnosing deploy errors
 

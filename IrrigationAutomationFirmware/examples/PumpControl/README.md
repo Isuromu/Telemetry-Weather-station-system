@@ -213,10 +213,10 @@ not ship broker settings, so it preserves the workspace's existing host, port,
 and TLS configuration. After import, confirm that Node-RED placed the Pump
 group on the intended page without creating duplicate configuration nodes.
 
-The flow is configured for the Pump application ID and DevEUI from the supplied
-dashboard. These values appear in the MQTT input topic and two Function nodes;
-update all three if the ChirpStack registration changes. No AppKey is stored
-in the flow. Install `pump_control_class_c_codec.js` in the ChirpStack device
+The flow subscribes dynamically and reads the Pump application ID and DevEUI
+from the Node-RED environment (`IRRIGATION_APP_ID` and `PUMP_DEV_EUI`), so its
+MQTT input topic and command functions hold no identifiers and need no editing
+when the ChirpStack registration changes. No AppKey is stored in the flow. Install `pump_control_class_c_codec.js` in the ChirpStack device
 profile for named uplink fields. The flow decodes the raw protocol-v2 payload
 if ChirpStack does not include an `object`, while retaining protocol-v1 support.
 

@@ -360,7 +360,7 @@ else ok('no mqtt out node (telemetry only)');
 // hand, and if it reused the shared id it could overwrite the existing host,
 // port and TLS settings instead. MainValve is the reference for the shared id.
 const mainValve = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'examples',
-  'MainValve', 'include', 'main_valve_dashboard2_updated_flow.json'), 'utf8'));
+  'MainValve', 'include', 'main_valve_dashboard_flow.json'), 'utf8'));
 const sharedBroker = (mainValve.find(n => n.type === 'mqtt in') || {}).broker;
 if (!sharedBroker) fail('cannot read the shared broker id from MainValve');
 else if (flow.some(n => n.type === 'mqtt-broker')) {
