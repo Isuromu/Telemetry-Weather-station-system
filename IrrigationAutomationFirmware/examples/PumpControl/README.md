@@ -265,6 +265,34 @@ remains blocked after a restart as the boot policy intends. The node does not
 report when it restarted, so confirm that with `pump status`, which prints
 `[PUMP] Uptime:`.
 
+## Serial event log
+
+The node prints an event line rather than only a status number, so a serial
+capture explains what the VFD and the LoRaWAN session did. USB and the Bluetooth
+console carry the same lines, and the monitor adds the wall-clock prefix
+(`monitor_filters = time`), not the firmware.
+
+- Every LoRaWAN frame prints as hex as it goes out or comes in:
+  `[LORAWAN] Status FPort 51: 02 39 01 ...`, `[LORAWAN] Downlink: 01 04 00 05 00 00`,
+  plus `[LORAWAN] Class C downlink received.` and `[LORAWAN] Status uplink sent.`
+  on the radio path. Every line starts with a `[SUBSYSTEM]` tag; failures add
+  `[ERROR]` and degraded cases `[WARN]`.
+- Every remote command reports its outcome. Accepted: `[LORAWAN] Command start id=292 accepted.`
+  Refused by the VFD: `... id=292 refused by the controller.`, followed by the
+  `[PUMP][ERROR]` line from `PumpController` naming the reason. Rejected before the
+  VFD is touched: one `[LORAWAN][ERROR]` line naming the offending value, for example
+  `Command ID 292 is not newer than the accepted ID 291.`,
+  `Command rejected: op 3, id 40, argument 900 out of range.`,
+  `Command rejected: 4 bytes, expected 6.`, or
+  `Command ID 292 was reused with different data.` The result also remains in the
+  status uplink as `command_result`, so a command refused on the radio is visible
+  even when only the uplink is available.
+- VFD state changes print once each, not at every poll: `[VFD] Communication failed.`,
+  `[VFD] Configuration valid.`, `[PUMP] Frequency armed.`,
+  `[PUMP] Run state changed to forward.`, and
+  `[VFD] Fault changed to <fault name> [<code>].` Start/Stop completion keeps its
+  final line, for example `[PUMP] Start complete: requested frequency reached.`
+
 ## Wireless (Bluetooth) console
 
 PumpNode also runs a Bluetooth Classic Serial (SPP) console, so diagnostics stay

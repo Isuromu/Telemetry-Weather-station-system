@@ -90,7 +90,7 @@ bool manualModeRaw = false;
 uint32_t manualModeRawChangedMs = 0;
 uint32_t lastStatusMs = 0;
 uint32_t nextJoinAttemptMs = 0;
-uint32_t lastStatusSignature = 0;
+uint64_t lastStatusSignature = 0;
 bool hasLastStatusSignature = false;
 uint8_t joinAttemptCount = 0;
 int16_t previousJoinError = RADIOLIB_ERR_NONE;
@@ -117,6 +117,76 @@ uint16_t get16(const uint8_t *source) {
   return (static_cast<uint16_t>(source[0]) << 8) | source[1];
 }
 
+void printHexFrame(const char *label, const uint8_t *data, size_t length) {
+  Serial.print(label);
+  for (size_t index = 0; index < length; ++index) {
+    if (data[index] < 0x10) Serial.print('0');
+    Serial.print(data[index], HEX);
+    if (index + 1 < length) Serial.print(' ');
+  }
+  Serial.println();
+}
+
+const char *commandOpName(uint8_t op) {
+  switch (op) {
+    case 1:
+      return "stop";
+    case 2:
+      return "estop";
+    case 3:
+      return "set_frequency";
+    case 4:
+      return "start";
+    default:
+      return "unknown";
+  }
+}
+
+// Last VFD status the poll reported, so a state that persists does not reprint at
+// the 1 Hz poll rate. statusSignature() detects the change that schedules a
+// status uplink; this snapshot supplies the field names for the serial line.
+struct ReportedStatus {
+  bool communicationOk{false};
+  bool configurationValid{false};
+  bool frequencyArmed{false};
+  DelixiRunState runState{DelixiRunState::Unknown};
+  uint16_t faultCode{0};
+};
+ReportedStatus lastReportedStatus;
+bool hasLastReportedStatus = false;
+
+void logStatusChanges() {
+  const PumpStatus &s = pump.status();
+  if (!hasLastReportedStatus) {
+    lastReportedStatus = {s.communicationOk, s.configurationValid,
+                          s.frequencyArmed, s.runState, s.vfdFaultCode};
+    hasLastReportedStatus = true;
+    return;
+  }
+  if (s.communicationOk != lastReportedStatus.communicationOk) {
+    Serial.printf("[VFD] Communication %s.\n",
+                  s.communicationOk ? "restored" : "failed");
+  }
+  if (s.configurationValid != lastReportedStatus.configurationValid) {
+    Serial.printf("[VFD] Configuration %s.\n",
+                  s.configurationValid ? "valid" : "invalid");
+  }
+  if (s.frequencyArmed != lastReportedStatus.frequencyArmed) {
+    Serial.printf("[PUMP] Frequency %s.\n",
+                  s.frequencyArmed ? "armed" : "not armed");
+  }
+  if (s.runState != lastReportedStatus.runState) {
+    Serial.printf("[PUMP] Run state changed to %s.\n",
+                  DelixiCDIE100::runStateName(s.runState));
+  }
+  if (s.vfdFaultCode != lastReportedStatus.faultCode) {
+    Serial.printf("[VFD] Fault changed to %s [0x%04X].\n",
+                  DelixiCDIE100::faultName(s.vfdFaultCode), s.vfdFaultCode);
+  }
+  lastReportedStatus = {s.communicationOk, s.configurationValid,
+                        s.frequencyArmed, s.runState, s.vfdFaultCode};
+}
+
 bool readManualModePin() {
   return digitalRead(MANUAL_MODE_PIN) == LOW;
 }
@@ -139,15 +209,24 @@ void updateManualMode() {
   }
 }
 
-uint32_t statusSignature() {
+// The status packed so a change schedules an uplink. The commanded frequency is part
+// of it because a local Serial command reaches the VFD through CommandProcessor,
+// whose SerialCommandSource::poll() cannot flag the status dirty: without this term,
+// `pump freq 24` changed nothing in the signature and waited for the periodic
+// interval instead of reporting. The actual frequency is deliberately excluded — it
+// moves while the motor ramps and would schedule an uplink on every poll.
+uint64_t statusSignature() {
   const PumpStatus &s = pump.status();
-  uint32_t signature = s.communicationOk ? 1U : 0U;
-  signature |= s.configurationValid ? (1U << 1) : 0U;
-  signature |= s.running ? (1U << 2) : 0U;
-  signature |= s.frequencyArmed ? (1U << 3) : 0U;
-  signature |= static_cast<uint32_t>(s.runState) << 4;
-  signature |= static_cast<uint32_t>(s.lastCommunicationError) << 8;
-  signature |= static_cast<uint32_t>(s.vfdFaultCode) << 16;
+  uint64_t signature = s.communicationOk ? 1ULL : 0ULL;
+  signature |= s.configurationValid ? (1ULL << 1) : 0ULL;
+  signature |= s.running ? (1ULL << 2) : 0ULL;
+  signature |= s.frequencyArmed ? (1ULL << 3) : 0ULL;
+  signature |= static_cast<uint64_t>(s.runState) << 4;
+  signature |= static_cast<uint64_t>(s.lastCommunicationError) << 8;
+  signature |= static_cast<uint64_t>(s.vfdFaultCode) << 16;
+  signature |= static_cast<uint64_t>(static_cast<uint16_t>(
+                   s.commandedFrequencyHz * 100.0f + 0.5f))
+               << 32;
   return signature;
 }
 
@@ -167,7 +246,7 @@ void scheduleJoinRetry(int16_t state) {
   nextJoinAttemptMs = millis() + retryMs;
   lastJoinRetrySeconds = static_cast<uint16_t>((retryMs + 999) / 1000);
   Serial.printf(
-      "Pump LoRaWAN join attempt %u failed: %s [%d]; next attempt in %u s.\n",
+      "[LORAWAN][ERROR] Join attempt %u failed: %s [%d]; next attempt in %u s.\n",
       joinAttemptCount, irrigation::diagnostics::radioErrorMeaning(state), state,
       lastJoinRetrySeconds);
 }
@@ -258,20 +337,21 @@ void updateRemoteCompletion() {
         std::fabs(s.actualFrequencyHz - s.commandedFrequencyHz) <=
             RUN_FREQUENCY_TOLERANCE_HZ) {
       finishRemoteCompletion(
-          true, "Pump Start complete: requested frequency reached.");
+          true, "[PUMP] Start complete: requested frequency reached.");
       return;
     }
     if (pendingRemoteCompletion == PendingRemoteCompletion::StoppedAtZero &&
         s.runState == DelixiRunState::Stopped &&
         s.actualFrequencyHz <= STOP_FREQUENCY_TOLERANCE_HZ) {
       finishRemoteCompletion(
-          true, "Pump Stop complete: VFD stopped at approximately 0 Hz.");
+          true, "[PUMP] Stop complete: VFD stopped at approximately 0 Hz.");
       return;
     }
   }
   if (millis() - remoteCompletionStartedMs >= REMOTE_COMPLETION_TIMEOUT_MS) {
     finishRemoteCompletion(
-        false, "Pump command completion timed out before the final VFD condition.");
+        false,
+        "[PUMP][ERROR] Command completion timed out before the final VFD condition.");
   }
 }
 
@@ -303,17 +383,23 @@ void buildStatus(uint8_t (&payload)[22]) {
 
 bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
   if (fPort != COMMAND_FPORT || length < 2 || data[0] != 1) {
+    Serial.printf(
+        "[LORAWAN][ERROR] Command rejected: FPort %u, length %u, version %u.\n",
+        fPort, static_cast<unsigned>(length),
+        static_cast<unsigned>(length > 0 ? data[0] : 0));
     lastCommandResult = 4;
     statusPending = true;
     return false;
   }
   const uint8_t op = data[1];
   if (op == 5 && length == 2) {
-    Serial.println("Pump status refresh requested by dashboard.");
+    Serial.println("[LORAWAN] Status refresh requested by dashboard.");
     statusPending = true;
     return true;
   }
   if (length != 6) {
+    Serial.printf("[LORAWAN][ERROR] Command rejected: %u bytes, expected 6.\n",
+                  static_cast<unsigned>(length));
     lastCommandResult = 4;
     statusPending = true;
     return false;
@@ -324,17 +410,30 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
       (op != 3 && arg != 0) ||
       (op == 3 && (arg < irrigation::ActiveMotor.minRunFrequencyHz * 100.0f ||
                    arg > irrigation::ActiveMotor.maxRunFrequencyHz * 100.0f))) {
+    Serial.printf(
+        "[LORAWAN][ERROR] Command rejected: op %u, id %u, argument %u out of range.\n",
+        op, id, arg);
     lastCommandResult = 4;
     statusPending = true;
     return false;
   }
   if (id == lastCommandId) {
-    lastCommandResult = (op == lastCommandOp && arg == lastCommandArg) ? 3 : 4;
+    const bool identical = op == lastCommandOp && arg == lastCommandArg;
+    if (identical) {
+      Serial.printf("[LORAWAN] Duplicate command %u ignored safely.\n", id);
+    } else {
+      Serial.printf(
+          "[LORAWAN][ERROR] Command ID %u was reused with different data.\n", id);
+    }
+    lastCommandResult = identical ? 3 : 4;
     statusPending = true;
     return lastCommandResult == 3;
   }
   if (lastCommandId != 0xFFFF &&
       static_cast<int16_t>(id - lastCommandId) <= 0) {
+    Serial.printf(
+        "[LORAWAN][ERROR] Command ID %u is not newer than the accepted ID %u.\n",
+        id, lastCommandId);
     lastCommandResult = 4;
     statusPending = true;
     return false;
@@ -350,6 +449,7 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
     lastCommandId = previousId;
     lastCommandOp = previousOp;
     lastCommandArg = previousArg;
+    Serial.printf("[LORAWAN][ERROR] Command ID %u was not saved to NVS.\n", id);
     lastCommandResult = 5;
     statusPending = true;
     return false;
@@ -362,6 +462,8 @@ bool processRemoteCommand(const uint8_t *data, size_t length, uint8_t fPort) {
     case 4: accepted = pump.start(); break;
   }
   lastCommandResult = accepted ? 1 : 2;
+  Serial.printf("[LORAWAN] Command %s id=%u %s.\n", commandOpName(op), id,
+                accepted ? "accepted" : "refused by the controller");
   if (accepted && op == 4) {
     beginRemoteCompletion(PendingRemoteCompletion::StartAtFrequency);
   } else if (accepted && op == 1) {
@@ -383,18 +485,21 @@ bool sendStatus(bool confirmed) {
   uint8_t downlink[RADIOLIB_LORAWAN_MAX_PAYLOAD_SIZE] = {};
   size_t downlinkLength = 0;
   LoRaWANEvent_t event = {};
+  printHexFrame("[LORAWAN] Status FPort 51: ", payload, sizeof(payload));
   const int16_t state = lorawan.sendReceive(payload, sizeof(payload), STATUS_FPORT,
       downlink, &downlinkLength, confirmed, nullptr, &event);
   lastStatusMs = millis();
   statusPending = false;
   if (state < RADIOLIB_ERR_NONE) {
-    Serial.printf("LoRaWAN status uplink failed: %s [%d]\n",
+    Serial.printf("[LORAWAN][ERROR] Status uplink failed: %s [%d]\n",
                   irrigation::diagnostics::radioErrorMeaning(state), state);
     return false;
   }
   lastStatusSignature = statusSignature();
   hasLastStatusSignature = true;
+  Serial.println("[LORAWAN] Status uplink sent.");
   if (state > RADIOLIB_ERR_NONE && downlinkLength > 0) {
+    printHexFrame("[LORAWAN] Downlink: ", downlink, downlinkLength);
     processRemoteCommand(downlink, downlinkLength, event.fPort);
   }
   return state > RADIOLIB_ERR_NONE || !confirmed;
@@ -402,11 +507,11 @@ bool sendStatus(bool confirmed) {
 
 bool setupLoRaWAN() {
   if (!secrets::CONFIGURED) {
-    Serial.println("Pump LoRaWAN credentials are not configured.");
+    Serial.println("[LORAWAN][ERROR] Credentials are not configured.");
     return false;
   }
   if (joinAttemptCount < UINT8_MAX) ++joinAttemptCount;
-  Serial.printf("Pump LoRaWAN OTAA join attempt %u.\n", joinAttemptCount);
+  Serial.printf("[LORAWAN] OTAA join attempt %u.\n", joinAttemptCount);
   SPI.begin(LORA_SCK_PIN, LORA_MISO_PIN, LORA_MOSI_PIN, LORA_NSS_PIN);
   int16_t state = radio.begin(868.0, 125.0, 9, 7,
       RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8, 0.0, false);
@@ -430,14 +535,14 @@ bool setupLoRaWAN() {
     scheduleJoinRetry(state);
     return false;
   }
-  if (!saveNonces()) Serial.println("Warning: LoRaWAN nonces were not saved.");
+  if (!saveNonces()) Serial.println("[LORAWAN][WARN] Nonces were not saved.");
   lorawanActive = true;
   nextJoinAttemptMs = 0;
-  Serial.printf("Pump LoRaWAN session active after %u attempt(s).\n",
+  Serial.printf("[LORAWAN] Session active after %u attempt(s).\n",
                 joinAttemptCount);
   state = lorawan.setClass(RADIOLIB_LORAWAN_CLASS_C);
   if (state != RADIOLIB_ERR_NONE) {
-    Serial.printf("Class C unavailable: %s [%d]; using Class A windows.\n",
+    Serial.printf("[LORAWAN][ERROR] Class C unavailable: %s [%d]; using Class A windows.\n",
                   irrigation::diagnostics::radioErrorMeaning(state), state);
     return true;
   }
@@ -445,12 +550,13 @@ bool setupLoRaWAN() {
     if (sendStatus(true)) {
       classCActive = true;
       statusPending = true;
-      Serial.println("Pump LoRaWAN Class C active.");
+      Serial.println("[LORAWAN] Class C active.");
       return true;
     }
     delay(2000);
   }
-  Serial.println("Class C activation unacknowledged; using Class A windows.");
+  Serial.println(
+      "[LORAWAN][WARN] Class C activation unacknowledged; using Class A windows.");
   return true;
 }
 
@@ -585,6 +691,7 @@ void loop() {
   serialCommands.poll(serialAccess);
   serialCommands.poll(wirelessConsole);
   pump.poll();
+  logStatusChanges();
   updateRemoteCompletion();
   // Persist the frequency this node writes, from a LoRaWAN command or the
   // console, so the next boot reports it rather than the begin() seed. Both
@@ -609,12 +716,17 @@ void loop() {
     const int16_t state = lorawan.getDownlinkClassC(
         downlink, &downlinkLength, &event);
     if (state > 0 && downlinkLength > 0) {
+      Serial.println("[LORAWAN] Class C downlink received.");
+      printHexFrame("[LORAWAN] Downlink: ", downlink, downlinkLength);
       (void)processRemoteCommand(downlink, downlinkLength, event.fPort);
     } else if (state < RADIOLIB_ERR_NONE) {
-      Serial.printf("Pump Class C receive error: %s [%d]\n",
+      Serial.printf("[LORAWAN][ERROR] Class C receive error: %s [%d]\n",
                     irrigation::diagnostics::radioErrorMeaning(state), state);
     }
   }
+  // A command handled above changes the VFD state in the same iteration, so report
+  // those changes before the status uplink that carries them.
+  logStatusChanges();
   const uint32_t now = millis();
   if (lorawanActive &&
       ((statusPending && now - lastStatusMs >= STATUS_RESPONSE_MIN_GAP_MS) ||

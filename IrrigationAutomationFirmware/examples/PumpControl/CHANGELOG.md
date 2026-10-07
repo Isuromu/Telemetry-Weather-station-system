@@ -1,5 +1,28 @@
 # PumpControl changelog
 
+## 2026-10-07
+
+### Added
+
+- Serial event log. LoRaWAN frames print as hex on the way out and in
+  (`[LORAWAN] Status FPort 51: ...`, `[LORAWAN] Downlink: ...`), the radio path
+  reports `status uplink sent` and `Class C downlink received`, and VFD state
+  changes print once each instead of at every poll (communication, configuration,
+  frequency armed, run state, fault).
+
+### Changed
+
+- Every remote command now reports its outcome on serial. Accepted and
+  controller-refused commands print one `[LORAWAN]` line next to the existing
+  `[PUMP][ERROR]` reason; the rejections that previously set `command_result`
+  silently (wrong FPort/length/version, op or argument out of range, reused
+  command ID, non-increasing ID, NVS save failure) now name the offending value
+  in a `[LORAWAN][ERROR]` line.
+- Every line now starts with a `[SUBSYSTEM]` tag, with `[ERROR]` or `[WARN]` for
+  failures and degraded cases. The previously untagged `Pump LoRaWAN …`,
+  `LoRaWAN status uplink failed`, `Class C unavailable`, and `Pump Start complete …`
+  wording is gone, so the log no longer mixes tagged and untagged lines.
+
 ## 2026-10-01
 
 ### Added
