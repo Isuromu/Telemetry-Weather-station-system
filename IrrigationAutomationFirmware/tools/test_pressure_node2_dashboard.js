@@ -31,6 +31,15 @@ for (const node of flow.filter(n => n.type === 'ui-template')) {
 }
 c.done('valve_2: the card does not present the build-time scale flag');
 
+// The PCV has no position feedback: the codec reports pcv_position_verified as a
+// constant false, so no card may present it as a reading.
+for (const node of flow.filter(n => n.type === 'ui-template')) {
+  if (/[Pp]osition verified/.test(node.format || '')) {
+    c.fail('the card still presents the constant position flag: ' + node.id);
+  }
+}
+c.done('valve_2: the card does not present the constant position flag');
+
 function statusEvent(object, extra) {
   return Object.assign({
     fPort: 31, fCnt: 9, dr: 5, adr: true, devAddr: '00aabbcc',
@@ -52,7 +61,7 @@ const stateOf = msg => {
 // --- FPort 31 status -------------------------------------------------------
 const object = {
   protocol_version: 2, runtime_mode: 'class_a', status_reason: 'scheduled',
-  pcv_last_commanded: 'open', pcv_position_verified: true, sleep_seconds: 900,
+  pcv_last_commanded: 'open', sleep_seconds: 900,
   last_command_id: 12, battery_voltage_v: 3.62, battery_soc_percent: 71,
   upstream_pressure_bar: 1.84, upstream_temperature_c: 19.4, upstream_scale_validated: true,
   downstream_pressure_bar: 1.79, downstream_temperature_c: 19.6, downstream_scale_validated: true,
@@ -62,7 +71,7 @@ if (!state) c.fail('the FPort 31 status did not reach the card');
 else {
   const expected = {
     runtime_mode: 'class_a', status_reason: 'scheduled', pcv_last_commanded: 'open',
-    pcv_position_verified: true, sleep_seconds: 900, last_command_id: 12,
+    sleep_seconds: 900, last_command_id: 12,
     battery_voltage_v: 3.62, battery_soc_percent: 71, upstream_pressure_bar: 1.84,
     upstream_temperature_c: 19.4, downstream_pressure_bar: 1.79, downstream_temperature_c: 19.6,
   };
@@ -85,10 +94,12 @@ if (!/codec/i.test((stateOf({ topic: TOPIC,
 c.done('valve_2: wrong FPort and missing codec object are both explained');
 
 // --- command builder -------------------------------------------------------
-function send(action, state) {
+function send(action, state, nextId) {
   return c.runNode(SEND.func, {
     env: ENV,
-    flow: { pn2_state: state || { last_command_id: 12 }, pn2_next_cmd_id: 13 },
+    flow: { pn2_state: state || { last_command_id: 12 } },
+    // The id counter lives in global context, shared with the integrated dashboard.
+    global: { cmd_next_id_valve2: nextId === undefined ? 13 : nextId },
     msg: { payload: action },
   });
 }
@@ -107,6 +118,18 @@ else {
   if (sent.payload.object.command_id !== 13) c.fail('downlink command id is ' + sent.payload.object.command_id);
 }
 c.done('valve_2: the command builds an FPort 30 downlink with the codec field names');
+
+// valve_2 ignores a command_id it has already taken, and the integrated dashboard
+// advances the shared counter from its own tab, so a counter behind the valve has to
+// catch up rather than send an id the valve has seen.
+const caughtUp = c.messages(send({ kind: 'command', pcv: 'close', sleep_seconds: 600 },
+  { last_command_id: 305 }, 5).result)
+  .find(m => typeof m.topic === 'string' && m.topic.endsWith('/command/down'));
+if (!caughtUp || caughtUp.payload.object.command_id !== 306) {
+  c.fail('a counter behind valve_2 did not catch up: ' +
+    (caughtUp ? caughtUp.payload.object.command_id : 'no downlink'));
+}
+c.done('valve_2: a counter behind the valve catches up to the id it reported');
 
 const badSleep = send({ kind: 'command', sleep_seconds: 5 });
 if (c.messages(badSleep.result).some(m => m.topic)) c.fail('a five-second interval was sent');

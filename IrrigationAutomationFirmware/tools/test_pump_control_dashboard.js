@@ -53,6 +53,27 @@ else {
 }
 c.done('pump_control: the FPort 51 object reaches the card');
 
+// --- the shared counter is refreshed from the status -------------------------
+// The counter lives in global context so every dashboard commanding this pump shares
+// one series. A status must move it, which is what stops a card that has been idle
+// from sending an id the pump has already taken.
+const statusWith = lastId => statusEvent({ object: {
+  command_result: 'accepted', last_command_id: lastId, running: false,
+  configuration_valid: true } });
+const behindSync = c.runNode(DECODE.func, { env: ENV, global: { cmd_next_id_pump: 5 },
+  msg: { topic: UP, payload: statusWith(305) } });
+if (behindSync.store.g_cmd_next_id_pump !== 306) {
+  c.fail('a status did not resync the shared counter: ' +
+    behindSync.store.g_cmd_next_id_pump);
+}
+const aheadSync = c.runNode(DECODE.func, { env: ENV, global: { cmd_next_id_pump: 400 },
+  msg: { topic: UP, payload: statusWith(305) } });
+if (aheadSync.store.g_cmd_next_id_pump !== 400) {
+  c.fail('a status clobbered a counter that was already ahead: ' +
+    aheadSync.store.g_cmd_next_id_pump);
+}
+c.done('pump_control: the shared counter tracks the id the pump reports, without clobbering');
+
 // --- the raw protocol-v1 fallback -----------------------------------------
 const v1 = Buffer.from([1, 0x03, 1, 0, 5, 0x0D, 0xDE, 0x0D, 0xAC, 0x00, 0xF0,
   0, 0, 0x00, 0xE6, 1, 0]);
@@ -116,8 +137,10 @@ c.done('pump_control: no stateless message reaches Present Pump status');
 function send(action, state, pending) {
   return c.runNode(SEND.func, {
     env: ENV,
-    flow: { pump_state: state || { last_seen_ms: Date.now() }, pump_next_id: 5,
-      pump_pending: pending || null },
+    flow: { pump_state: state || { last_seen_ms: Date.now() }, pump_pending: pending || null },
+    // The id counter lives in global context so the integrated dashboard and this
+    // card allocate from one series.
+    global: { cmd_next_id_pump: 5 },
     msg: { payload: action },
   });
 }
@@ -145,6 +168,21 @@ if (tunedBytes[1] !== 3 || ((tunedBytes[4] << 8) | tunedBytes[5]) !== 3550) {
   c.fail('set_frequency downlink is ' + tunedBytes.toString('hex'));
 }
 c.done('pump_control: start and set_frequency build the FPort 50 downlink for protocol v1');
+
+// PumpControl refuses an id that is not newer than the last one it accepted, so a
+// counter that has fallen behind the pump has to catch up rather than be sent.
+const behind = downlinkOf(c.runNode(SEND.func, {
+  env: ENV,
+  flow: { pump_state: { last_seen_ms: Date.now(), last_command_id: 305 }, pump_pending: null },
+  global: { cmd_next_id_pump: 5 },
+  msg: { payload: { kind: 'command', command: 'start' } },
+}));
+const behindBytes = behind && Buffer.from(JSON.parse(behind.payload).data, 'base64');
+if (!behindBytes || ((behindBytes[2] << 8) | behindBytes[3]) !== 306) {
+  c.fail('a counter behind the pump did not catch up: ' +
+    (behindBytes ? behindBytes.toString('hex') : 'no downlink'));
+}
+c.done('pump_control: a counter behind the pump catches up to the id it reported');
 
 const badHz = send({ kind: 'command', command: 'set_frequency', frequency_hz: 5 });
 if (downlinkOf(badHz)) c.fail('a 5 Hz set_frequency was sent');

@@ -37,6 +37,7 @@ function runNode(func, options) {
   // command, a last command id) sees it, as it would on a deployed flow.
   for (const [key, value] of Object.entries(options.flow || {})) store['f_' + key] = value;
   for (const [key, value] of Object.entries(options.context || {})) store['c_' + key] = value;
+  for (const [key, value] of Object.entries(options.global || {})) store['g_' + key] = value;
   const seen = { status: [], send: [] };
   const flow = {
     get: k => store['f_' + k],
@@ -46,14 +47,21 @@ function runNode(func, options) {
     get: k => store['c_' + k],
     set: (k, v) => { store['c_' + k] = v; },
   };
+  // The shared command-id counters live in global context, so several dashboards
+  // commanding the same device allocate from one series. Keyed 'g_' in the store.
+  const global = {
+    get: k => store['g_' + k],
+    set: (k, v) => { store['g_' + k] = v; },
+  };
   const node = {
     status: s => seen.status.push(s),
     warn: m => seen.warn = m,
     send: m => seen.send.push(m),
   };
   const fn = vm.runInNewContext(
-    '(function(env, flow, context, node, msg) {' + func + '})', { Buffer });
-  const result = fn({ get: k => env[k] }, flow, context, node, options.msg || null);
+    '(function(env, flow, context, node, msg, global) {' + func + '})', { Buffer });
+  const result = fn({ get: k => env[k] }, flow, context, node, options.msg || null,
+                    global);
   return { result, store, seen };
 }
 

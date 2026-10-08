@@ -44,15 +44,15 @@
       <div class="ir-panel-heading"><div><h2>Watering zones</h2><p>Select one half of the field or both.</p></div><span class="ir-small-tag">OPERATOR CONTROL</span></div>
       <div class="ir-control-row">
         <div class="ir-zone-options">
-          <label><input type="checkbox" v-model="valve1"><span><b>Half 1</b><small>valve_1</small></span></label>
-          <label><input type="checkbox" v-model="valve2"><span><b>Half 2</b><small>valve_2</small></span></label>
+          <label><input type="checkbox" :checked="zoneSelected('valve1')" @change="chooseZone('valve1',$event.target.checked)"><span><b>Half 1</b><small>valve_1</small></span></label>
+          <label><input type="checkbox" :checked="zoneSelected('valve2')" @change="chooseZone('valve2',$event.target.checked)"><span><b>Half 2</b><small>valve_2</small></span></label>
         </div>
         <div class="ir-buttons">
-          <button class="ir-start" :disabled="state.phase !== 'idle' || !state.configured || !!state.check" @pointerdown="showRipple" @click="start($event)"><span class="ir-button-label">Start watering</span></button>
+          <button class="ir-start" :disabled="state.phase === 'running' || !state.configured || !!state.check" @pointerdown="showRipple" @click="start($event)"><span class="ir-button-label">Start watering</span></button>
           <button class="ir-stop" @pointerdown="showRipple" @click="stop($event)"><span class="ir-button-label">Stop watering</span></button>
         </div>
       </div>
-      <p class="ir-sequence">Shutdown order: stop pump → close selected field valves → close main valve.</p>
+      <p class="ir-sequence">{{ runText }}</p>
     </section>
 
     <section class="ir-panel ir-limits-panel">
@@ -73,7 +73,7 @@
 export default {
   data() {
     return {
-      state: {phase:'idle',devices:{}}, valve1:true, valve2:true, now:Date.now(), timer:null,
+      state: {phase:'idle',devices:{}}, now:Date.now(), timer:null,
       names: {water:'Reservoir',soil:'Soil',main:'Main valve',valve1:'Valve 1',valve2:'Valve 2',pump:'Pump'},
       icons: {water:'💧',soil:'🌱',main:'⚙',valve1:'↔',valve2:'↔',pump:'◉'}
     }
@@ -81,6 +81,12 @@ export default {
   computed: {
     settings() { return this.state.settings || {} },
     cards() { return Object.fromEntries(Object.keys(this.names).map(k => [k,this.state.devices?.[k] || {stale:true}])) },
+    runText() {
+      const sel = Array.isArray(this.state.selected) ? this.state.selected : [];
+      const prefix = this.state.phase && this.state.phase !== 'idle' && sel.length
+        ? `This run: ${sel.map(k => this.names[k] || k).join(' and ')}. ` : '';
+      return prefix + 'Shutdown order: stop pump → close selected field valves → close main valve.';
+    },
     phaseLabel() { return String(this.state.phase || 'idle').replace(/_/g,' ').toUpperCase() },
     phaseClass() { return this.state.phase === 'running' ? 'ir-phase-running' : this.state.phase === 'fault' ? 'ir-phase-fault' : 'ir-phase-idle' },
     mqttLabel() { const t=String(this.state.mqtt_status||'').toLowerCase(); return t.includes('disconnected') ? 'disconnected' : t.includes('connected') ? 'connected' : t.includes('connecting') ? 'connecting' : 'unknown' },
@@ -119,7 +125,7 @@ export default {
       if (k === 'soil') return d.sensor_valid ? 'Moisture sensor valid' : 'Moisture sensor invalid';
       if (k === 'main') return `Actuator ${d.actuator_online === true ? 'online' : 'offline'} · ${d.valve_moving ? 'moving' : 'stopped'}`;
       if (k === 'pump') return d.stale ? 'VFD and radio status unavailable' : `VFD link ${d.communication_ok === true ? 'OK' : 'fault'} · ${this.fmt(d.actual_frequency_hz,' Hz')}`;
-      return d.pcv_position_verified ? 'Physical position verified' : 'Physical position unverified';
+      return d.status_reason || 'No status reason reported';
     },
     secondary(k,d) {
       if (!d.last_seen) return 'Awaiting telemetry';
@@ -166,12 +172,21 @@ export default {
         {transform:'scale(1)',opacity:0}
       ], {duration:550,easing:'ease-out'}).onfinish = () => ripple.remove();
     },
+    // The selection lives on the server (state.selection), not in this component, so
+    // leaving and returning to the dashboard page does not reset the checkboxes.
+    zoneSelected(k) { const sel = this.state.selection; return !sel ? true : sel[k] === true; },
+    chooseZone(k,on) {
+      const next = {valve1:this.zoneSelected('valve1'), valve2:this.zoneSelected('valve2')};
+      next[k] = on === true;
+      this.send({payload:{kind:'select',valve1:next.valve1,valve2:next.valve2}});
+    },
     start(event) {
       if (event.detail === 0) this.showRipple(event);
-      if (!this.valve1 && !this.valve2) return;
+      if (!this.zoneSelected('valve1') && !this.zoneSelected('valve2')) return;
       window.setTimeout(() => {
         if (!window.confirm('Start watering selected zones?')) return;
-        this.send({payload:{kind:'start',valve1:this.valve1,valve2:this.valve2}});
+        this.send({payload:{kind:'start',
+          valve1:this.zoneSelected('valve1'), valve2:this.zoneSelected('valve2')}});
       }, 100);
     },
     stop(event) {

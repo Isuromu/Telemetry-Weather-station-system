@@ -31,6 +31,15 @@ for (const node of flow.filter(n => n.type === 'ui-template')) {
 }
 c.done('valve_1: the card does not present the build-time scale flag');
 
+// The PCV has no position feedback: the codec reports pcv_position_verified as a
+// constant false, so no card may present it as a reading.
+for (const node of flow.filter(n => n.type === 'ui-template')) {
+  if (/[Pp]osition verified/.test(node.format || '')) {
+    c.fail('the card still presents the constant position flag: ' + node.id);
+  }
+}
+c.done('valve_1: the card does not present the constant position flag');
+
 function statusEvent(object, extra) {
   return Object.assign({
     fPort: 31, fCnt: 12, dr: 5, adr: true, devAddr: '00aabbcc',
@@ -50,7 +59,7 @@ const stateOf = msg => {
 
 const object = {
   protocol_version: 2, runtime_mode: 'class_a', status_reason: 'scheduled',
-  pcv_last_commanded: 'open', pcv_position_verified: true, sleep_seconds: 900,
+  pcv_last_commanded: 'open', sleep_seconds: 900,
   last_command_id: 21, battery_voltage_v: 3.58, battery_soc_percent: 64,
   upstream_pressure_bar: 1.91, upstream_temperature_c: 20.1, upstream_scale_validated: true,
   downstream_pressure_bar: 1.86, downstream_temperature_c: 20.4, downstream_scale_validated: true,
@@ -84,10 +93,12 @@ if (!/codec/i.test((stateOf({ topic: TOPIC,
 }
 c.done('valve_1: wrong FPort and missing codec object are both explained');
 
-function send(action) {
+function send(action, state, nextId) {
   return c.runNode(SEND.func, {
     env: ENV,
-    flow: { pn1_state: { last_command_id: 21 }, pn1_next_cmd_id: 22 },
+    flow: { pn1_state: state || { last_command_id: 21 } },
+    // The id counter lives in global context, shared with the integrated dashboard.
+    global: { cmd_next_id_valve1: nextId === undefined ? 22 : nextId },
     msg: { payload: action },
   });
 }
@@ -105,6 +116,18 @@ else {
   if (sent.payload.object.command_id !== 22) c.fail('downlink command id is ' + sent.payload.object.command_id);
 }
 c.done('valve_1: the command builds an FPort 30 downlink with the codec field names');
+
+// valve_1 ignores a command_id it has already taken, and the integrated dashboard
+// advances the shared counter from its own tab, so a counter behind the valve has to
+// catch up rather than send an id the valve has seen.
+const caughtUp = c.messages(send({ kind: 'command', pcv: 'open', sleep_seconds: 600 },
+  { last_command_id: 305 }, 5).result)
+  .find(m => typeof m.topic === 'string' && m.topic.endsWith('/command/down'));
+if (!caughtUp || caughtUp.payload.object.command_id !== 306) {
+  c.fail('a counter behind valve_1 did not catch up: ' +
+    (caughtUp ? caughtUp.payload.object.command_id : 'no downlink'));
+}
+c.done('valve_1: a counter behind the valve catches up to the id it reported');
 
 // The flow meter's local baseline reset travels as its own flag.
 const reset = c.messages(send({ kind: 'command', flow_total_reset: true }).result)
