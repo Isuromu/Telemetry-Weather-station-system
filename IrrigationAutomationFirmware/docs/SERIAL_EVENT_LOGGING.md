@@ -54,6 +54,11 @@ and BLE is explicitly disabled there, so it is paired with an SPP terminal. New
 lines should keep writing through `Serial` / the `logTee` so they reach both
 channels without extra work.
 
+A third channel — WiFi, readable on the laptop for all six nodes — is planned in
+[`WIRELESS_DEBUG_PLAN.md`](WIRELESS_DEBUG_PLAN.md). It is one more `LogSink`
+implementation plus a host collector, so the vocabulary and the `EventLog`/`LogSink`
+split above are unchanged by it.
+
 ## Where each example stands
 
 | Example | Frame hex (up) | Frame hex (down) | Session new/restored | Command outcomes | State changes |
