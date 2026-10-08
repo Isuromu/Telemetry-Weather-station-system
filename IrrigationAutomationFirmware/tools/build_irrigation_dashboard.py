@@ -55,12 +55,14 @@ const settings = {
   valveOpenMaxAgeSec: 45, valveClosedMaxAgeSec: 180,
   // These two are failure detectors, not retries: neither wait_field phase ever
   // re-sends, so this is only how long a sequence that looks frozen runs before
-  // the operator is told the downlink was lost. 300 s clears 5x the field valves'
-  // 60 s production interval and 20x their 15 s open-state cadence, and matches
-  // the main valve, whose own 180 s movement timeout it must also clear. The
-  // 2100 s this used to carry meant 35 minutes of silence with the main valve
-  // open, in both the open and the close case.
-  mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 300,
+  // the operator is told the downlink was lost. fieldValveCommandTimeoutSec is
+  // twice the field valves' 60 s production interval: an open command waits for
+  // the node's next wake, so the deadline has to clear the interval the node is
+  // actually sleeping, and at exactly 2x one lost downlink spends the whole
+  // budget. Raise it if an operator moves a valve off the 60 s interval by
+  // downlink. The 2100 s this used to carry meant 35 minutes of silence with the
+  // main valve open, in both the open and the close case.
+  mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 120,
   pumpCommandTimeoutSec: 150, pumpStopTimeoutSec: 150,
   maxWateringSec: 14400
 };
@@ -94,23 +96,87 @@ const pumpMaxAge = () => device('pump').running === true ? cfg.pumpRunningMaxAge
 const pumpFresh = () => fresh('pump',pumpMaxAge());
 const pumpLive = () => fresh('pump',device('pump').running===true?cfg.pumpRunningMaxAgeSec:cfg.pumpOnlineMaxAgeSec);
 const isValve = k => k==='valve1'||k==='valve2';
+// The PCV codec names the uplink states open/closed while the downlink action is
+// open/close, so a state comparison must not reuse the action word.
+const pcvState = op => op==='close' ? 'closed' : op;
+// The reasons a PCV reports when it refused the command outright: the actuation
+// failed, or the id was one it had already accepted, which means this counter fell
+// behind the valve's own dashboard. Either way the state will never change.
+const valveRefused = d => d.status_reason==='pcv_actuation_failed'||d.status_reason==='invalid_command_rejected';
+// Being refused for the id alone means the shared counter was behind the valve's own
+// view of it, which the refusal uplink has now corrected, so resend once. A reported
+// actuation failure is hardware and is not retried.
+const valveIdRefused = d => d.status_reason==='invalid_command_rejected';
+const retryValveOnce=(k,op)=>{if (s.valveRetried===k) return false;command(k,op);s.valveRetried=k;return true;};
 // The field valves report on a short fixed cadence while a valve is open and on
 // their configured interval while closed, so one limit cannot fit both states.
 // The last commanded state is the discriminator, as it is on the device.
 const valveMaxAge = k => device(k).pcv_last_commanded === 'open' ? cfg.valveOpenMaxAgeSec : cfg.valveClosedMaxAgeSec;
 const valveFresh = k => fresh(k,valveMaxAge(k));
+// A PCV reports the state it last *commanded*, not where it is, and in Class A the
+// downlink arrives in the RX window *after* an uplink: the first report following our
+// command still carries the previous state. A timestamp cannot tell that report from
+// one the device has acted on. The device echoes the id of the last command it
+// accepted, so only an echo at least as new as the id we sent proves it acted. Without
+// that, a close pass skips a valve whose open is in flight -- leaving it open -- and a
+// close wait confirms a close the device never made.
+const valveReported = (k,d,state) => {
+  if (!valveFresh(k)||d.pcv_last_commanded!==state) return false;
+  const sent=s.valveCmd?.[k];
+  if (sent===undefined) return true;
+  const echo=num(d.last_command_id);
+  return echo!==null&&!idAhead(sent,echo);
+};
 const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
-const nextId = k => {let n=flow.get('irrigation_id_'+k); if (!Number.isInteger(n)||n<0||n>65534) {const last=num(device(k).last_command_id);n=last===null?1:(last+1)%65535;} flow.set('irrigation_id_'+k,(n+1)%65535);return n;};
+// One counter per device, in global rather than flow context: five dashboards
+// command the same hardware, flow context is scoped to a tab, and the device
+// refuses an id it has already seen, so per-dashboard counters drift apart as soon
+// as one dashboard is used more than another.
+const nextKey = k => 'cmd_next_id_'+k;
+// The pump accepts an id only when it is 1..32767 ahead of the last one it took --
+// its rule is a signed 16-bit difference, so 65534 -> 0 counts as ahead -- and an
+// equal id is refused. Compare modularly; "greater than" is wrong across the wrap.
+const idAhead = (n,last) => {const d=(n-last+65535)%65535;return d!==0&&d<32768;};
+const nextId = k => {const last=num(device(k).last_command_id);let n=global.get(nextKey(k));
+  if (!Number.isInteger(n)||n<0||n>65534||(last!==null&&!idAhead(n,last))) n=last===null?1:(last+1)%65535;
+  global.set(nextKey(k),(n+1)%65535);return n;};
 function command(k,op) {
-  const id=nextId(k); s.pending={device:k,op,id,at:now};
-  if (k==='main') {const angle=op==='open'?cfg.mainOpenTargetDeg:0, a=Math.round(angle*10);emit(k,30,{data:Buffer.from([1,1,a>>8,a&255,id>>8,id&255]).toString('base64')});}
-  else if (k==='pump') {const code={stop:1,estop:2,frequency:3,start:4}[op];const arg=op==='frequency'?Math.round(cfg.pumpFrequencyHz*100):0;emit(k,50,{data:Buffer.from([1,code,id>>8,id&255,arg>>8,arg&255]).toString('base64')});}
-  else emit(k,30,{object:{pcv:op,command_id:id}});
+  const id=nextId(k);
+  // The codec rejects a downlink without an integer command_id, so a valve still
+  // gets one; only the main valve and the pump answer with an id we have to match.
+  // A PCV is confirmed by the state it reports, so it carries no pending entry.
+  if (isValve(k)) {emit(k,30,{object:{pcv:op,command_id:id}});if(!s.valveCmd)s.valveCmd={};s.valveCmd[k]=id;}
+  else {
+    s.pending={device:k,op,id,at:now,retried:false};
+    if (k==='main') {const angle=op==='open'?cfg.mainOpenTargetDeg:0, a=Math.round(angle*10);emit(k,30,{data:Buffer.from([1,1,a>>8,a&255,id>>8,id&255]).toString('base64')});}
+    else {const code={stop:1,estop:2,frequency:3,start:4}[op];const arg=op==='frequency'?Math.round(cfg.pumpFrequencyHz*100):0;emit(k,50,{data:Buffer.from([1,code,id>>8,id&255,arg>>8,arg&255]).toString('base64')});}
+  }
   s.notice=`${k}: ${op} sent; awaiting device result`;
 }
-function advance(phase) {s.phase=phase;if (!phase.startsWith('wait_')) s.pending=null;s.phaseAt=now;}
-function stop(reason) {s.notice=reason;s.stopReason=reason;if (s.phase==='idle') s.selected=['valve1','valve2']; if (s.phase!=='stop_pump'&&s.phase!=='wait_pump_stop'&&s.phase!=='close_fields'&&s.phase!=='wait_field_close'&&s.phase!=='close_main'&&s.phase!=='wait_main_close') advance('stop_pump');}
-function ready() {
+// A device refuses an id it has already taken, which happens when another dashboard
+// advanced the shared counter before this one saw the uplink. The refusal carries the
+// id the device actually holds, so nextId() now catches up: resend once rather than
+// wait out the deadline. Once only, so a genuinely bad command cannot loop.
+function retryRefused(k,op) {
+  const q=s.pending;
+  if (!q||q.retried) return false;
+  command(k,op);
+  s.pending.retried=true;
+  return true;
+}
+function advance(phase) {s.phase=phase;if (!phase.startsWith('wait_')) {s.pending=null;s.valveRetried=null;}s.phaseAt=now;}
+// A start pressed while the sequence is busy is queued rather than refused, and fires
+// here once the field valves are closed -- before close_main, so the main valve never
+// has to close and reopen. ready() re-runs because the conditions may have moved.
+function beginQueuedStart() {
+  if (!s.pendingStart) return false;
+  const problem=ready(s.pendingStart);
+  if (problem) {s.notice='Queued start cancelled: '+problem;s.pendingStart=null;return false;}
+  s.selected=s.pendingStart;s.pendingStart=null;s.step=0;advance('open_main');s.notice='Start checks passed';
+  return true;
+}
+function stop(reason) {s.notice=reason;s.stopReason=reason;s.pendingStart=null;if (s.phase==='idle') s.selected=['valve1','valve2']; if (s.phase!=='stop_pump'&&s.phase!=='wait_pump_stop'&&s.phase!=='close_fields'&&s.phase!=='wait_field_close'&&s.phase!=='close_main'&&s.phase!=='wait_main_close') advance('stop_pump');}
+function ready(list) {
   const w=device('water'), t=device('soil'), m=device('main'), p=device('pump');
   if (!configured) return 'Set IRRIGATION_APP_ID and all six DEV_EUI environment variables';
   if (!fresh('water',cfg.waterMaxAgeSec)||w.pressure_valid!==true||num(w.depth_m)===null) return 'Water level unavailable or stale';
@@ -120,7 +186,7 @@ function ready() {
   if (!fresh('main',cfg.mainMaxAgeSec)||m.actuator_online!==true||m.overpressure===true||num(m.actuator_fault_code)!==0) return 'Main valve offline, stale or faulted';
   if (!pumpLive()||p.communication_ok!==true||p.configuration_valid!==true||num(p.vfd_fault_code)!==0||p.running===true) return 'Pump offline, running or faulted';
   if (!p.frequency_armed && !(cfg.pumpFrequencyHz>=cfg.pumpMinFrequencyHz&&cfg.pumpFrequencyHz<=cfg.pumpMaxFrequencyHz)) return 'Pump frequency invalid';
-  for (const k of s.selected) if (!valveFresh(k)) return k+' status unavailable or stale';
+  for (const k of (list||s.selected)) if (!valveFresh(k)) return k+' status unavailable or stale';
   return '';
 }
 function decodePump(e) {
@@ -156,10 +222,20 @@ if (msg.topic && msg.topic.startsWith('application/')) {
       const d=e&&decode(k,e);if(d){s.devices[k]={...s.devices[k],...d,at:now,last_seen:e.time||new Date(now).toISOString(),fPort:e.fPort};if(k==='pump'&&s.pumpRefresh?.pending)s.pumpRefresh={...s.pumpRefresh,pending:false,result:'Status received',completedAt:now};}}
   }
 } else if (msg.payload&&msg.payload.kind==='start') {
-  if (s.phase!=='idle') s.notice='Irrigation is already active';
-  else {s.selected=['valve1','valve2'].filter(k=>msg.payload[k]===true);s.step=0;
-    if (!s.selected.length) s.notice='Select at least one field valve';
-    else {const problem=ready();if(problem) s.notice=problem;else {advance('open_main');s.notice='Start checks passed';}}}
+  // s.selected is deliberately not touched until the start is honoured: this branch
+  // can return, and a teardown in progress is walking s.selected right now.
+  const sel=['valve1','valve2'].filter(k=>msg.payload[k]===true);
+  // Remember the operator's choice on the server, so the checkboxes survive leaving
+  // and returning to the dashboard page.
+  s.selection={valve1:msg.payload.valve1===true,valve2:msg.payload.valve2===true};
+  if (s.phase==='running') s.notice='Irrigation is already active';
+  else if (!sel.length) s.notice='Select at least one field valve';
+  else {const problem=ready(sel);if(problem) s.notice=problem;
+    else if (s.phase==='idle') {s.selected=sel;s.step=0;s.pendingStart=null;advance('open_main');s.notice='Start checks passed';}
+    else if (s.phase==='fault') {s.pendingStart=sel;s.selected=['valve1','valve2'];s.step=s.selected.length-1;s.notice='Start queued; retrying the failed close pass first';advance('close_fields');}
+    else {s.pendingStart=sel;s.notice='Start queued; watering begins once the field valves are closed';}}
+} else if (msg.payload&&msg.payload.kind==='select') {
+  s.selection={valve1:msg.payload.valve1===true,valve2:msg.payload.valve2===true};
 } else if (msg.payload&&msg.payload.kind==='stop') stop('Operator requested stop');
 else if (msg.payload&&msg.payload.kind==='refresh_pump') {
   const previous=Number(s.pumpRefresh?.requestedAt||0);
@@ -175,9 +251,12 @@ if (s.phase==='idle'&&p.running===true&&pumpFresh()) stop('Pump running outside 
 const mainOpen=()=>num(m.actual_angle_deg)!==null&&m.actual_angle_deg>=cfg.mainOpenMinDeg&&m.actual_angle_deg<=cfg.mainOpenMaxDeg&&m.valve_moving===false&&m.actuator_online===true&&num(m.actuator_fault_code)===0;
 const done=(k,op)=>{const q=s.pending,d=device(k);if(!q||q.device!==k||q.op!==op||num(d.last_command_id)!==q.id||d.at<q.at)return false;
   if(k==='main') return d.reported_command_id===q.id&&d.command_phase==='finished'&&d.valve_moving===false&&(op==='open'?mainOpen():num(d.actual_angle_deg)!==null&&d.actual_angle_deg<=cfg.mainClosedMaxDeg);
-  if(k==='pump') return d.command_result==='accepted'&&(op==='stop'||op==='estop'?d.running===false:op==='start'?d.running===true:op==='frequency'?d.frequency_armed===true:false);
-  return d.pcv_last_commanded===op&&d.status_reason!=='invalid_command';};
+  return d.command_result==='accepted'&&(op==='stop'||op==='estop'?d.running===false:op==='start'?d.running===true:op==='frequency'?d.frequency_armed===true:false);};
 const timed=(seconds)=>s.pending&&now-s.pending.at>seconds*1000;
+// A field valve wait has no pending entry to age, so it ages from the phase it
+// entered, which advance() set immediately after the command was emitted. Fails
+// closed: a missing phaseAt reads as expired rather than as an endless wait.
+const timedPhase=(seconds)=>!s.phaseAt||now-s.phaseAt>seconds*1000;
 if (s.phase==='running') {
   if (now-s.runAt>cfg.maxWateringSec*1000) stop('Maximum watering duration reached');
   else if (!fresh('water',cfg.waterMaxAgeSec)||w.pressure_valid!==true||num(w.depth_m)===null||w.depth_m*100<=cfg.stopLevelCm) stop('Water level low or unavailable');
@@ -187,19 +266,35 @@ if (s.phase==='running') {
   else if (s.selected.some(k=>!valveFresh(k)||device(k).pcv_last_commanded!=='open')) stop('Field valve status unsafe');
 }
 if (s.phase==='open_main') {if(mainOpen()) advance('open_fields');else {command('main','open');advance('wait_main_open');}}
-if (s.phase==='wait_main_open') {if(done('main','open')) advance('open_fields');else if(timed(cfg.mainCommandTimeoutSec)||m.command_phase==='failed'||m.command_phase==='rejected') stop('Main valve open failed');}
-if (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='open'&&valveFresh(k)) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}
-if (s.phase==='wait_field_open') {if(done(s.selected[s.step],'open')) {s.step++;advance('open_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed');}
+if (s.phase==='wait_main_open') {if(done('main','open')) advance('open_fields');
+  else if(m.command_phase==='rejected'&&retryRefused('main','open')) s.notice='Main valve refused the command; resending with a fresh id';
+  else if(timed(cfg.mainCommandTimeoutSec)||m.command_phase==='failed'||m.command_phase==='rejected') stop('Main valve open failed');}
+if (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(valveReported(k,device(k),pcvState('open'))) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}
+if (s.phase==='wait_field_open') {const k=s.selected[s.step],d=device(k);
+  if(valveReported(k,d,pcvState('open'))) {s.step++;advance('open_fields');}
+  else if(valveFresh(k)&&d.at>=s.phaseAt&&valveIdRefused(d)&&retryValveOnce(k,'open')) s.notice=k+' refused the command id; resending with a fresh one';
+  else if(valveFresh(k)&&d.at>=s.phaseAt&&valveRefused(d)) stop('Field valve open failed: '+k+' reported '+d.status_reason);
+  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed: '+k);}
 if (s.phase==='set_frequency') {const problem=ready();if(problem){stop('Start recheck: '+problem);}else if(p.frequency_armed===true&&Math.abs((num(p.commanded_frequency_hz)||0)-cfg.pumpFrequencyHz)<cfg.pumpFrequencyToleranceHz) advance('start_pump');else {command('pump','frequency');advance('wait_frequency');}}
-if (s.phase==='wait_frequency') {if(done('pump','frequency')) advance('start_pump');else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump frequency command unconfirmed');}
+if (s.phase==='wait_frequency') {if(done('pump','frequency')) advance('start_pump');else if(p.command_result==='invalid'&&retryRefused('pump','frequency')) s.notice='Pump refused the frequency command; resending with a fresh id';else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump frequency command unconfirmed');}
 if (s.phase==='start_pump') {const problem=ready();if(problem) stop('Start recheck: '+problem);else if(!mainOpen()||s.selected.some(k=>device(k).pcv_last_commanded!=='open')) stop('Valve readiness lost');else {command('pump','start');advance('wait_pump_start');}}
-if (s.phase==='wait_pump_start') {if(done('pump','start')) {advance('running');s.runAt=now;s.notice='Watering';}else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump start accepted; waiting for final VFD condition';else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump start unconfirmed');}
+if (s.phase==='wait_pump_start') {if(done('pump','start')) {advance('running');s.runAt=now;s.notice='Watering';}
+  else if(p.command_result==='invalid'&&retryRefused('pump','start')) s.notice='Pump refused the start; resending with a fresh id';
+  else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump start accepted; waiting for final VFD condition';
+  else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump start unconfirmed');}
 if (s.phase==='stop_pump') {if(p.running===false&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else {command('pump','stop');advance('wait_pump_stop');}}
-if (s.phase==='wait_pump_stop') {if((done('pump','stop')||done('pump','estop'))&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump stop accepted; waiting for final VFD condition';else if(timed(cfg.pumpStopTimeoutSec)){if(s.pending.op==='stop'){command('pump','estop');s.notice='Pump stop unconfirmed; emergency stop sent';}else {s.phase='fault';s.notice='Pump stop unconfirmed. Valves left open; inspect pump.';}}}
-if (s.phase==='close_fields') {if(s.step<0) advance('close_main');else {const k=s.selected[s.step];if(device(k).pcv_last_commanded==='close'&&valveFresh(k)) s.step--;else {command(k,'close');advance('wait_field_close');}}}
-if (s.phase==='wait_field_close') {if(done(s.selected[s.step],'close')) {s.step--;advance('close_fields');}else if(timed(cfg.fieldValveCommandTimeoutSec)){s.phase='fault';s.notice='Field valve close unconfirmed; inspect system';}}
-if (s.phase==='close_main') {if(num(m.actual_angle_deg)!==null&&m.actual_angle_deg<=cfg.mainClosedMaxDeg&&m.valve_moving===false) advance('idle');else {command('main','close');advance('wait_main_close');}}
-if (s.phase==='wait_main_close') {if(done('main','close')) {advance('idle');s.notice='Watering stopped; valves closed';}else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
+if (s.phase==='wait_pump_stop') {if((done('pump','stop')||done('pump','estop'))&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else if(p.command_result==='invalid'&&retryRefused('pump',s.pending.op)) s.notice='Pump refused the stop; resending with a fresh id';
+else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump stop accepted; waiting for final VFD condition';else if(timed(cfg.pumpStopTimeoutSec)){if(s.pending.op==='stop'){command('pump','estop');s.notice='Pump stop unconfirmed; emergency stop sent';}else {s.phase='fault';s.notice='Pump stop unconfirmed. Valves left open; inspect pump.';}}}
+if (s.phase==='close_fields') {if(s.step<0) {if(!beginQueuedStart()) advance('close_main');}else {const k=s.selected[s.step];if(valveReported(k,device(k),pcvState('close'))) s.step--;else {command(k,'close');advance('wait_field_close');}}}
+if (s.phase==='wait_field_close') {const k=s.selected[s.step],d=device(k);
+  if(valveReported(k,d,pcvState('close'))) {s.step--;advance('close_fields');}
+  else if(valveFresh(k)&&d.at>=s.phaseAt&&valveIdRefused(d)&&retryValveOnce(k,'close')) s.notice=k+' refused the command id; resending with a fresh one';
+  else if(valveFresh(k)&&d.at>=s.phaseAt&&valveRefused(d)) {s.phase='fault';s.notice='Field valve close failed: '+k+' reported '+d.status_reason;}
+  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) {s.phase='fault';s.notice='Field valve close unconfirmed: '+k;}}
+if (s.phase==='close_main') {if(num(m.actual_angle_deg)!==null&&m.actual_angle_deg<=cfg.mainClosedMaxDeg&&m.valve_moving===false) {if(!beginQueuedStart()) advance('idle');}else {command('main','close');advance('wait_main_close');}}
+if (s.phase==='wait_main_close') {if(done('main','close')) {if(!beginQueuedStart()) {advance('idle');s.notice='Watering stopped; valves closed';}}
+  else if(m.command_phase==='rejected'&&retryRefused('main','close')) s.notice='Main valve refused the command; resending with a fresh id';
+  else if(timed(cfg.mainCommandTimeoutSec)||m.command_phase==='rejected'){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
 s.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
@@ -220,8 +315,10 @@ if (!/^[a-f0-9-]{36}$/.test(app)) {
   return null;
 }
 const topic = `application/${app}/device/+/event/up`;
-if (context.get('topic') === topic) return null;
-context.set('topic', topic);
+// No context guard here. The inject that feeds this node fires once per deploy,
+// which is the whole idempotence needed -- and a guard on stored context would
+// actively break a redeploy, because the context survives it: the guard would
+// match, return early, and leave the mqtt in node with no subscription.
 node.status({fill:'green',shape:'dot',text:topic});
 return {action:'subscribe',topic,qos:0};'''
 

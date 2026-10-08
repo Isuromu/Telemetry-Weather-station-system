@@ -70,6 +70,9 @@ def write_flow(nodes, relative_path, indent, trailing_newline=False):
     if trailing_newline:
         text += "\n"
     path = ROOT / relative_path
-    path.write_text(text, encoding="utf-8", newline="")
+    # write_bytes rather than write_text(..., newline=""): the newline argument
+    # only exists on Python 3.10+, and this box runs 3.8. Writing bytes keeps the
+    # \n exactly as exported on every platform, which is what newline="" was for.
+    path.write_bytes(text.encode("utf-8"))
     print("wrote %s (%d nodes)" % (path, len(nodes)))
     return path

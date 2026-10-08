@@ -75,9 +75,14 @@ const subscribed = c.messages(c.runNode(SUBSCRIBE.func, { env: ENV }).result)
 if (subscribed.length !== 1 || subscribed[0].topic !== TOPIC.replace('/up', '/+')) {
   c.fail('subscription topic is ' + JSON.stringify(subscribed.map(m => m.topic)));
 }
+// A context that already holds the topic is what a redeploy looks like, since
+// context survives one. It must subscribe again: a stored-context guard would
+// match, return early, and leave the mqtt in node unsubscribed after every
+// redeploy. tools/test_nodered_flows.js forbids that guard for the same reason.
 const repeat = c.runNode(SUBSCRIBE.func, { env: ENV, context: { topic: TOPIC.replace('/up', '/+') } });
-if (c.messages(repeat.result).some(m => m.action === 'subscribe')) {
-  c.fail('an unchanged subscription is requested again');
+const again = c.messages(repeat.result).filter(m => m.action === 'subscribe');
+if (again.length !== 1 || again[0].topic !== TOPIC.replace('/up', '/+')) {
+  c.fail('a redeploy does not re-subscribe: ' + JSON.stringify(again.map(m => m.topic)));
 }
 const missing = c.runNode(SUBSCRIBE.func, { env: {} });
 if (c.messages(missing.result).some(m => m.action === 'subscribe')) {
@@ -89,9 +94,11 @@ if (!/IRRIGATION_APP_ID/.test(JSON.stringify(missing.result))) {
 c.done('main_valve: subscribes from the environment and refuses without it');
 
 // --- command path ----------------------------------------------------------
-function queueCommand(state, action) {
+function queueCommand(state, action, nextId) {
   return c.runNode(COMMAND.func, {
     env: ENV, flow: { mv_state: state, mv_queue: [], mv_pending: null },
+    // The id counter lives in global context, shared with the integrated dashboard.
+    global: nextId === undefined ? {} : { cmd_next_id_main: nextId },
     msg: { payload: action },
   });
 }
@@ -120,6 +127,19 @@ else {
   }
 }
 c.done('main_valve: a v3 status unlocks the queue and the downlink is built from the environment');
+
+// MainValve refuses an id it has already taken, and the integrated dashboard advances
+// the shared counter from its own tab, so a counter behind the valve has to catch up.
+const caught = queueCommand({ last_seen: '2026-10-05T13:26:58.759Z', protocol_version: 3,
+  last_command_id: 305 }, { kind: 'command', angle_deg: 45 }, 5);
+const caughtDownlink = c.messages(caught.result)
+  .find(m => typeof m.topic === 'string' && m.topic.endsWith('/command/down'));
+const caughtBytes = caughtDownlink && Buffer.from(JSON.parse(caughtDownlink.payload).data, 'base64');
+if (!caughtBytes || ((caughtBytes[4] << 8) | caughtBytes[5]) !== 306) {
+  c.fail('a counter behind MainValve did not catch up: ' +
+    (caughtBytes ? caughtBytes.toString('hex') : 'no downlink'));
+}
+c.done('main_valve: a counter behind the valve catches up to the id it reported');
 
 const legacy = queueCommand({ last_seen: '2026-10-05T13:26:58.759Z', protocol_version: 1 },
   { kind: 'command', angle_deg: 45 });

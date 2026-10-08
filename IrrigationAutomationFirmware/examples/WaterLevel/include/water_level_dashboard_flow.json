@@ -2,7 +2,7 @@
     {
         "id": "sc_wl_group_flow",
         "type": "group",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "style": {
             "stroke": "#999999",
             "stroke-opacity": "1",
@@ -34,7 +34,7 @@
     {
         "id": "sc_wl_inject",
         "type": "inject",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "Refresh subscription",
         "props": [
@@ -42,7 +42,7 @@
                 "p": "payload"
             }
         ],
-        "repeat": "30",
+        "repeat": "",
         "crontab": "",
         "once": true,
         "onceDelay": "1",
@@ -60,10 +60,10 @@
     {
         "id": "sc_wl_subscribe",
         "type": "function",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "Subscribe to configured ChirpStack application",
-        "func": "// Subscribe to the WaterLevel node's ChirpStack events. The application ID and\n// DevEUI come from the same environment variables the IntegratedDashboard uses,\n// so one settings.js block configures both flows.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nconst eui = String(env.get('WATER_DEV_EUI') || '').toLowerCase();\nconst state = Object.assign({}, flow.get('water_state') || {});\nconst snapshot = {payload:{kind:'state', state:state}};\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:'red',shape:'ring',text:'set IRRIGATION_APP_ID and WATER_DEV_EUI'});\n  state.config_error = 'Set IRRIGATION_APP_ID and WATER_DEV_EUI in the Node-RED environment, then redeploy.';\n  flow.set('water_state', state);\n  return [null, {payload:{kind:'state', state:state}}];\n}\nconst topic = 'application/' + app + '/device/' + eui + '/event/+';\nstate.config_error = '';\nflow.set('water_state', state);\nif (context.get('topic') === topic) return [null, null];\ncontext.set('topic', topic);\nnode.status({fill:'green',shape:'dot',text:topic});\nreturn [{action:'subscribe', topic:topic, qos:0}, {payload:{kind:'state', state:state}}];",
+        "func": "// Subscribe to the WaterLevel node's ChirpStack events. The application ID and\n// DevEUI come from the same environment variables the IntegratedDashboard uses,\n// so one settings.js block configures both flows.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nconst eui = String(env.get('WATER_DEV_EUI') || '').toLowerCase();\nconst state = Object.assign({}, flow.get('water_state') || {});\nconst snapshot = {payload:{kind:'state', state:state}};\nif (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {\n  node.status({fill:'red',shape:'ring',text:'set IRRIGATION_APP_ID and WATER_DEV_EUI'});\n  state.config_error = 'Set IRRIGATION_APP_ID and WATER_DEV_EUI in the Node-RED environment, then redeploy.';\n  flow.set('water_state', state);\n  return [null, {payload:{kind:'state', state:state}}];\n}\nconst topic = 'application/' + app + '/device/' + eui + '/event/+';\nstate.config_error = '';\nflow.set('water_state', state);\n// No context guard: it would survive a redeploy, match, and leave the mqtt in\n// node unsubscribed. The once-per-deploy inject already handles idempotence.\nnode.status({fill:'green',shape:'dot',text:topic});\nreturn [{action:'subscribe', topic:topic, qos:0}, {payload:{kind:'state', state:state}}];",
         "outputs": 2,
         "timeout": 0,
         "noerr": 0,
@@ -84,7 +84,7 @@
     {
         "id": "sc_wl_mqtt_in",
         "type": "mqtt in",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "ChirpStack events",
         "topic": "",
@@ -106,7 +106,7 @@
     {
         "id": "sc_wl_decode",
         "type": "function",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "Filter and decode WaterLevel events",
         "func": "// WaterLevel Class A reservoir node, telemetry only.\n// FPort 40, protocol v1, ten bytes. The firmware deliberately ignores\n// application downlinks, so this flow never publishes one.\n// Outputs: 0 state card, 1 water depth chart, 2 pressure chart.\nconst app = String(env.get('IRRIGATION_APP_ID') || '').toLowerCase();\nconst eui = String(env.get('WATER_DEV_EUI') || '').toLowerCase();\nconst parts = String(msg.topic || '').toLowerCase().split('/');\nif (parts.length !== 6 || parts[0] !== 'application' || parts[2] !== 'device' ||\n    parts[4] !== 'event' || parts[1] !== app || parts[3] !== eui) return null;\nlet event = msg.payload;\ntry {\n  if (Buffer.isBuffer(event)) event = JSON.parse(event.toString('utf8'));\n  else if (typeof event === 'string') event = JSON.parse(event);\n} catch (err) { node.warn('Invalid ChirpStack JSON: ' + err.message); return null; }\nif (!event || typeof event !== 'object') return null;\nconst kind = parts[5];\nconst num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;\nconst arrivedAt = Date.now();\nconst s = Object.assign({}, flow.get('water_state') || {});\ns.last_event = kind;\ns.last_event_time = new Date().toISOString();\nconst card = () => [{payload:{kind:'state', state:s}}, null, null];\nif (kind === 'up') {\n  if (event.fPort !== 40) return null;\n  let d = event.object;\n  let fromRaw = false;\n  if (!d || typeof d !== 'object' ||\n      !Object.prototype.hasOwnProperty.call(d, 'pressure_valid')) {\n    // The ChirpStack codec is not installed or returned an error; decode the\n    // documented ten-byte v1 payload instead.\n    fromRaw = true;\n    let b = null;\n    try { b = Buffer.from(event.data || '', 'base64'); } catch (_) { b = null; }\n    if (!b || b.length !== 10 || b[0] !== 1) {\n      s.decode_error = 'FPort 40 needs the WaterLevel codec object or a ten-byte v1 payload.';\n      return card();\n    }\n    const valid = !!(b[1] & 0x01);\n    d = {\n      protocol_version: b[0],\n      pressure_valid: valid,\n      load_on: !!(b[1] & 0x02),\n      battery_voltage_v: b.readUInt16BE(2) / 1000,\n      pressure_bar: valid ? b.readInt16BE(4) / 1000 : null,\n      depth_m: valid ? b.readUInt16BE(6) / 1000 : null,\n      water_level_percent: valid ? b.readUInt16BE(8) / 10 : null\n    };\n  }\n  s.decode_error = '';\n  s.config_error = '';\n  // Surface which path decoded this uplink: \"codec\" is normal, anything else\n  // means the ChirpStack device profile is not decoding for us.\n  s.decoded_from = fromRaw ? 'raw payload' : 'codec';\n  s.protocol_version = num(d.protocol_version);\n  s.pressure_valid = d.pressure_valid === true;\n  s.load_on = d.load_on === true;\n  s.battery_voltage_v = num(d.battery_voltage_v);\n  // Depth, level and pressure are only meaningful while the sensor reports valid.\n  s.pressure_bar = s.pressure_valid ? num(d.pressure_bar) : null;\n  s.depth_m = s.pressure_valid ? num(d.depth_m) : null;\n  s.water_level_percent = s.pressure_valid ? num(d.water_level_percent) : null;\n  s.depth_cm = s.depth_m === null ? null : s.depth_m * 100;\n  s.last_seen = event.time || new Date(arrivedAt).toISOString();\n  // Only the telemetry uplink counts as a report. A join, log or status event\n  // proves the radio is up but is not the reading this page waits for.\n  s.last_seen_ms = arrivedAt;\n  s.stale = false;\n  s.f_port = event.fPort;\n  s.f_cnt = event.fCnt == null ? null : event.fCnt;\n  s.uplink_count = (s.uplink_count || 0) + 1;\n  const rx = Array.isArray(event.rxInfo) ? event.rxInfo : [];\n  if (rx.length) {\n    const best = rx.reduce((a, b) => Number(b.snr) > Number(a.snr) ? b : a);\n    s.rssi = num(best.rssi);\n    s.snr = num(best.snr);\n    s.gateway_id = best.gatewayId || '';\n  }\n  const lora = (((event.txInfo || {}).modulation || {}).lora || {});\n  s.sf = num(lora.spreadingFactor);\n  s.dr = num(event.dr);\n  s.frequency_hz = num((event.txInfo || {}).frequency);\n  node.status({fill: s.pressure_valid ? 'green' : 'yellow', shape:'dot',\n    text: s.pressure_valid ? 'level ' + s.water_level_percent + ' %' : 'level sensor invalid'});\n  flow.set('water_state', s);\n  // Only a valid reading is charted. A null point would plot a gap the sensor\n  // never reported, so gaps stay gaps. waterMetric routes the point to the\n  // right chart through the chart time zoom function.\n  const point = (metric, series, value) =>\n    value === null ? null : {waterMetric:metric, topic:series, payload:value};\n  return [\n    {payload:{kind:'state', state:s}},\n    point('depth', 'Water depth', s.depth_cm),\n    point('pressure', 'Pressure', s.pressure_bar)\n  ];\n} else if (kind === 'join') { s.network_join = s.last_event_time; }\nelse if (kind === 'txack') { s.network_txack = 'Gateway transmission acknowledged'; }\nelse if (kind === 'ack') { s.network_ack = event.acknowledged === true ? 'Confirmed uplink ACK' : 'Uplink not acknowledged'; }\nelse if (kind === 'log') { s.network_log = event.description || event.code || 'Device log'; }\nelse if (kind === 'status') { s.network_status = event.battery == null ? 'Device status received' : 'Network battery ' + event.battery; }\nelse return null;\nflow.set('water_state', s);\nreturn card();",
@@ -133,7 +133,7 @@
     {
         "id": "sc_wl_stale_inject",
         "type": "inject",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "Refresh and check staleness",
         "props": [
@@ -159,7 +159,7 @@
     {
         "id": "sc_wl_stale",
         "type": "function",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "Check stale status",
         "func": "// The node reports once per wake cycle and then deep-sleeps, so age is\n// measured from when an uplink reached Node-RED, not from the gateway\n// timestamp. The limit tracks the firmware's sleep interval (2 x it, floor\n// 60 s), so it tightens when the interval is short and never trips on one\n// lost uplink.\nconst STALE_AFTER_SECONDS = 60;\nconst s = Object.assign({}, flow.get('water_state') || {});\ns.stale_after_seconds = STALE_AFTER_SECONDS;\ns.stale = !s.last_seen_ms || Date.now() - s.last_seen_ms > STALE_AFTER_SECONDS * 1000;\nflow.set('water_state', s);\nmsg.payload = {kind:'state', state:s};\nreturn msg;",
@@ -180,7 +180,7 @@
     {
         "id": "sc_wl_zoom",
         "type": "function",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "name": "WaterLevel chart time zoom",
         "func": "// Per-chart time window. + shows a shorter span; - shows a longer span.\nconst windows = [\n  {label:'30 min',ms:1800000}, {label:'1 h',ms:3600000},\n  {label:'3 h',ms:10800000}, {label:'6 h',ms:21600000},\n  {label:'12 h',ms:43200000}, {label:'24 h',ms:86400000}\n];\nconst metrics = {depth:0, pressure:1};\nconst metric = msg.waterMetric || (msg.payload && msg.payload.metric);\nif (!Object.prototype.hasOwnProperty.call(metrics, metric)) return null;\nconst slot = metrics[metric];\nconst key = 'water_zoom_' + metric;\nlet index = Number(flow.get(key));\nif (!Number.isInteger(index) || index < 0 || index >= windows.length) index = 3;\nconst control = msg.payload && msg.payload.kind === 'zoom';\nif (control) {\n  if (msg.payload.direction !== 1 && msg.payload.direction !== -1) return null;\n  index = Math.max(0, Math.min(windows.length - 1, index - msg.payload.direction));\n  flow.set(key, index);\n} else if (typeof msg.payload !== 'number' || !Number.isFinite(msg.payload)) return null;\nconst now = Date.now();\nconst axis = {ui_update:{chartOptions:{xAxis:{min:now - windows[index].ms, max:now}}}};\nconst out = Array(4).fill(null);\nout[slot] = control ? axis : [axis, {topic:msg.topic, payload:msg.payload}];\nif (control) out[slot + 2] = {payload:{kind:'zoom_state', label:windows[index].label}};\nreturn out;",
@@ -210,7 +210,7 @@
     {
         "id": "sc_wl_ui",
         "type": "ui-template",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "group": "0dcf231c222554fc",
         "page": "",
@@ -235,7 +235,7 @@
     {
         "id": "sc_wl_chart_depth",
         "type": "ui-chart",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "group": "18fb832a66d8775e",
         "name": "Water depth history",
@@ -290,7 +290,7 @@
     {
         "id": "sc_wl_zoom_depth",
         "type": "ui-template",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "group": "18fb832a66d8775e",
         "page": "",
@@ -317,7 +317,7 @@
     {
         "id": "sc_wl_chart_pressure",
         "type": "ui-chart",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "group": "18fb832a66d8775e",
         "name": "Pressure history",
@@ -372,7 +372,7 @@
     {
         "id": "sc_wl_zoom_pressure",
         "type": "ui-template",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "g": "sc_wl_group_flow",
         "group": "18fb832a66d8775e",
         "page": "",
@@ -399,7 +399,7 @@
     {
         "id": "0dcf231c222554fc",
         "type": "ui-group",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "name": "Water Level",
         "page": "334b707b21a5ce0a",
         "width": "8",
@@ -414,7 +414,7 @@
     {
         "id": "18fb832a66d8775e",
         "type": "ui-group",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "name": "Water Level history",
         "page": "334b707b21a5ce0a",
         "width": "4",
@@ -429,7 +429,7 @@
     {
         "id": "334b707b21a5ce0a",
         "type": "ui-page",
-        "z": "sc_wl_tab",
+        "z": "e618dcf23e3fb563",
         "name": "Water Level",
         "ui": "f53e93e9ba219e63",
         "path": "/water-level",

@@ -100,6 +100,13 @@ const valveOpenAge = Number(settings.match(/valveOpenMaxAgeSec:\s*(\d+)/)[1]);
 assert(valveOpenAge >= 2 * openCadences[0] && valveOpenAge <= 4 * openCadences[0],
   `valveOpenMaxAgeSec ${valveOpenAge} s does not clear two of the ${openCadences[0]} s open-valve cadence`);
 
+// The field-valve waits are failure detectors, not retries, so the deadline also
+// has to clear the interval the node sleeps. The closed cadence is an operator
+// setting with a downlink and no compile-time value, so this is read for the
+// timing test below rather than asserted against a cadence.
+const fieldValveCommandTimeoutSec = Number(settings.match(/fieldValveCommandTimeoutSec:\s*(\d+)/)[1]);
+assert(fieldValveCommandTimeoutSec, 'cannot resolve fieldValveCommandTimeoutSec from the settings node');
+
 // PumpControl reports on a fixed stopped cadence, resolved from its source like the
 // water interval above. The pump carries two stopped-state limits and they have to
 // bracket each other: pumpOnlineMaxAgeSec is the liveness limit, while
@@ -123,7 +130,14 @@ const context = {get:k=>subscriptionContext.get(k),set:(k,v)=>subscriptionContex
 assert.deepEqual(subscription(subscriptionEnv,context,subscriptionStatus), {
   action:'subscribe',topic:'application/12345678-1234-1234-1234-123456789abc/device/+/event/up',qos:0
 });
-assert.equal(subscription(subscriptionEnv,context,subscriptionStatus), null);
+// Called a second time with the same context -- which is what a redeploy looks
+// like, because context survives one -- it must subscribe again. Returning null
+// here would leave the mqtt in node unsubscribed after every redeploy. The
+// once-per-deploy inject is what stops this being a per-message hot path; see
+// tools/test_nodered_flows.js, which forbids a stored-context guard.
+assert.deepEqual(subscription(subscriptionEnv,context,subscriptionStatus), {
+  action:'subscribe',topic:'application/12345678-1234-1234-1234-123456789abc/device/+/event/up',qos:0
+});
 const vueScript = template.match(/<script>([\s\S]*?)<\/script>/)[1];
 new Function(vueScript.replace('export default', 'return'));
 assert(template.includes('v-for="(d,k) in cards"'));
@@ -137,6 +151,10 @@ assert(template.includes('pumpModeLabel(d)'),
 assert(template.includes("timeZone:'Asia/Tashkent'"));
 const memory = new Map();
 const flow = {get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)};
+// The shared command-id counters live in global context, so this dashboard and the
+// per-device cards allocate from one series per device.
+const globalMemory = new Map();
+const globalCtx = {get:k=>globalMemory.get(k),set:(k,v)=>globalMemory.set(k,v)};
 const env = {get:k=>{
   const name=k.replace(/_DEV_EUI$/,'').toLowerCase();
   return k==='IRRIGATION_APP_ID' ? '12345678-1234-1234-1234-123456789abc' :
@@ -144,10 +162,10 @@ const env = {get:k=>{
       valve1:'0000000000000004',valve2:'0000000000000005',pump:'0000000000000006'})[name];
 }};
 const node = {status:()=>{}};
-const configure = new Function('msg','flow','node','env','Buffer',settings);
-const run = new Function('msg','flow','node','env','Buffer',control);
-const take = msg => run(msg,flow,node,env,Buffer);
-configure({},flow,node,env,Buffer);
+const configure = new Function('msg','flow','node','env','Buffer','global',settings);
+const run = new Function('msg','flow','node','env','Buffer','global',control);
+const take = msg => run(msg,flow,node,env,Buffer,globalCtx);
+configure({},flow,node,env,Buffer,globalCtx);
 const app = '12345678-1234-1234-1234-123456789abc';
 function up(name,object,port) {
   const eui=env.get(name.toUpperCase()+'_DEV_EUI');
@@ -157,11 +175,18 @@ function upRaw(name,bytes,port) {
   const eui=env.get(name.toUpperCase()+'_DEV_EUI');
   return take({topic:`application/${app}/device/${eui}/event/up`,payload:{fPort:port,data:Buffer.from(bytes).toString('base64')}});
 }
+// A field valve in flight is s.selected[s.step]: a PCV carries no pending entry,
+// because it is confirmed by the state it reports rather than by its command id.
+function inFlight() { const s=memory.get('irrigation'); return s.selected[s.step]; }
+// A valve echoes the id of the command it accepted, and the sequencer now requires that
+// echo before it treats a report as proof -- in Class A the first report after a command
+// still carries the previous state. Fixtures must carry the echo, as a device does.
+const valveCmdId = k => ((memory.get('irrigation')||{}).valveCmd||{})[k];
 up('water',{pressure_valid:true,depth_m:0.25},40);
 up('soil',{sensor_valid:true,vwc_percent:50},10);
 up('main',{actuator_online:true,actuator_fault_code:0,overpressure:false,actual_angle_deg:0,valve_moving:false,command_phase:'none'},31);
-up('valve1',{pcv_last_commanded:'close',last_command_id:0},31);
-up('valve2',{pcv_last_commanded:'close',last_command_id:0},31);
+up('valve1',{pcv_last_commanded:'closed',last_command_id:0},31);
+up('valve2',{pcv_last_commanded:'closed',last_command_id:0},31);
 upRaw('pump',[2,115,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0xfb,0xa4,3,0,60],51);
 assert.equal(memory.get('irrigation').devices.pump.previous_join_error_code,-1116);
 assert.equal(memory.get('irrigation').devices.pump.join_attempt_count,3);
@@ -174,13 +199,11 @@ assert(out[0][0].topic.includes('0000000000000003'));
 let q=memory.get('irrigation').pending;
 up('main',{actuator_online:true,actuator_fault_code:0,overpressure:false,actual_angle_deg:90,valve_moving:false,command_phase:'finished',last_command_id:q.id,reported_command_id:q.id},31);
 assert.equal(memory.get('irrigation').phase,'wait_field_open');
-q=memory.get('irrigation').pending;
-assert.equal(q.device,'valve1');
-up('valve1',{pcv_last_commanded:'open',last_command_id:q.id,status_reason:'remote_command'},31);
+assert.equal(inFlight(),'valve1');
+up('valve1',{pcv_last_commanded:'open',last_command_id:valveCmdId('valve1'),status_reason:'remote_command'},31);
 take({payload:{kind:'tick'}});
-q=memory.get('irrigation').pending;
-assert.equal(q.device,'valve2');
-up('valve2',{pcv_last_commanded:'open',last_command_id:q.id,status_reason:'remote_command'},31);
+assert.equal(inFlight(),'valve2');
+up('valve2',{pcv_last_commanded:'open',last_command_id:valveCmdId('valve2'),status_reason:'remote_command'},31);
 take({payload:{kind:'tick'}});
 assert.equal(memory.get('irrigation').phase,'wait_frequency');
 q=memory.get('irrigation').pending;
@@ -200,7 +223,25 @@ up('pump',{communication_ok:true,configuration_valid:true,vfd_fault_code:0,runni
 assert.equal(memory.get('irrigation').phase,'wait_pump_stop');
 up('pump',{communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false,last_command_id:q.id,command_result:'accepted'},51);
 assert.equal(memory.get('irrigation').phase,'wait_field_close');
-assert.equal(memory.get('irrigation').pending.device,'valve2');
+assert.equal(inFlight(),'valve2');
+
+// --- the close half, end to end -------------------------------------------
+// The codec names the uplink state 'closed' while the downlink action is 'close'.
+// Every stop run used to fault here, because the sequencer compared the report to
+// 'close' and nothing ever matched it.
+up('valve2',{pcv_last_commanded:'closed',last_command_id:valveCmdId('valve2')},31);
+assert.equal(memory.get('irrigation').phase,'close_fields','a fresh closed report must confirm the close');
+assert.equal(memory.get('irrigation').step,0);
+take({payload:{kind:'tick'}});
+assert.equal(inFlight(),'valve1');
+up('valve1',{pcv_last_commanded:'closed',last_command_id:valveCmdId('valve1')},31);
+take({payload:{kind:'tick'}});
+assert.equal(memory.get('irrigation').phase,'wait_main_close',
+  'both field valves confirming must let the sequence reach the main valve');
+const mainClose=memory.get('irrigation').pending;
+up('main',{actuator_online:true,actuator_fault_code:0,overpressure:false,actual_angle_deg:0,valve_moving:false,command_phase:'finished',last_command_id:mainClose.id,reported_command_id:mainClose.id},31);
+assert.equal(memory.get('irrigation').phase,'idle');
+assert.equal(memory.get('irrigation').notice,'Watering stopped; valves closed');
 
 out=take({payload:{kind:'refresh_pump'}});
 assert.equal(JSON.parse(out[0][0].payload).fPort,50);
@@ -226,7 +267,7 @@ const commonDevices = {
 };
 adaptiveMemory.set('irrigation',{phase:'running',runAt:base,selected:['valve1'],step:0,notice:'Watering',pending:null,devices:{...commonDevices,pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:true}}});
 Date.now=()=>base+46001;
-new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
+new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
 assert.equal(adaptiveMemory.get('irrigation').notice,'pump: stop sent; awaiting device result');
 assert.equal(adaptiveMemory.get('irrigation').stopReason,'Pump status unsafe');
 // A stopped PumpControl reports once a minute, so the two questions asked of its
@@ -236,7 +277,7 @@ assert.equal(adaptiveMemory.get('irrigation').stopReason,'Pump status unsafe');
 const pumpTick = devices => {
   adaptiveMemory.set('irrigation',{phase:'idle',selected:[],step:0,notice:'Ready',pending:null,devices});
   Date.now=()=>base;
-  new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
+  new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
   return adaptiveMemory.get('irrigation');
 };
 const stoppedPump = age => ({...commonDevices,
@@ -250,7 +291,7 @@ assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).check,'Pump offline, r
   'past pumpOnlineMaxAgeSec the Start gate must still refuse');
 adaptiveMemory.set('irrigation',{phase:'stop_pump',selected:['valve1'],step:0,notice:'',pending:null,devices:stoppedPump(beyondPumpStoppedAgeMs)});
 Date.now=()=>base;
-new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
+new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
 assert.equal(adaptiveMemory.get('irrigation').phase,'wait_pump_stop',
   'a stopped report past pumpStoppedMaxAgeSec must cause a stop command before closing valves');
 assert.equal(adaptiveMemory.get('irrigation').notice,'pump: stop sent; awaiting device result');
@@ -262,12 +303,252 @@ assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).devices.pump.stale,tru
 // valve is open and still fresh while it is closed. That is what lets the open
 // half stay tight without the closed half flagging a healthy idle valve.
 adaptiveMemory.set('irrigation',{phase:'idle',selected:[],step:0,notice:'Ready',pending:null,devices:{...commonDevices,
-  valve1:{at:base,pcv_last_commanded:'open'}, valve2:{at:base,pcv_last_commanded:'close'},
+  valve1:{at:base,pcv_last_commanded:'open'}, valve2:{at:base,pcv_last_commanded:'closed'},
   pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}}});
 Date.now=()=>base+60000;
-new Function('msg','flow','node','env','Buffer',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer);
+new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
 const splitState=adaptiveMemory.get('irrigation').devices;
 assert.equal(splitState.valve1.stale,true,'a valve open and silent past valveOpenMaxAgeSec must read stale');
 assert.equal(splitState.valve2.stale,false,'a closed valve silent for the same time is within valveClosedMaxAgeSec');
+
+// --- the close wait in isolation -------------------------------------------
+// Confirmation is the valve's own fresh report, with no command id to match: a
+// stale report must not confirm, a reported actuation failure must fault at once
+// and name the valve, and silence must fault at fieldValveCommandTimeoutSec.
+const closeTick = (valve,ageMs) => {
+  adaptiveMemory.set('irrigation',{phase:'wait_field_close',phaseAt:base-ageMs,selected:['valve1'],step:0,notice:'',pending:null,
+    devices:{...commonDevices,valve1:valve,
+      pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}}});
+  Date.now=()=>base;
+  new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  return adaptiveMemory.get('irrigation');
+};
+assert.equal(closeTick({at:base,pcv_last_commanded:'closed'},1000).phase,'close_fields',
+  'a fresh closed report must confirm the close');
+assert.equal(closeTick({at:base-181000,pcv_last_commanded:'closed'},1000).phase,'wait_field_close',
+  'a closed report older than valveClosedMaxAgeSec must not confirm');
+const failedClose=closeTick({at:base,pcv_last_commanded:'open',status_reason:'pcv_actuation_failed'},1000);
+assert.equal(failedClose.phase,'fault','a reported actuation failure must fault without waiting out the deadline');
+assert.equal(failedClose.notice,'Field valve close failed: valve1 reported pcv_actuation_failed');
+const timedOutClose=closeTick({at:base,pcv_last_commanded:'open'},(fieldValveCommandTimeoutSec+1)*1000);
+assert.equal(timedOutClose.phase,'fault','silence past fieldValveCommandTimeoutSec must fault');
+assert.equal(timedOutClose.notice,'Field valve close unconfirmed: valve1');
+
+// --- command ids ------------------------------------------------------------
+// One counter per device, in global context, shared with the device's own card, so
+// several dashboards commanding the same hardware allocate from one series. A
+// counter that has fallen behind the device must catch up, and the pump refuses an
+// id that is not newer than the last one it accepted.
+const pumpCommandId = (sharedId,deviceLast) => {
+  globalMemory.set('cmd_next_id_pump',sharedId);
+  adaptiveMemory.set('irrigation',{phase:'set_frequency',phaseAt:base,selected:['valve1'],step:0,notice:'',pending:null,
+    devices:{...commonDevices,pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,
+      running:false,frequency_armed:false,last_command_id:deviceLast}}});
+  Date.now=()=>base;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const bytes=Buffer.from(JSON.parse(out[0][0].payload).data,'base64');
+  return (bytes[2]<<8)|bytes[3];
+};
+assert.equal(pumpCommandId(5,305),306,
+  'a shared counter behind the pump\'s accepted id must catch up instead of reusing an id');
+assert.equal(pumpCommandId(400,305),400,
+  'a shared counter already ahead of the pump must be used as-is');
+// The pump accepts only an id 1..32767 ahead -- its rule is a signed 16-bit
+// difference -- and the counters wrap 65534 -> 0, so "ahead" is modular, not numeric.
+assert.equal(pumpCommandId(1,65534),1,
+  'an id that wrapped past the device must not be mistaken for one that fell behind');
+assert.equal(pumpCommandId(0,65534),0,
+  'the wrapped id 0 is one ahead of 65534 and must be kept');
+assert.equal(pumpCommandId(32767,0),32767,
+  'an id exactly 32767 ahead is the furthest the pump still accepts');
+assert.equal(pumpCommandId(32768,0),1,
+  'an id 32768 ahead reads as behind, so the counter must catch up');
+assert.equal(globalMemory.get('cmd_next_id_pump'),2,
+  'the shared counter must advance past the id it just issued');
+globalMemory.set('cmd_next_id_pump',100);
+const firstSharedId=pumpCommandId(100,99);
+const secondSharedId=pumpCommandId(globalMemory.get('cmd_next_id_pump'),99);
+assert.equal(firstSharedId,100);
+assert.notEqual(secondSharedId,firstSharedId,
+  'two consecutive commands must not allocate the same id');
+
+// --- refusal recovery -------------------------------------------------------
+// A refusal carries the id the device actually holds, so a command refused for its id
+// is resent once with a corrected one, instead of waiting out the deadline.
+const refusalTick = pendingRetried => {
+  globalMemory.set('cmd_next_id_pump',5);
+  adaptiveMemory.set('irrigation',{phase:'wait_pump_start',phaseAt:base,selected:['valve1'],step:0,notice:'',
+    pending:{device:'pump',op:'start',id:500,at:base,retried:pendingRetried},
+    devices:{...commonDevices,pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,
+      running:false,frequency_armed:true,last_command_id:305,command_result:'invalid'}}});
+  Date.now=()=>base;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const downlinks=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  return {ids:downlinks.map(m=>{const b=Buffer.from(JSON.parse(m.payload).data,'base64');return (b[2]<<8)|b[3];}),
+    state:adaptiveMemory.get('irrigation')};
+};
+const firstRefusal=refusalTick(false);
+assert.deepEqual(firstRefusal.ids,[306],
+  'a pump start refused for its id must be resent once with the id the pump reported plus one');
+assert.equal(firstRefusal.state.pending.retried,true,'the resend must be marked as the single retry');
+assert.deepEqual(refusalTick(true).ids,[],'a second refusal must not resend again');
+
+// --- a start pressed before the sequence is idle ----------------------------
+assert(template.includes("state.phase === 'running' || !state.configured || !!state.check"),
+  'Start must be available in every phase except running');
+const startTick = (state, action) => {
+  adaptiveMemory.set('irrigation', state);
+  Date.now=()=>base;
+  new Function('msg','flow','node','env','Buffer','global',control)(action,adaptiveFlow,node,env,Buffer,globalCtx);
+  return adaptiveMemory.get('irrigation');
+};
+const teardown = extra => ({phase:'wait_field_close',phaseAt:base,selected:['valve1','valve2'],step:1,
+  notice:'',pending:null,pendingStart:null,
+  devices:{...commonDevices,valve1:{at:base,pcv_last_commanded:'open'},
+    valve2:{at:base,pcv_last_commanded:'open'},
+    pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}},
+  ...extra});
+
+// Queued, and the teardown in progress is left exactly as it was.
+const queued=startTick(teardown({}),{payload:{kind:'start',valve1:true}});
+assert.deepEqual(queued.pendingStart,['valve1'],'a start mid-teardown must be queued');
+assert.deepEqual(queued.selected,['valve1','valve2'],'queueing must not reshape the teardown in progress');
+assert.equal(queued.step,1,'queueing must not move the close pass');
+assert.equal(queued.phase,'wait_field_close','queueing must not start anything yet');
+
+// A refusal must not reshape it either, whether the selection is empty or the
+// safety conditions have moved since the operator pressed the button.
+const emptySel=startTick(teardown({}),{payload:{kind:'start',valve1:false,valve2:false}});
+assert.deepEqual(emptySel.selected,['valve1','valve2'],'an empty selection must not reshape the teardown');
+assert.equal(emptySel.notice,'Select at least one field valve');
+const notReady=startTick({...teardown({}),devices:{...teardown({}).devices,
+  water:{at:base,pressure_valid:false,depth_m:0.25}}},{payload:{kind:'start',valve1:true}});
+assert.deepEqual(notReady.selected,['valve1','valve2'],'a refused start must not reshape the teardown');
+assert.equal(notReady.step,1,'a refused start must not move the close pass');
+assert.equal(notReady.pendingStart,null,'a refused start must not be queued');
+
+// It fires when the field valves are closed, and close_main is never entered.
+const firing=startTick({...teardown({phase:'close_fields',step:-1,pendingStart:['valve1']}),
+  devices:{...teardown({}).devices,
+    main:{at:base,actuator_online:true,actuator_fault_code:0,overpressure:false,actual_angle_deg:0,valve_moving:false},
+    valve1:{at:base,pcv_last_commanded:'closed'},valve2:{at:base,pcv_last_commanded:'closed'}}},
+  {payload:{kind:'tick'}});
+assert.equal(firing.phase,'open_main','a queued start must divert to opening, never to close_main');
+assert.deepEqual(firing.selected,['valve1'],'the queued selection becomes the active one');
+assert.equal(firing.pendingStart,null,'the queued start is consumed once');
+// close_main is evaluated after close_fields in the same tick, so the diversion also
+// skips it; the next tick issues the main-valve command.
+assert.equal(startTick(firing,{payload:{kind:'tick'}}).phase,'wait_main_open',
+  'the queued start must open the main valve, not close it');
+
+// A start from fault retries the close pass, including the valve that failed.
+const fromFault=startTick(teardown({phase:'fault'}),{payload:{kind:'start',valve2:true}});
+assert.equal(fromFault.phase,'wait_field_close','a start from fault must retry the close pass');
+assert.deepEqual(fromFault.selected,['valve1','valve2'],'the fault retry closes both field valves');
+assert.deepEqual(fromFault.pendingStart,['valve2']);
+
+// A safety stop cancels a queued start, so the pump is not restarted behind it.
+const stopped=startTick({...teardown({phase:'running',runAt:base-14401000,pendingStart:['valve1']})},
+  {payload:{kind:'tick'}});
+assert.equal(stopped.pendingStart,null,'a safety stop must cancel a queued start');
+assert.notEqual(stopped.phase,'running','the safety stop must begin the teardown');
+assert.equal(stopped.stopReason,'Maximum watering duration reached');
+
+// --- the zone selection survives leaving the page ---------------------------
+const chosen=startTick(teardown({}),{payload:{kind:'select',valve1:false,valve2:true}});
+assert.deepEqual(chosen.selection,{valve1:false,valve2:true},
+  'the operator selection must be kept on the server so it survives navigation');
+const started=startTick(teardown({}),{payload:{kind:'start',valve1:true,valve2:false}});
+assert.deepEqual(started.selection,{valve1:true,valve2:false},
+  'a start must record the selection it was given');
+assert(template.includes("zoneSelected('valve1')")&&template.includes("zoneSelected('valve2')"),
+  'the checkboxes must read the server-side selection');
+assert(template.includes("kind:'select'"),'changing a checkbox must tell the server');
+if (/v-model="valve1"/.test(template)||/v-model="valve2"/.test(template)) {
+  c.fail('a component-local checkbox resets as soon as the page is left');
+}
+assert(template.includes('{{ runText }}'),
+  'the control panel must show which valves the current run is using');
+
+// --- a valve refused only for its id ----------------------------------------
+// Being refused for the id alone means the shared counter was behind the valve's own
+// view of it, which this refusal uplink has just corrected, so resend once. A
+// reported actuation failure is hardware and is never retried.
+const valveRefusal = (reason,retried) => {
+  globalMemory.set('cmd_next_id_valve1',5);
+  adaptiveMemory.set('irrigation',{phase:'wait_field_close',phaseAt:base,selected:['valve1'],step:0,
+    notice:'',pending:null,valveRetried:retried,
+    devices:{...commonDevices,
+      valve1:{at:base,pcv_last_commanded:'open',status_reason:reason,last_command_id:305},
+      pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}}});
+  Date.now=()=>base;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const downlinks=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  return {ids:downlinks.map(m=>JSON.parse(m.payload).object.command_id),
+    state:adaptiveMemory.get('irrigation')};
+};
+const idRefused=valveRefusal('invalid_command_rejected',null);
+assert.deepEqual(idRefused.ids,[306],
+  'a valve refused for its id must be resent once with the id it reported plus one');
+assert.equal(idRefused.state.valveRetried,'valve1','the resend must be marked so it happens once');
+assert.equal(idRefused.state.phase,'wait_field_close','an id refusal must not fault the sequence');
+assert.deepEqual(valveRefusal('invalid_command_rejected','valve1').ids,[],
+  'a second id refusal must not resend again');
+const hardwareFail=valveRefusal('pcv_actuation_failed',null);
+assert.deepEqual(hardwareFail.ids,[],'an actuation failure must not be retried');
+assert.equal(hardwareFail.state.phase,'fault','an actuation failure must still fault at once');
+
+// --- a report proves nothing until the valve echoes our command id ------------
+// In Class A the downlink lands in the RX window *after* an uplink, so the first report
+// after we send still carries the previous state. Only the echoed last_command_id shows
+// that the device has acted. Live, a stop pressed 10 s after an open skipped that valve
+// in the close pass and left it open while the panel claimed "valves closed".
+const valveRun = (state,action) => {
+  adaptiveMemory.set('irrigation',state); Date.now=()=>base;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)(action,adaptiveFlow,node,env,Buffer,globalCtx);
+  const downs=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  return {s:adaptiveMemory.get('irrigation'),
+    sent:downs.map(m=>{const b=JSON.parse(m.payload);return b.object?b.object.pcv+':'+b.object.command_id:'binary';})};
+};
+const pumpOff={at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false};
+const closingState = (valveCmd,valve2) => ({phase:'close_fields',phaseAt:base,selected:['valve1','valve2'],step:1,
+  notice:'',pending:null,pendingStart:null,valveCmd,valveRetried:null,
+  devices:{...commonDevices,valve1:{at:base,pcv_last_commanded:'open',last_command_id:53},
+    valve2:valve2,pump:pumpOff}});
+
+// The open is in flight: the valve still reports closed and has not echoed our id.
+globalMemory.set('cmd_next_id_valve2',100);
+const inFlightOpen=valveRun(closingState({valve2:21},{at:base,pcv_last_commanded:'closed',last_command_id:20}),
+  {payload:{kind:'tick'}});
+assert.equal(inFlightOpen.s.phase,'wait_field_close',
+  'a valve whose open is in flight must not be skipped by the close pass');
+assert.deepEqual(inFlightOpen.sent,['close:100'],
+  'the close pass must command that valve, or it is left open by the stop');
+// Echoed back, so it may be skipped.
+const acknowledged=valveRun(closingState({valve2:22},{at:base,pcv_last_commanded:'closed',last_command_id:22}),
+  {payload:{kind:'tick'}});
+assert.deepEqual(acknowledged.sent,[],'a valve that echoed our close must be skipped');
+assert.equal(acknowledged.s.step,0);
+
+// The mirror image: a close in flight must not be skipped by the open pass, or the pump
+// would be started against a valve that is closing.
+globalMemory.set('cmd_next_id_valve1',101);
+const closeInFlight=valveRun({phase:'open_fields',phaseAt:base,selected:['valve1'],step:0,notice:'',
+  pending:null,valveCmd:{valve1:54},
+  devices:{...commonDevices,valve1:{at:base,pcv_last_commanded:'open',last_command_id:53},pump:pumpOff}},
+  {payload:{kind:'tick'}});
+assert.equal(closeInFlight.s.phase,'wait_field_open',
+  'a valve whose close is in flight must not be skipped by the open pass');
+assert.deepEqual(closeInFlight.sent,['open:101'],'the open pass must command that valve');
+
+// A close is confirmed only by a report that echoes it.
+const waiting = echo => valveRun({phase:'wait_field_close',phaseAt:base,selected:['valve1'],step:0,notice:'',
+  pending:null,valveCmd:{valve1:56},
+  devices:{...commonDevices,valve1:{at:base,pcv_last_commanded:'closed',last_command_id:echo},pump:pumpOff}},
+  {payload:{kind:'tick'}});
+assert.equal(waiting(55).s.phase,'wait_field_close',
+  'a report that has not echoed the close must not confirm it');
+assert.equal(waiting(56).s.phase,'close_fields','a report echoing the close must confirm it');
+
 Date.now=realNow;
 console.log('Irrigation sequence smoke test passed');

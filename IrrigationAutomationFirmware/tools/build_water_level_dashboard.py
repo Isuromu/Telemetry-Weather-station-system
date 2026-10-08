@@ -23,7 +23,10 @@ import pathlib
 
 from water_level_interval import FLOOR_SECONDS, MULTIPLIER, stale_after_seconds
 
-TAB = "sc_wl_tab"
+# The tab id is NOT builder-minted, for the same reason UI_GROUP/UI_PAGE are not:
+# it must name the "Water Level Node" tab the workspace already owns. Ship a made-up
+# id here and every import spawns a second, identical tab beside the real one.
+TAB = "e618dcf23e3fb563"    # workspace tab "Water Level Node"
 FLOW_GROUP = "sc_wl_group_flow"
 # These three are NOT builder-minted ids. They must match the page and groups
 # the workspace already owns, because Node-RED reuses a config node whose id it
@@ -57,8 +60,8 @@ if (!/^[a-f0-9-]{36}$/.test(app) || !/^[a-f0-9]{16}$/.test(eui)) {
 const topic = 'application/' + app + '/device/' + eui + '/event/+';
 state.config_error = '';
 flow.set('water_state', state);
-if (context.get('topic') === topic) return [null, null];
-context.set('topic', topic);
+// No context guard: it would survive a redeploy, match, and leave the mqtt in
+// node unsubscribed. The once-per-deploy inject already handles idempotence.
 node.status({fill:'green',shape:'dot',text:topic});
 return [{action:'subscribe', topic:topic, qos:0}, {payload:{kind:'state', state:state}}];"""
 
@@ -394,10 +397,10 @@ def chart(chart_id, name, label, order, x, y):
     }
 
 
-# No "tab" node on purpose, matching MainValve and PumpControl. The nodes still
-# carry z = TAB, but because that id is absent from the file Node-RED's import
-# dialog retargets them into whichever existing flow you pick. Shipping a tab
-# node instead makes every import create a second, identical tab.
+# No "tab" node on purpose, matching MainValve and PumpControl: shipping one makes
+# every import create a second, identical tab. The nodes carry z = TAB instead, and
+# TAB above names the tab the workspace already has, so an import places them
+# inside it.
 nodes = [
     {
         "id": FLOW_GROUP,
@@ -438,7 +441,11 @@ nodes = [
         "g": FLOW_GROUP,
         "name": "Refresh subscription",
         "props": [{"p": "payload"}],
-        "repeat": "30",
+        # Once per deploy only. A repeat here would re-subscribe on a timer for
+        # no gain: the card is already refreshed every 15 s by sc_wl_stale, which
+        # re-emits the same {kind:"state"} payload, and the convention test forbids
+        # a repeating subscribe inject.
+        "repeat": "",
         "crontab": "",
         "once": True,
         "onceDelay": "1",

@@ -162,7 +162,12 @@ NODES = [{'id': '1a3af649fb7e41e9',
             '84e13bd54cdbbc93',
             'b5dc490b4b627d4d',
             '3e2d92b9b9c64485',
-            '1d3690f33fd9d797'],
+            '1d3690f33fd9d797',
+            # The subscription plumbing is tagged into this group, so it must be
+            # listed here as well: group.nodes and a node's own g have to agree,
+            # and tools/test_nodered_flows.js asserts exactly that.
+            'mv_subscribe_tick',
+            'mv_subscribe'],
   'x': 94,
   'y': 19,
   'w': 1412,
@@ -205,8 +210,8 @@ NODES = [{'id': '1a3af649fb7e41e9',
           "const topic = 'application/' + app + '/device/' + eui + '/event/+';\n"
           "state.ui_error = '';\n"
           "flow.set('mv_state', state);\n"
-          "if (context.get('topic') === topic) return [null, null];\n"
-          "context.set('topic', topic);\n"
+          '// No context guard: it would survive a redeploy, match, and leave the\n'
+          '// mqtt in node unsubscribed. The once-per-deploy inject handles idempotence.\n'
           "node.status({fill:'green',shape:'dot',text:topic});\n"
           "return [{action:'subscribe', topic:topic, qos:0}, snapshot];",
   'outputs': 2,
@@ -480,11 +485,15 @@ NODES = [{'id': '1a3af649fb7e41e9',
           "  if (flow.get('mv_pending') || s.queue_paused || queue.length === 0) return [null,snapshot()];\n"
           '  const next = queue.shift();\n'
           "  flow.set('mv_queue', queue);\n"
-          "  let id = flow.get('mv_next_id');\n"
-          '  if (!Number.isInteger(id) || id < 0 || id > 65534) id = (Number(s.last_command_id) + 1) % '
-          '65535;\n'
-          '  if (id === Number(s.last_command_id)) id = (id + 1) % 65535;\n'
-          "  flow.set('mv_next_id', (id + 1) % 65535);\n"
+          "  // One counter per device, in global context, shared with the integrated\n"
+          "  // dashboard: MainValve refuses an id it has already taken.\n"
+          "  let id = global.get('cmd_next_id_main');\n"
+          "  const last = s.last_command_id == null ? null : Number(s.last_command_id);\n"
+          "  const usable = Number.isInteger(id) && id >= 0 && id <= 65534;\n"
+          "  const ahead = last !== null && ((id - last + 65535) % 65535) !== 0 &&\n"
+          "    ((id - last + 65535) % 65535) < 32768;\n"
+          "  if (!usable || (last !== null && !ahead)) id = last === null ? 1 : (last + 1) % 65535;\n"
+          "  global.set('cmd_next_id_main', (id + 1) % 65535);\n"
           '  const angle10 = Math.round(next.angle_deg * 10);\n'
           '  const bytes = Buffer.from([1,1,angle10 >> 8,angle10 & 255,id >> 8,id & 255]);\n'
           "  flow.set('mv_pending',{id,angle_deg:angle10 / 10,queue_id:next.queue_id,queued_at:new "
