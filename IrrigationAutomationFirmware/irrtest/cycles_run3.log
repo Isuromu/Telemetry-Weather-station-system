@@ -1,0 +1,43 @@
+15:49:43 page ready on /dashboard/irrigation
+15:49:43 check=''
+15:49:44 reservoir before: 49 cm
+
+15:49:44 ===== CYCLE 1 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=360 run=stopped comm=True cfg=True)
+   15:49:46 CLICK Start on /dashboard/irrigation
+   15:49:46 idle               notice='Watering stopped; valves closed' pending=None
+   15:49:47 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 69, 'at': 1791456586296, 'retried': False}
+   15:50:10 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   15:50:23 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   15:50:24 open_fields        notice='valve2: open sent; awaiting device result' pending=None
+   15:50:27 wait_pump_start    notice='pump: start sent; awaiting device result' pending={'device': 'pump', 'op': 'start', 'id': 361, 'at': 1791456626255, 'retried': False}
+   15:50:32 wait_pump_start    notice='Pump start accepted; waiting for final VFD condition' pending={'device': 'pump', 'op': 'start', 'id': 361, 'at': 1791456626255, 'retried': False}
+   15:50:40 running            notice='Watering' pending=None
+   15:50:40 RUNNING after 54 s
+   15:51:00 CLICK Stop
+   15:51:00   wait_pump_stop entered
+   15:51:15   wait_pump_stop left after 15 s
+   15:51:52 IDLE  teardown=52 s  pump_stop=15 s  notice='Watering stopped; valves closed'
+
+15:51:57 ===== CYCLE 2 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=362 run=stopped comm=True cfg=True)
+   15:51:58 CLICK Start on /dashboard/irrigation
+   15:51:58 idle               notice='Watering stopped; valves closed' pending=None
+   15:51:59 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 71, 'at': 1791456718872, 'retried': False}
+   15:52:23 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   15:52:34 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   15:52:40 open_fields        notice='valve2: open sent; awaiting device result' pending=None
+   15:52:43 wait_pump_start    notice='pump: start sent; awaiting device result' pending={'device': 'pump', 'op': 'start', 'id': 363, 'at': 1791456763627, 'retried': False}
+   15:52:47 wait_pump_start    notice='Pump start accepted; waiting for final VFD condition' pending={'device': 'pump', 'op': 'start', 'id': 363, 'at': 1791456763627, 'retried': False}
+   15:52:59 running            notice='Watering' pending=None
+   15:52:59 RUNNING after 60 s
+   15:53:19 CLICK Stop
+   15:53:19   wait_pump_stop entered
+   15:53:32   wait_pump_stop left after 13 s
+   15:54:09 IDLE  teardown=51 s  pump_stop=13 s  notice='Watering stopped; valves closed'
+
+15:54:14 ================= TALLY =================
+cycle  start_s   pump_stop_s teardown_s  fault     level cm
+1      54        15          52          None      49 -> 48.5
+2      60        13          51          None      48.5 -> 48.4
+wrote irrtest/cycles_run3.json

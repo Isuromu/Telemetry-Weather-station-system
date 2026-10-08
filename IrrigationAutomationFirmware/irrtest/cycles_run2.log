@@ -1,0 +1,29 @@
+15:44:01 page ready on /dashboard/irrigation
+15:44:01 check=''
+15:44:01 reservoir before: 49.2 cm
+
+15:44:01 ===== CYCLE 1 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=358 run=stopped comm=True cfg=True)
+   15:44:01 CLICK Start on /dashboard/irrigation
+   15:44:01 idle               notice='Watering stopped; valves closed' pending=None
+   15:44:03 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 67, 'at': 1791456242189, 'retried': False}
+   15:44:26 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   15:44:29 open_fields        notice='valve1: open sent; awaiting device result' pending=None
+   15:44:31 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   15:44:38 open_fields        notice='valve2: open sent; awaiting device result' pending=None
+   15:44:39 wait_pump_start    notice='pump: start sent; awaiting device result' pending={'device': 'pump', 'op': 'start', 'id': 359, 'at': 1791456278606, 'retried': False}
+   15:44:43 wait_pump_start    notice='Pump start accepted; waiting for final VFD condition' pending={'device': 'pump', 'op': 'start', 'id': 359, 'at': 1791456278606, 'retried': False}
+   15:44:51 running            notice='Watering' pending=None
+   15:44:51 RUNNING after 50 s
+   15:45:11 CLICK Stop
+   15:45:11   wait_pump_stop entered
+   15:45:28   wait_pump_stop left after 16 s
+   15:46:00 IDLE  teardown=49 s  pump_stop=16 s  notice='Watering stopped; valves closed'
+Traceback (most recent call last):
+  File "irrtest/run_click_cycle.py", line 170, in <module>
+    main()
+  File "irrtest/run_click_cycle.py", line 146, in main
+    r = run_cycle(ch, i, a.water, lvl)
+  File "irrtest/run_click_cycle.py", line 107, in run_cycle
+    level_after = level_now()
+NameError: name 'level_now' is not defined

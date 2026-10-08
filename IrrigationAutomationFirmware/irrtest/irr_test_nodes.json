@@ -1,0 +1,53 @@
+[
+  {
+    "id": "irr_test_in",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "name": "irr-test control",
+    "url": "/irr-test/:action",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 500,
+    "wires": [
+      [
+        "irr_test_fn"
+      ]
+    ]
+  },
+  {
+    "id": "irr_test_fn",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "name": "build irrigation control msg",
+    "func": "const a = msg.req.params.action;\nconst b = msg.payload || {};\nif (a === 'start') msg.payload = {kind:'start', valve1:b.valve1 === true, valve2:b.valve2 === true};\nelse if (a === 'stop') msg.payload = {kind:'stop'};\nelse if (a === 'tick') msg.payload = {kind:'tick'};\nelse { msg.statusCode = 400; msg.payload = {error:'action must be start, stop or tick'}; return [null, msg]; }\nreturn [msg, msg];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 460,
+    "y": 500,
+    "wires": [
+      [
+        "1406698c9cd792c5"
+      ],
+      [
+        "irr_test_resp"
+      ]
+    ]
+  },
+  {
+    "id": "irr_test_resp",
+    "type": "http response",
+    "z": "irrigation_single_page",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 720,
+    "y": 560,
+    "wires": []
+  }
+]

@@ -1,0 +1,61 @@
+17:11:55 page ready on /dashboard/irrigation
+17:11:55 check=''
+17:11:55 reservoir before: 47.9 cm
+
+17:11:55 ===== CYCLE 1 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=364 run=stopped comm=True cfg=True)
+   17:11:55 CLICK Start on /dashboard/irrigation
+   17:11:55 idle               notice='Watering stopped; valves closed' pending=None
+   17:11:56 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 73, 'at': 1791461515770, 'retried': False}
+   17:12:22 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   17:12:27 open_fields        notice='valve1: open sent; awaiting device result' pending=None
+   17:12:29 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   17:12:34 open_fields        notice='valve2: open sent; awaiting device result' pending=None
+   17:12:35 wait_pump_start    notice='pump: start sent; awaiting device result' pending={'device': 'pump', 'op': 'start', 'id': 365, 'at': 1791461554110, 'retried': False}
+   17:12:36 wait_pump_start    notice='Pump start accepted; waiting for final VFD condition' pending={'device': 'pump', 'op': 'start', 'id': 365, 'at': 1791461554110, 'retried': False}
+   17:12:47 running            notice='Watering' pending=None
+   17:12:47 RUNNING after 52 s
+   17:13:07 CLICK Stop
+   17:13:07   wait_pump_stop entered
+   17:13:23   wait_pump_stop left after 16 s
+   17:13:58 IDLE  teardown=51 s  pump_stop=16 s  notice='Watering stopped; valves closed'
+
+17:14:03 ===== CYCLE 2 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=366 run=stopped comm=True cfg=True)
+   17:14:03 CLICK Start on /dashboard/irrigation
+   17:14:03 idle               notice='Watering stopped; valves closed' pending=None
+   17:14:05 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 75, 'at': 1791461644001, 'retried': False}
+   17:14:27 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   17:14:40 open_fields        notice='valve1: open sent; awaiting device result' pending=None
+   17:14:48 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   17:14:52 wait_pump_start    notice='pump: start sent; awaiting device result' pending={'device': 'pump', 'op': 'start', 'id': 367, 'at': 1791461692124, 'retried': False}
+   17:15:05 running            notice='Watering' pending=None
+   17:15:05 RUNNING after 62 s
+   17:15:25 CLICK Stop
+   17:15:26   wait_pump_stop entered
+   17:15:39   wait_pump_stop left after 14 s
+   17:16:29 IDLE  teardown=63 s  pump_stop=14 s  notice='Watering stopped; valves closed'
+
+17:16:34 ===== CYCLE 3 ===== water 20 s =====
+   pre: phase=idle check='' pump(id=368 run=stopped comm=True cfg=True)
+   17:16:34 CLICK Start on /dashboard/irrigation
+   17:16:34 idle               notice='Watering stopped; valves closed' pending=None
+   17:16:36 wait_main_open     notice='main: open sent; awaiting device result' pending={'device': 'main', 'op': 'open', 'id': 77, 'at': 1791461794226, 'retried': False}
+   17:16:59 wait_field_open    notice='valve1: open sent; awaiting device result' pending=None
+   17:17:08 open_fields        notice='valve1: open sent; awaiting device result' pending=None
+   17:17:09 wait_field_open    notice='valve2: open sent; awaiting device result' pending=None
+   17:17:22 open_fields        notice='valve2: open sent; awaiting device result' pending=None
+   17:17:30 wait_pump_start    notice='Pump start accepted; waiting for final VFD condition' pending={'device': 'pump', 'op': 'start', 'id': 369, 'at': 1791461844120, 'retried': False}
+   17:17:38 running            notice='Watering' pending=None
+   17:17:38 RUNNING after 64 s
+   17:17:58 CLICK Stop
+   17:17:59   wait_pump_stop entered
+   17:18:13   wait_pump_stop left after 14 s
+   17:18:53 IDLE  teardown=56 s  pump_stop=14 s  notice='Watering stopped; valves closed'
+
+17:18:58 ================= TALLY =================
+cycle  start_s   pump_stop_s teardown_s  fault     level cm
+1      52        16          51          None      47.9 -> 47.4
+2      62        14          63          None      47.4 -> 47.5
+3      64        14          56          None      47.5 -> 47.3
+wrote irrtest/cycles_run4.json

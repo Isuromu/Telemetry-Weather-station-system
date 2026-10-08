@@ -12,3 +12,12 @@ config/PumpControlLoRaSecrets.h
 /tools/USB_RS485_Sensor_Tool_v0_9_2/USB_RS485_Sensor_Tool/__pycache__/
 /.codex/
 /tmp/
+
+# Local dashboard test harness artifacts. The captures carry the real ChirpStack
+# application UUID and every DevEUI, so they must stay out of git; the harness
+# code beside them is tracked. See docs/NODERED_DASHBOARD_WORKFLOW.md.
+/irrtest/mqtt*.log
+/irrtest/t.log
+/irrtest/deployed_flows_backup_*.json
+/irrtest/shot_*.png
+/irrtest/__pycache__/

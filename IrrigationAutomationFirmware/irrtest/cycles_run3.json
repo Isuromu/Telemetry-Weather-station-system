@@ -1,0 +1,26 @@
+[
+  {
+    "cycle": 1,
+    "result": "idle",
+    "start_s": 54,
+    "pump_stop_s": 15,
+    "teardown_s": 52,
+    "fault": null,
+    "notice": "Watering stopped; valves closed",
+    "pump_id": 362,
+    "level_cm_before": 49,
+    "level_cm_after": 48.5
+  },
+  {
+    "cycle": 2,
+    "result": "idle",
+    "start_s": 60,
+    "pump_stop_s": 13,
+    "teardown_s": 51,
+    "fault": null,
+    "notice": "Watering stopped; valves closed",
+    "pump_id": 364,
+    "level_cm_before": 48.5,
+    "level_cm_after": 48.4
+  }
+]
