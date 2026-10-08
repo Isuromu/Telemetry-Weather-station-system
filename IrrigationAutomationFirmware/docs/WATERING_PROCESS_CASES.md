@@ -161,28 +161,42 @@ enter a fault-watch state after an unconfirmed CLOSE.
 | WaterLevel uplink missing or measurement invalid | Water data becomes stale after 60 s on the 10 s bench build, or 1,800 s after the 900 s field setting. | Start is refused; a running sequence stops. | No live sleep update exists. Keep its configured period; a faster diagnostic period requires a rebuild/configuration change. | Check sensor power, RS485, OTAA/join, and the depth reading before restarting. |
 | Soil telemetry missing or invalid | Dashboard freshness limit is 1,200 s; invalid payload clears `sensor_valid`. | Start is refused; a running sequence stops. | Current firmware keeps its stored sleep. A valid Class A command can set SoilNode to a proposed 60 s diagnostic interval, then return it to 600 s after recovery. | Check switched sensor power, RS485 response and probe condition. |
 | MainValve does not move, reports busy/fault, or times out | Actuator reports movement/fault, named in the notice; firmware movement timeout is 180 s and dashboard command timeout is 300 s. | Pump is never started, or the running sequence starts shutdown. | MainValve is awake and reports at least every 60 s; it has no deep sleep. | Inspect actuator, RS485 mode, local override, target angle and pressure interlock. |
-| MainValve refuses a command (`rejected`) | The refusal names the command it answers in `reported_command_id`; the sequencer acts only on that. A reused command id is resent once; a pressure interlock, a busy actuator or an actuator fault is not retried. | The shutdown path runs, and the notice names the reported reason (`Main valve open failed: actuator_busy`, `Main valve close failed: pressure_interlock`). | Stale or unattributable phases are ignored, so the deadlines below are what remains. | Act on the reason: an interlock is physics, a busy actuator means a movement was still in flight, an actuator fault needs the actuator. |
+| MainValve refuses a command (`rejected`) | The refusal names the command it answers in `reported_command_id`; the sequencer acts only on that. A reused command id is resent once. `actuator_busy` means a movement was already in flight, so the sequence waits for it to end and then decides again. A pressure interlock or an actuator fault is not retried. | The shutdown path runs and the notice names the reason (`Main valve close failed: pressure_interlock`); a busy valve shows `Main valve busy; waiting for its movement to finish` and no fault. | The wait is bounded by the 300 s command deadline, which clears the firmware's 180 s movement timeout, so a movement that never ends still faults. | Act on the reason: an interlock is physics, an actuator fault needs the actuator, and a busy valve only needs waiting. |
+| MainValve never answers a command | No correlated report and the refusal event was lost — the heartbeat after it carries the *last* event's phase and id, not a repeat of the refusal. The angle is measured position, so the wait is also judged on state: fresh, still, and not at the requested angle means the command never landed. One repeat goes out at 150 s (half the deadline). | The notice reads `Main valve close unconfirmed; repeating once` and the sequence continues; a second silence faults at 300 s as before. | The repeat is bounded by the same 300 s deadline. | A repeat that also goes unanswered is a radio or actuator fault to diagnose; the earlier notice says which of the two happened. |
 | MainValve pressure is invalid | The current remote-move setting does **not** require valid pressure. | Dashboard does not block solely on invalid pressure unless another main-valve field is bad. | Awake; 60 s heartbeat. | Treat this as a safety gap: validate and enable the required pressure interlock before relying on unattended pressure protection. |
 | MainValve overpressure | MainValve reports `overpressure`; the sequencer detects it. | Start is refused, or the pump-stop sequence begins. | Awake; 60 s heartbeat, plus status events. | Do not simply retry the close command. The firmware currently rejects movement that closes farther during upstream overpressure; after the pump is confirmed stopped, inspect whether that rule also prevents the required final close. |
 | Pump start is not confirmed | Matching command ID never reaches final VFD running state within 150 s. | The sequencer runs the shutdown path; it does not retry Start automatically. | Pump stays awake. It reports every 15 s if running, otherwise every 60 s. | Check VFD fault, Modbus link, armed frequency and pump hydraulics. |
 | Pump stop is not confirmed | No matching final stopped state within 150 s. | Dashboard sends one software `estop`. If that is not confirmed, it enters fault and deliberately leaves valves open. | Pump stays awake; use the 15 s running heartbeat while it may still run. | Treat as an emergency inspection. A network `estop` is not a physical emergency-stop circuit. |
-| Field-valve OPEN command is not acknowledged | No matching field-valve status within 120 s (`fieldValveCommandTimeoutSec`). | Pump is not started; shutdown is requested. | If the valve had reported OPEN, it is already at 15 s. If it remained CLOSED/unknown, current cadence may be the configured closed interval. | Check Class A downlink queue, OTAA session, battery, pulse circuit, polarity and solenoid. Do not resend repeatedly with new IDs without inspection. |
+| Field-valve OPEN command is not acknowledged | The valve echoes no id at all: one repeat of the same command goes out at 60 s (half `fieldValveCommandTimeoutSec`), and silence past 120 s faults. | Pump is not started; shutdown is requested. | If the valve had reported OPEN, it is already at 15 s. If it remained CLOSED/unknown, current cadence may be the configured closed interval. | Check Class A downlink queue, OTAA session, battery, pulse circuit, polarity and solenoid. The fault names what the valve last reported, so read that before resending anything further. |
 | Field valve is broken, stuck closed, or closes unexpectedly while commanded OPEN | **Not reliably detectable now.** A PCV can report `open` after a successful pulse even if its mechanism did not move. valve_2 has no flow meter. | The sequence can continue until another condition stops it or the four-hour limit expires. | valve_1/2 report every 15 s only because their last command is OPEN; this is telemetry, not proof of flow. | This is the principal unattended-watering gap. Add proven valve-position feedback or a commissioned per-zone flow/pressure interlock before treating this case as safe. |
-| Field-valve CLOSE command is unconfirmed | No matching status within 120 s (`fieldValveCommandTimeoutSec`). | Dashboard enters fault after the pump stop has been confirmed; MainValve is not closed automatically. **Deliberate, confirmed as a policy choice on 2026-10-07, not an oversight.** | Current CLOSE state can fall back to 60 s field cadence. A future fault-watch state should hold 15 s for up to the existing 120 s timeout. | Inspect the physical valve and water path. Do not assume a reported CLOSE stopped flow. |
+| Field-valve CLOSE command is unconfirmed | The valve echoes no id at all: one repeat of the same command goes out at 60 s (half `fieldValveCommandTimeoutSec`), and silence past 120 s faults. | Dashboard enters fault after the pump stop has been confirmed; MainValve is not closed automatically. **The no-repeat policy of 2026-10-07 is amended: one same-id repeat, then the detector stands. Confirmed by the operator 2026-10-08 after a live stalled close.** | Current CLOSE state can fall back to 60 s field cadence. A future fault-watch state should hold 15 s for up to the existing 120 s timeout. | Inspect the physical valve and water path. Do not assume a reported CLOSE stopped flow. |
 
 Two notes on that row, added after testing on 2026-10-07. First, the fault
 leaves the main valve open — observed live as `main 90°, valve1 open, pump
 stopped, phase fault`. No water can flow because the pump is already confirmed
 stopped, but the supply stays connected to a field valve whose state is unknown,
 and the fault is terminal until an operator stops. Change that behaviour only as
-a conscious policy change. Second, the sequence does **not** retry a field-valve
-command that goes unanswered; the timeout is a failure detector, as the pointer
-table says. A downlink that is published but never applied therefore costs the
-whole timeout and ends in this fault. That was seen twice on 2026-10-07 (one
-main-valve open, one field-valve close), and in the second case re-issuing the
-same close was confirmed by the device within five seconds. Treat a lost downlink
-as a device or radio-side fault to be diagnosed there, not as something the
-dashboard should paper over.
+a conscious policy change. Second, a field-valve command that goes unanswered is
+repeated **once, with the same command id**, at half the deadline; the timeout is
+still the failure detector and the fault still ends the sequence. A downlink
+that is published but never applied therefore costs at most the repeat plus the
+remaining wait. That was seen twice on 2026-10-07 (one main-valve open, one
+field-valve close), and in the second case re-issuing the same close was
+confirmed by the device within five seconds — which is where this repeat comes
+from. The same id matters: a PCV accepts an identical repeat as a duplicate
+instead of pulsing the solenoid again, and it reports the id it holds either way,
+so a close that landed but was never reported confirms on the repeat, while a
+close that was lost is simply applied. MainValve gets the same single repeat, on
+the same half-deadline rule, with a fresh id and judged on its measured angle
+instead of an echo: its refusal is a one-shot event, so one lost uplink otherwise
+left a run waiting on an answer that could not come — observed live on
+2026-10-08 with the valve idle at 90°, the refusal's uplink lost, and the run
+recovering only when the repeat landed. A lost downlink is still a device or
+radio-side fault to diagnose; the field-valve fault message now carries what the
+valve last reported (`echo <id> of <sent>, <last state>, <age> quiet`) so that
+diagnosis starts from evidence. This amends the 2026-10-07 "never retry a
+field-valve command" choice at the operator's request on 2026-10-08, after a
+stopped run sat unconfirmed for the full 120 s.
 
 A third note, added 2026-10-08 after those two events were reproduced off-line.
 MainValve repeats the phase and reason of its last status *event* in every later
@@ -201,6 +215,148 @@ the dashboard; the MainValve card had the same guard already.
 | valve_1 flow missing, zero, or TUF error bits present during a run | valve_1 telemetry provides flow, velocity and TUF errors. | The current sequencer does **not** use a minimum-flow interlock. | valve_1 remains at 15 s while commanded OPEN. | Use the data diagnostically now. Implement a commissioned minimum-flow/time-after-pump-start interlock before using it to stop runs automatically. |
 | Radio/OTAA failure on a Class A node | Missing uplinks; a queued downlink cannot reach a sleeping node until its next uplink. | Dashboard marks the node stale and fails closed for Start; a running sequence starts shutdown when its required telemetry becomes stale. | The node continues its stored timer sleep. No dashboard command can reduce it until the node rejoins and opens RX1/RX2. | Diagnose power, credentials, nonce storage, gateway coverage and ChirpStack queue. |
 | Node reboot or last PCV state unknown | Latching PCV starts with physical position unknown after reset. | Firmware sends no pulse at boot. Dashboard must wait for fresh telemetry. | Normal current interval resumes; a device that last reported OPEN gets the 15 s cadence only if that state was retained. | Inspect a field valve before resuming an interrupted watering run. |
+
+## Case progress charts
+
+One chart per case, left to right. Every arrow carries the condition that lets the
+sequence move on — that condition *is* the check, and it is the only thing standing
+between a healthy run and a fault. Times are the current source settings, not
+measurements. Every `wait_*` node is a place the sequence can look idle; each has a
+deadline that ends it, and no wait can hang (the bounded-exit matrix in
+`examples/IntegratedDashboard/README.md` proves that in-process for every one of them).
+
+### Case 1 — normal run and stop
+
+```mermaid
+flowchart LR
+  A[Start<br/>5 gates] -->|all pass| B[main open sent]
+  B -->|angle 90, still, online, no fault| C[valve1 open sent]
+  C -->|echo of the id we sent, state open| D[valve2 open sent]
+  D -->|echo, open| E[frequency 25.00 Hz]
+  E -->|frequency armed| F[pump start]
+  F -->|VFD reports running| G[RUNNING]
+  G -->|Stop, limit, or stale telemetry| H[pump stop]
+  H -->|fresh stopped report| I[valve2 close]
+  I -->|echo, closed| J[valve1 close]
+  J -->|echo, closed| K[main close]
+  K -->|angle 0, still| L[IDLE]
+```
+
+Measured live 2026-10-08: start 47–60 s (the main valve alone travels ~23 s), teardown
+53–55 s of which the pump stop is 14–16 s.
+
+### Case 2 — Stop while the main valve is still opening
+
+```mermaid
+flowchart LR
+  A[RUNNING request: main open sent] -->|operator presses Stop| B[pump stop<br/>already stopped]
+  B -->|fresh stopped report| C[field valves: nothing to close]
+  C --> D[main close sent]
+  D -->|the valve is mid-movement: it refuses with actuator_busy| E[wait: Main valve busy;<br/>waiting for its movement to finish]
+  E -->|its own report shows movement ended| F[close_main decides again]
+  F -->|angle 90, so not closed| G[main close sent]
+  G -->|angle 0, still| H[IDLE]
+  E -->|movement never ends: 300 s| I[FAULT<br/>Main valve close failed: actuator_busy]
+```
+
+Confirmed live: refusal at +16 s, movement ended +8 s later, idle at +53 s, no fault.
+The wait is held in sequencer state, not in the device's phase field, because the
+movement's own `finished` event replaces the refusal in the status payload.
+
+### Case 3 — MainValve refuses with hardware or physics behind it
+
+```mermaid
+flowchart LR
+  A[main close sent] -->|refusal names our command id| B{reason}
+  B -->|invalid_command<br/>id collision| C[resend once with a fresh id]
+  B -->|pressure_interlock| D[FAULT<br/>Main valve close failed: pressure_interlock]
+  B -->|actuator_fault| D2[FAULT<br/>Main valve open failed: actuator_fault]
+  B -->|actuator_busy| E[wait for the movement to end, then decide again]
+```
+
+Only `invalid_command` is retried: the refusal uplink carries the id the device holds,
+so the shared counter catches up. The others are physics or hardware and are named
+instead of being papered over.
+
+### Case 4 — MainValve never answers (the case that keeps biting)
+
+```mermaid
+flowchart LR
+  A[main close sent<br/>id N] -->|no report echoes N| B{what the heartbeats say}
+  B -->|fresh, still, not at the target| C[still not answered at +150 s:<br/>repeat the close once, fresh id]
+  C -->|no report echoes the repeat| D[300 s: FAULT<br/>Main valve close unconfirmed;<br/>inspect system]
+  B -->|fresh, still, already at the target| E[no repeat needed,<br/>but nothing echoes N either]
+  E --> D
+  A -.->|downlink lost OR its answer lost<br/>the heartbeat cannot tell these apart| B
+```
+
+**This is the open one.** The refusal and the acceptance are both one-shot *events*; the
+heartbeat after them carries the last event's phase and id instead of repeating it, so a
+lost uplink loses the answer for good. Live 2026-10-08, twice: close 103 refused `busy`
+with its refusal lost (recovered by the repeat), and close 112 with no answer at all,
+valve idle at 90°, ending in the fault above. Whether the device received the close is
+**not decidable from the dashboard** — the device's serial log, or a capture of
+`application/.../command/down`, is the only way to tell "downlink lost" from "answer
+lost". That is what to check next.
+
+### Case 5 — field valve never answers
+
+```mermaid
+flowchart LR
+  A[valve close sent<br/>id N] -->|no report echoes N| B[fresh reports keep arriving]
+  B -->|silent to +60 s| C[resend the SAME id:<br/>a duplicate is ignored, not re-pulsed]
+  C -->|report echoes N| D[close confirmed]
+  C -->|still silent at +120 s| E[FAULT<br/>Field valve close unconfirmed: valve2<br/>echo 72 of 73, open, 41 s quiet]
+```
+
+The same id is deliberate: a PCV accepts an identical repeat as a duplicate instead of
+pulsing the solenoid again, and it echoes the id it holds either way — so a close that
+landed but was never reported confirms on the repeat, while a lost one is applied.
+Confirmed live: "resent once" at 19:12:44, closed 6 s later.
+
+### Case 6 — field valve reports a refusal
+
+```mermaid
+flowchart LR
+  A[valve close sent] -->|report names it: invalid_command_rejected| B[resend once, fresh id]
+  A -->|report names it: pcv_actuation_failed| C[FAULT<br/>Field valve close failed: valve1 reported pcv_actuation_failed]
+  A -->|report arrives before our resend| D[ignored: it cannot be the answer to the resend]
+```
+
+### Case 7 — pump stop not confirmed
+
+```mermaid
+flowchart LR
+  A[pump stop sent] -->|fresh stopped report| B[close the field valves]
+  A -->|nothing at +150 s| C[software estop sent]
+  C -->|fresh stopped report| B
+  C -->|nothing again at +300 s| D[FAULT<br/>Pump stop unconfirmed.<br/>Valves left open; inspect pump.]
+```
+
+Observed live: 14–16 s normally; one run took the full 150 s and escalated to `estop`
+before the teardown continued. That is the pump being slow, not the dashboard.
+
+### Case 8 — Start after a fault
+
+```mermaid
+flowchart LR
+  A[FAULT, main valve maybe open] -->|operator presses Start| B[queue the asked-for valves,<br/>select BOTH valves for the close pass]
+  B --> C[close both field valves]
+  C -->|confirmed| D[close the main valve]
+  D -->|angle 0| E[open the queued set]
+  E --> F[normal run]
+  C -->|not confirmed| G[FAULT again,<br/>with the new evidence in the notice]
+```
+
+### Where each case can stall, and what ends it
+
+| Wait | Waits for | Deadline | When the deadline passes |
+| --- | --- | --- | --- |
+| `wait_main_open` / `wait_main_close` | main valve saying it reached the angle | 300 s | repeat once at 150 s, then fault and name it |
+| `wait_field_open` / `wait_field_close` | the valve echoing our id | 120 s | repeat the same id at 60 s, then fault with the valve's last report |
+| `wait_frequency` | frequency armed | 150 s | stop the start, or shutdown if already running |
+| `wait_pump_start` | VFD reporting running | 150 s | shutdown, do not retry the start |
+| `wait_pump_stop` | a fresh stopped report | 150 s | one software `estop`, then fault with the valves left open |
 
 ## Fault-time policy to add before unattended operation
 
@@ -259,15 +415,17 @@ interval cannot be changed remotely.
    `enterDeepSleep` a seconds parameter and pass the join-retry interval when
    the cycle did not complete a join plus uplink. The successful path is
    unaffected.
-7. **A MainValve still moving when the next command arrives stops the start
-   instead of waiting.** The firmware refuses any command while its movement is
-   active (`actuator_busy`), including the open that begins a new run. The
-   dashboard now stops with `Main valve open failed: actuator_busy` rather than
-   mistaking it for a movement failure, which is safe (the pump is never
-   started) but is not the smoothest operation: the firmware's movement timeout
-   is 180 s and the dashboard's is 300 s, so waiting for the movement to end
-   would also fit inside the existing budget. Unverified on hardware — the
-   observed failures were the stale-phase reads above, not a live busy refusal.
+7. **A MainValve still moving when the next command arrives** (fixed 2026-10-08,
+   confirmed live). The firmware runs one movement at a time and refuses any
+   command that arrives while one is active (`actuator_busy`), so pressing Stop
+   while the main valve was opening refused the close and faulted with the valve
+   left open — the case an operator hit on 2026-10-08. The sequence now waits for
+   the valve's own report to show the movement finished (its 180 s movement
+   timeout fits inside the 300 s deadline), then re-enters `close_main` /
+   `open_main`: the valve is closed if it reached its target angle, or held there
+   if the wait was for an open. Residual: a movement that never ends — a valve
+   stuck part-way — is still a fault, now bounded at 300 s and named
+   `Main valve close failed: actuator_busy`.
 
 ## Source basis
 

@@ -117,13 +117,23 @@ node off that assumption and this limit has to be raised to match.
 `fieldValveCommandTimeoutSec` (120 s) carries that same assumption, for the same
 reason: an open command waits for the node's next wake, so the deadline has to
 clear the interval the node is actually sleeping. At twice the 60-second
-production interval it is as tight as this can safely be — one lost downlink
-spends the whole budget — so an operator who raises a valve's interval by downlink
-has to raise this to match. It is a failure detector rather than a retry — neither
-`wait_field_open` nor `wait_field_close` re-sends — so it is only how long a
-sequence that looks frozen runs before the operator is told the downlink was lost.
-At the 2100 seconds it used to carry that was 35 minutes, with the main valve
-open, in both the open and the close case.
+production interval it is as tight as this can safely be — one lost downlink used
+to spend the whole budget — so an operator who raises a valve's interval by
+downlink has to raise this to match. It is still the failure detector: silence
+past it faults the sequence. What changed on 2026-10-08 is that half the budget is
+now spent on one repeat of the same command rather than on waiting. An operator
+watched a stopped run sit at "valve2: close sent" for the full 120 s and then
+fault; the 2026-10-07 record already had the recovery — re-issuing the same close
+was confirmed within five seconds. The repeat keeps the id on purpose: a PCV
+accepts an identical repeat as a duplicate instead of pulsing the solenoid again,
+and it echoes the id it holds either way, so a close that landed but was never
+reported confirms on the repeat while a lost one is applied. Both waits spend
+that repeat through the same per-valve latch the id refusal uses, so a valve is
+never re-sent twice, and the fault that ends an unanswered wait now names what
+the valve last said — `Field valve close unconfirmed: valve2 (echo 72 of 73, open,
+41 s quiet)` — because otherwise the operator has a fault and no evidence. At the
+2100 seconds this timeout used to carry, the wait was 35 minutes with the main
+valve open, in both the open and the close case.
 
 A field valve is confirmed by its own report **only once that report echoes our
 command id**. This is not bookkeeping for its own sake. A PCV is Class A, so the
@@ -156,6 +166,11 @@ fires once the field valves are confirmed closed, diverting to `open_main` befor
 waited. A start from `fault` queues the same way and re-runs the close pass, retrying the
 valve that failed. A *safety* stop clears `pendingStart`, so a run stopped for low water
 is never restarted automatically.
+
+Stop pressed while the teardown is already running records the request in `stopReason`
+and does nothing else — including leaving the notice alone. It used to overwrite it with
+"Operator requested stop", which hid which valve the sequence was still waiting on
+(`valve2: close sent; awaiting device result`) exactly when the operator needed to see it.
 
 The zone checkboxes read their state from the server (`s.selection`, set by a
 `kind:'select'` message whenever one changes, and recorded again on `start` — both only
@@ -233,9 +248,36 @@ status only when it arrived after the command was sent *and* it names that comma
 `reported_command_id` for MainValve, the send time for a field valve (which echoes an
 id only for a command it processed) and for the pump (which stores an id only when it
 accepts one, so a refused command carries no id at all). An attributable refusal is
-resent once — and only for a reused id; a pressure interlock, a busy actuator or an
-actuator fault is not retried, and the notice names the reason
+resent once — and only for a reused id; a pressure interlock or an actuator fault is
+not retried, and the notice names the reason
 (`Main valve close failed: pressure_interlock`).
+
+`actuator_busy` is a third case, and the only one that is waited rather than retried
+or faulted. MainValve runs one movement at a time and refuses anything that arrives
+while one is active, and only the *refusal* names our command — the movement's own
+`finished` event names the command that started it. So the wait is held in sequencer
+state (`s.mainBusyWait`), not read back from the phase, and the phase that decides is
+re-entered once the valve's report says its movement ended. That covers the live case
+of Stop pressed while the main valve was opening: the close is refused, the valve is
+left to reach 90°, and the close is then re-issued and confirmed — the run ends idle
+instead of faulting with the valve open. The wait is bounded by
+`mainCommandTimeoutSec` (300 s, which clears the firmware's 180 s movement timeout),
+so a valve stuck part-way still faults, naming `actuator_busy`.
+
+The fourth case is the one that wasted the most time live, because nothing at all
+comes back. MainValve's refusal is a **one-shot event**: the heartbeats after it carry
+the *last* event's phase and id, so a lost uplink loses the refusal for good and the
+wait cannot resolve — on 2026-10-08 a close refused busy during an opening movement had
+its refusal uplink lost, and the run sat 216 s into a 300 s deadline with the valve idle
+at 90° and everything else healthy. What saves it is that MainValve's angle is measured
+physical position and rides every heartbeat, so the wait is judged on *state* as well:
+fresh, not moving, and not at the angle that was asked for means the command never
+landed. After half the deadline the sequencer repeats it once, with a fresh id — an id
+the valve never stored cannot collide, and one it did store is ignored as a duplicate
+instead of re-running the movement. The notice reads `Main valve close unconfirmed;
+repeating once`, and the deadline still ends the wait if the repeat goes unanswered too.
+Field valves get the same single repeat with the same half-deadline rule, but keep the
+id, because a PCV's latching pulse must not fire twice for a close that already landed.
 
 **Flash both valves before importing this flow.** The 45-second open limit is
 shorter than the 60-second cadence the valves kept before that firmware change,
@@ -313,3 +355,28 @@ the import invariants (no tab, no broker node, shared ids, derived water age, an
 the cadences it resolves from the WaterLevel, PCV and PumpControl sources)
 and fails if either drifts. Replace the whole deployed flow using the steps
 above.
+
+## What the tests cover, and what they cannot
+
+The sequencer is a state machine whose failures are all races, so the tests are
+matrices rather than examples — each one names the invariant it holds, and adding
+a phase or a command without a case fails the suite.
+
+| Matrix | What it drives | Invariant |
+| --- | --- | --- |
+| Stop from every phase | all 17 phases, with the pending/valve-id state each is actually entered with | ends `idle`, valves closed, pump stopped, no fault; a guard fails the suite if a `s.phase===` comparison in the generated function has no case |
+| Bounded exit | every `wait_*` phase with devices that never answer | leaves the wait by its own deadline and names it; the pump stop escalates to `estop` first, then faults |
+| Running safety inputs | each required device broken on its own, everything else healthy | stops with the reason of the check that fired, plus the four-hour ceiling |
+| Start from every phase | idle, running, fault, every teardown, plus refused and empty selections | idle starts, running is refused by name, a fault or teardown queues without reshaping the run |
+| Zone lock | the panel's computed/methods and the sequencer's `select` handler | boxes disabled and showing the running set while active; a `select` cannot reach the next start |
+| Refusals and silence | stale vs correlated refusals, repeats, busy, deadlines | only a report that names the command is acted on; one repeat at half the deadline; field-valve faults name the valve's last report |
+| Emitted frames | one case per command | port, op code, angle, argument, id and envelope (`qos 0`, unretained, unconfirmed, device topic) |
+
+`tools/test_irrigation_dashboard.js` runs all of it in-process against the generated
+function, so a wrong command or a hang fails locally. What it cannot do is make a real
+device refuse, stall, or drop an uplink: those paths are exercised by the in-process
+matrices, and confirmed live by driving the dashboard page over CDP
+(`irrtest/run_click_cycle.py` for whole cycles, and a boundary sweep that starts a run
+and acts the instant a valve reports open, a pump start is accepted, or `running` begins).
+Anything that needs a *forced* downlink loss or a real hardware refusal is still
+field-verification, not test coverage.

@@ -164,7 +164,7 @@ function retryRefused(k,op) {
   s.pending.retried=true;
   return true;
 }
-function advance(phase) {s.phase=phase;if (!phase.startsWith('wait_')) {s.pending=null;s.valveRetried=null;}s.phaseAt=now;}
+function advance(phase) {s.phase=phase;if (!phase.startsWith('wait_')) {s.pending=null;s.valveRetried=null;s.mainBusyWait=null;}s.phaseAt=now;}
 // A start pressed while the sequence is busy is queued rather than refused, and fires
 // here once the field valves are closed -- before close_main, so the main valve never
 // has to close and reopen. ready() re-runs because the conditions may have moved.
@@ -175,7 +175,15 @@ function beginQueuedStart() {
   s.selected=s.pendingStart;s.pendingStart=null;s.step=0;advance('open_main');s.notice='Start checks passed';
   return true;
 }
-function stop(reason) {s.notice=reason;s.stopReason=reason;s.pendingStart=null;if (s.phase==='idle') s.selected=['valve1','valve2']; if (s.phase!=='stop_pump'&&s.phase!=='wait_pump_stop'&&s.phase!=='close_fields'&&s.phase!=='wait_field_close'&&s.phase!=='close_main'&&s.phase!=='wait_main_close') advance('stop_pump');}
+// A stop pressed while the teardown is already running must not hide what the sequence
+// is waiting for: an operator saw "valve2: close sent" replaced by "Operator requested
+// stop" and lost track of which valve was outstanding. The request is still recorded in
+// stopReason, and the phase is already stopping, so nothing moves. A queued start is the
+// exception: cancelling it is news, or the panel keeps promising a run that will never
+// happen.
+function stop(reason) {const tearing=s.phase==='stop_pump'||s.phase==='wait_pump_stop'||s.phase==='close_fields'||s.phase==='wait_field_close'||s.phase==='close_main'||s.phase==='wait_main_close';const queued=s.pendingStart;s.stopReason=reason;s.pendingStart=null;if (s.phase==='idle') s.selected=['valve1','valve2'];
+  if (!tearing) {s.notice=reason;advance('stop_pump');}
+  else if (queued) s.notice='Stop requested; queued start cancelled';}
 function ready(list) {
   const w=device('water'), t=device('soil'), m=device('main'), p=device('pump');
   if (!configured) return 'Set IRRIGATION_APP_ID and all six DEV_EUI environment variables';
@@ -266,6 +274,28 @@ const timed=(seconds)=>s.pending&&now-s.pending.at>seconds*1000;
 // entered, which advance() set immediately after the command was emitted. Fails
 // closed: a missing phaseAt reads as expired rather than as an endless wait.
 const timedPhase=(seconds)=>!s.phaseAt||now-s.phaseAt>seconds*1000;
+// A field valve that says nothing is waited on with one resend at half the deadline, not
+// left to the full timeout. Silence is a lost Class A downlink far more often than a dead
+// valve -- the 2026-10-07 recovery was to re-issue the same close, confirmed within five
+// seconds -- and the wait was measured from the phase, so the resend needs no state of
+// its own beyond the per-valve retry latch the id refusal also spends. The command keeps
+// its id: a PCV accepts an identical repeat as a duplicate rather than pulsing the
+// solenoid again, and it reports the id it holds either way, so a landed-but-unreported
+// close confirms on the repeat while a lost one is simply applied. A fresh id would
+// pulse the valve twice for the first case and give the second a new refusal to survive.
+function resendValve(k,op) {const id=s.valveCmd?.[k];if (id===undefined) {command(k,op);return;}
+  emit(k,30,{object:{pcv:op,command_id:id}});s.valveSentAt[k]=now;}
+// One repeat, strictly between half the deadline and the deadline itself: before half the
+// valve has not had its chance to answer, and after the deadline the wait is over and the
+// failure detector stands.
+const valveSilent = (k,op) => {if (s.valveRetried===k) return false;
+  if (!timedPhase(cfg.fieldValveCommandTimeoutSec/2)||timedPhase(cfg.fieldValveCommandTimeoutSec)) return false;
+  resendValve(k,op);s.valveRetried=k;return true;};
+// What the valve was last heard saying, so the timeout that ends a wait is diagnosable
+// from the panel: the echo is the id it holds -- the thing the confirmation was waiting
+// for -- and the age is how long the valve has been quiet.
+const valveLastHeard = k => {const d=device(k);const echo=num(d.last_command_id);
+  return 'echo '+(echo===null?'none':echo)+' of '+String(s.valveCmd?.[k]??'-')+', '+String(d.pcv_last_commanded||'unknown')+', '+(d.at?Math.round((now-d.at)/1000)+' s quiet':'never heard');};
 // Every device here reports the phase or reason of its LAST command, not of the one
 // in flight, and keeps reporting it in later heartbeats until a newer event replaces
 // it. A refusal or a failure from an earlier command therefore stays visible after the
@@ -287,6 +317,39 @@ const valveAnswered = k => device(k).at >= (s.valveSentAt?.[k] ?? 0);
 // Pump: same sticky result field, and a refused command carries no id at all (the id
 // is stored only when a command is accepted), so freshness is the whole test here too.
 const pumpAnswered = () => p.at >= (s.pending?.at ?? 0);
+// A busy refusal is not a failure. The firmware moves the valve one movement at a time
+// and refuses any command that arrives while one is active, so pressing Stop while the
+// main valve was still opening refused the close and faulted with the valve left open
+// (seen live 2026-10-08, "Main valve close failed: actuator_busy"). Wait for the
+// movement to end instead: the valve's own report says when its actual angle has
+// reached its target, its movement timeout is 180 s, and this deadline is 300 s, so the
+// wait resolves inside the budget already allowed. Re-entering the phase that decides
+// (open_main / close_main) then closes the valve if it reached 90 degrees, or holds it
+// at its target, and commands again once the movement is over.
+const mainBusyRefused = () => mainPhase()==='rejected'&&device('main').reason==='actuator_busy';
+const mainMovementOver = () => device('main').valve_moving===false&&fresh('main',cfg.mainMaxAgeSec);
+// MainValve's refusal is a one-shot event, and the heartbeat after it carries the last
+// event's phase and id rather than repeating the refusal -- so one lost uplink leaves the
+// dashboard waiting for an answer that will never come, with the valve sitting still where
+// it was. Seen live 2026-10-08: a close refused busy while the valve was opening, its
+// refusal uplink lost, and the run heading for a 300 s "close unconfirmed" with the valve
+// idle at 90 degrees. The actuator angle is measured physical position and every heartbeat
+// carries it, so the wait can also be judged on state: fresh, not moving, and not at the
+// target that was requested means the command never landed. Repeat it once after half the
+// deadline, with a fresh id -- an id the valve never stored cannot collide, and one it did
+// store is ignored as a duplicate instead of re-running the movement.
+const mainAtTarget = op => num(device('main').actual_angle_deg)!==null&&device('main').valve_moving===false&&
+  (op==='open'?mainOpen():device('main').actual_angle_deg<=cfg.mainClosedMaxDeg);
+const mainSilent = (op) => {const q=s.pending;
+  if(!q||q.retried||!fresh('main',cfg.mainMaxAgeSec)||device('main').valve_moving===true||mainAtTarget(op)) return false;
+  if(now-q.at<cfg.mainCommandTimeoutSec*500||now-q.at>cfg.mainCommandTimeoutSec*1000) return false;
+  command('main',op);s.pending.retried=true;return true;};
+// The wait is held in state, not re-read from the phase, because the movement's own
+// 'finished' event replaces the refusal in the status payload: the busy phase is gone
+// by the time the valve stops, and a wait keyed on it would never fire again.
+const mainBusyWait = op => {if (mainMovementOver()) {advance(op==='open'?'open_main':'close_main');return;}
+  if (timed(cfg.mainCommandTimeoutSec)) {if(op==='open') stop('Main valve open failed: actuator_busy');else {s.phase='fault';s.notice='Main valve close failed: actuator_busy';}return;}
+  s.notice='Main valve busy; waiting for its movement to finish';};
 if (s.phase==='running') {
   if (now-s.runAt>cfg.maxWateringSec*1000) stop('Maximum watering duration reached');
   else if (!fresh('water',cfg.waterMaxAgeSec)||w.pressure_valid!==true||num(w.depth_m)===null||w.depth_m*100<=cfg.stopLevelCm) stop('Water level low or unavailable');
@@ -296,17 +359,23 @@ if (s.phase==='running') {
   else if (s.selected.some(k=>!valveFresh(k)||device(k).pcv_last_commanded!=='open')) stop('Field valve status unsafe');
 }
 if (s.phase==='open_main') {if(mainOpen()) advance('open_fields');else {command('main','open');advance('wait_main_open');}}
-if (s.phase==='wait_main_open') {const ph=mainPhase();
-  if(done('main','open')) advance('open_fields');
-  else if(ph==='rejected'&&device('main').reason==='invalid_command'&&retryRefused('main','open')) s.notice='Main valve refused the command id; resending with a fresh one';
-  else if(ph==='rejected'||ph==='failed') stop('Main valve open failed: '+(device('main').reason||'no result'));
-  else if(timed(cfg.mainCommandTimeoutSec)) stop('Main valve open unconfirmed');}
+if (s.phase==='wait_main_open') {
+  if(s.mainBusyWait) mainBusyWait('open');
+  else {const ph=mainPhase();
+    if(done('main','open')) advance('open_fields');
+    else if(mainBusyRefused()) {s.mainBusyWait=true;s.notice='Main valve busy; waiting for its movement to finish';}
+    else if(ph==='rejected'&&device('main').reason==='invalid_command'&&retryRefused('main','open')) s.notice='Main valve refused the command id; resending with a fresh one';
+    else if(ph==='rejected'||ph==='failed') stop('Main valve open failed: '+(device('main').reason||'no result'));
+    else if(mainSilent('open')) s.notice='Main valve open unconfirmed; repeating once';
+    else if(timed(cfg.mainCommandTimeoutSec)) stop('Main valve open unconfirmed');}
+}
 if (s.phase==='open_fields') {if(s.step>=s.selected.length) advance('set_frequency');else {const k=s.selected[s.step];if(valveReported(k,device(k),pcvState('open'))) {s.step++;}else {command(k,'open');advance('wait_field_open');}}}
 if (s.phase==='wait_field_open') {const k=s.selected[s.step],d=device(k);
   if(valveReported(k,d,pcvState('open'))) {s.step++;advance('open_fields');}
   else if(valveFresh(k)&&valveAnswered(k)&&valveIdRefused(d)&&retryValveOnce(k,'open')) s.notice=k+' refused the command id; resending with a fresh one';
   else if(valveFresh(k)&&valveAnswered(k)&&valveRefused(d)) stop('Field valve open failed: '+k+' reported '+d.status_reason);
-  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed: '+k);}
+  else if(valveSilent(k,'open')) s.notice=k+': open unconfirmed; resent once';
+  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) stop('Field valve open unconfirmed: '+k+' ('+valveLastHeard(k)+')');}
 if (s.phase==='set_frequency') {const problem=ready();if(problem){stop('Start recheck: '+problem);}else if(p.frequency_armed===true&&Math.abs((num(p.commanded_frequency_hz)||0)-cfg.pumpFrequencyHz)<cfg.pumpFrequencyToleranceHz) advance('start_pump');else {command('pump','frequency');advance('wait_frequency');}}
 if (s.phase==='wait_frequency') {if(done('pump','frequency')) advance('start_pump');else if(pumpAnswered()&&p.command_result==='invalid'&&retryRefused('pump','frequency')) s.notice='Pump refused the frequency command; resending with a fresh id';else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump frequency command unconfirmed');}
 if (s.phase==='start_pump') {const problem=ready();if(problem) stop('Start recheck: '+problem);else if(!mainOpen()||s.selected.some(k=>device(k).pcv_last_commanded!=='open')) stop('Valve readiness lost');else {command('pump','start');advance('wait_pump_start');}}
@@ -322,13 +391,19 @@ if (s.phase==='wait_field_close') {const k=s.selected[s.step],d=device(k);
   if(valveReported(k,d,pcvState('close'))) {s.step--;advance('close_fields');}
   else if(valveFresh(k)&&valveAnswered(k)&&valveIdRefused(d)&&retryValveOnce(k,'close')) s.notice=k+' refused the command id; resending with a fresh one';
   else if(valveFresh(k)&&valveAnswered(k)&&valveRefused(d)) {s.phase='fault';s.notice='Field valve close failed: '+k+' reported '+d.status_reason;}
-  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) {s.phase='fault';s.notice='Field valve close unconfirmed: '+k;}}
+  else if(valveSilent(k,'close')) s.notice=k+': close unconfirmed; resent once';
+  else if(timedPhase(cfg.fieldValveCommandTimeoutSec)) {s.phase='fault';s.notice='Field valve close unconfirmed: '+k+' ('+valveLastHeard(k)+')';}}
 if (s.phase==='close_main') {if(num(m.actual_angle_deg)!==null&&m.actual_angle_deg<=cfg.mainClosedMaxDeg&&m.valve_moving===false) {if(!beginQueuedStart()) advance('idle');}else {command('main','close');advance('wait_main_close');}}
-if (s.phase==='wait_main_close') {const ph=mainPhase();
-  if(done('main','close')) {if(!beginQueuedStart()) {advance('idle');s.notice='Watering stopped; valves closed';}}
-  else if(ph==='rejected'&&device('main').reason==='invalid_command'&&retryRefused('main','close')) s.notice='Main valve refused the command id; resending with a fresh one';
-  else if(ph==='rejected'||ph==='failed'){s.phase='fault';s.notice='Main valve close failed: '+(device('main').reason||'no result');}
-  else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
+if (s.phase==='wait_main_close') {
+  if(s.mainBusyWait) mainBusyWait('close');
+  else {const ph=mainPhase();
+    if(done('main','close')) {if(!beginQueuedStart()) {advance('idle');s.notice='Watering stopped; valves closed';}}
+    else if(mainBusyRefused()) {s.mainBusyWait=true;s.notice='Main valve busy; waiting for its movement to finish';}
+    else if(ph==='rejected'&&device('main').reason==='invalid_command'&&retryRefused('main','close')) s.notice='Main valve refused the command id; resending with a fresh one';
+    else if(ph==='rejected'||ph==='failed'){s.phase='fault';s.notice='Main valve close failed: '+(device('main').reason||'no result');}
+    else if(mainSilent('close')) s.notice='Main valve close unconfirmed; repeating once';
+    else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
+}
 s.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
