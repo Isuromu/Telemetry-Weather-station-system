@@ -114,13 +114,93 @@ limit cannot fit two different cadences. The closed half assumes the production
 60-second interval; an operator who sets a longer interval by downlink moves the
 node off that assumption and this limit has to be raised to match.
 
-`fieldValveCommandTimeoutSec` (300 s) carries that same assumption, for the same
+`fieldValveCommandTimeoutSec` (120 s) carries that same assumption, for the same
 reason: an open command waits for the node's next wake, so the deadline has to
-clear the interval the node is actually sleeping. It is a failure detector rather
-than a retry — neither `wait_field_open` nor `wait_field_close` re-sends — so it
-is only how long a sequence that looks frozen runs before the operator is told
-the downlink was lost. At the 2100 seconds it used to carry that was 35 minutes,
-with the main valve open, in both the open and the close case.
+clear the interval the node is actually sleeping. At twice the 60-second
+production interval it is as tight as this can safely be — one lost downlink
+spends the whole budget — so an operator who raises a valve's interval by downlink
+has to raise this to match. It is a failure detector rather than a retry — neither
+`wait_field_open` nor `wait_field_close` re-sends — so it is only how long a
+sequence that looks frozen runs before the operator is told the downlink was lost.
+At the 2100 seconds it used to carry that was 35 minutes, with the main valve
+open, in both the open and the close case.
+
+A field valve is confirmed by its own report **only once that report echoes our
+command id**. This is not bookkeeping for its own sake. A PCV is Class A, so the
+downlink arrives in the RX window *after* an uplink, and the first report following a
+command still carries the previous state — a valve whose open is in flight keeps
+reporting `closed`. Comparing a report's age against the send time does not separate
+those two cases; the device's echoed `last_command_id` does. `valveReported` therefore
+needs a fresh report of the requested state whose echoed id is not older than the id
+the sequencer sent (`s.valveCmd`). Without that echo, a stop pressed inside an open's
+confirmation window skips the valve in the close pass and leaves it open while the
+panel prints "valves closed" — observed on hardware — and the open pass can likewise
+skip a valve whose close is in flight and start the pump against a closed valve.
+
+The other trap here is vocabulary: the codec names the uplink states `open`/`closed`
+while the downlink action is `open`/`close`, so a state comparison against the action
+word means the close half can never confirm and every stop run ends in the fault state
+with the main valve still open. `tools/build_irrigation_dashboard.py` translates
+between the two in `pcvState`, and `tools/test_irrigation_dashboard.js` feeds the
+codec's real `closed` value so the mismatch cannot come back unnoticed. A valve is also
+faulted at once, naming it, when its report carries `pcv_actuation_failed` or
+`invalid_command_rejected`.
+
+Start is accepted whenever the sequence is not already `running`. Pressing it while a
+teardown is in progress **queues** the request rather than refusing it: the selection is
+held in `pendingStart` and `s.selected` is left alone, so a close pass in flight finishes
+on the set it was already walking and a refused start cannot reshape it. A queued start
+fires once the field valves are confirmed closed, diverting to `open_main` before
+`close_main` — so the main valve never closes and reopens — and it is re-checked against
+`ready()` at that moment, because the safety conditions may have moved while the operator
+waited. A start from `fault` queues the same way and re-runs the close pass, retrying the
+valve that failed. A *safety* stop clears `pendingStart`, so a run stopped for low water
+is never restarted automatically.
+
+The zone checkboxes read their state from the server (`s.selection`, set by a
+`kind:'select'` message whenever one changes, and recorded again on `start`). They are
+deliberately not component-local, because Dashboard 2.0 recreates the template when
+you leave and return to the page, which would silently reset a local selection to
+whatever the component defaults to. While a sequence is not idle the control panel
+also names the valves that run is actually using (`s.selected`), so the display cannot
+disagree with what is watering.
+
+The deliberate limit: a queued start opens nothing until the field valves are closed.
+Deciding "which open valves are not selected" from `pcv_last_commanded` would be unsafe,
+because that field is the state the valve last *commanded*, not its position — while an
+open command is in flight the valve still reports `closed`, so such a valve would land in
+neither the close set nor the new selection and be left open while the pump runs.
+
+Every device here is also commanded by its own card. Those cards used to keep a
+*separate* id counter per dashboard, in flow context — which is scoped to a tab — so
+the counters drifted apart as soon as one dashboard was used more than another, and
+a command sent from the quiet card was refused for carrying an old id. All five now
+allocate from **one counter per device in global context**: `cmd_next_id_main`,
+`cmd_next_id_pump`, `cmd_next_id_valve1`, `cmd_next_id_valve2`.
+
+Which firmware actually refuses what matters here:
+
+| Device | A smaller id | An equal id |
+| --- | --- | --- |
+| PumpControl | refused, `invalid` — its rule is a signed 16-bit difference | refused unless byte-identical (`duplicate`) |
+| MainValve | **accepted** | refused unless the same angle |
+| valve_1 / valve_2 | **accepted** | refused unless byte-identical |
+
+So only the pump enforces order; the others break on an exact collision. Two
+consequences drive the code. First, "ahead" is modular: an id counts as newer only
+when it is 1..32767 ahead of the last one the device took, and the counters wrap
+`65534 -> 0`, so `nextId` and the cards compare with `idAhead` rather than
+`>`. Second, a counter can still be behind what the device holds if this dashboard
+missed the acks — but a refusal *is* an uplink and carries the device's real
+`last_command_id`, so the sequencer resends a refused `pump`/`main` command once
+with the corrected id (`retryRefused`) instead of waiting out the deadline, and the
+cards' next command catches up the same way. A field valve refused *only* for its id
+is resent once too (`retryValveOnce`); a reported `pcv_actuation_failed` is hardware
+and faults at once, naming the valve.
+
+Note the counters live in global context, which is in memory unless Node-RED is
+configured for persistent storage: a restart clears them, and the first command per
+device reseeds from the id that device reports.
 
 **Flash both valves before importing this flow.** The 45-second open limit is
 shorter than the 60-second cadence the valves kept before that firmware change,

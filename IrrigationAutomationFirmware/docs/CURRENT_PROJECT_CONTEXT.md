@@ -181,7 +181,10 @@ Do not assume or invent:
 - the final deployed reporting interval (10 seconds is commissioning-only and
   the deployment value remains undecided);
 - credentials for end nodes other than the provisioned valve_1 device;
-- final energy budget and acceptable command latency.
+- final energy budget and acceptable command latency;
+- whether the serial LoRaWAN payload-hex dump stays always on or becomes
+  switchable, and whether MainValve's new hex lines carry the `[LORAWAN]` tag
+  (`docs/SERIAL_EVENT_LOGGING.md`).
 
 These values require the actual hardware, manuals, system behavior, or a direct
 user decision.
