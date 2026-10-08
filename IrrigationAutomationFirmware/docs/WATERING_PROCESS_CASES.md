@@ -93,7 +93,16 @@ settings.
 ### Case 1 — Automatic watering starts normally
 
 The operator selects `valve_1`, `valve_2`, or both, then presses Start. The
-dashboard permits the run only when all of these are true:
+zone checkboxes are then locked until the sequence is back in `idle` (or in
+`fault`, where a start retries the close pass), because a run's valves are fixed
+the moment it starts: a box ticked during a run changes nothing physically, and
+the panel would otherwise show a set that is not the one watering. Locked, the
+boxes show the valves the current run is using, and Start during a teardown
+queues a repeat of that same set. A `select` message is ignored in the same
+phases on the server, so a stale second tab that still shows idle cannot reshape
+the next run either.
+
+The dashboard permits the run only when all of these are true:
 
 1. WaterLevel is fresh, valid, and at least **20 cm**.
 2. SoilNode is fresh and valid, and moisture is below **70%**.
@@ -151,14 +160,15 @@ enter a fault-watch state after an unconfirmed CLOSE.
 |---|---|---|---|---|
 | WaterLevel uplink missing or measurement invalid | Water data becomes stale after 60 s on the 10 s bench build, or 1,800 s after the 900 s field setting. | Start is refused; a running sequence stops. | No live sleep update exists. Keep its configured period; a faster diagnostic period requires a rebuild/configuration change. | Check sensor power, RS485, OTAA/join, and the depth reading before restarting. |
 | Soil telemetry missing or invalid | Dashboard freshness limit is 1,200 s; invalid payload clears `sensor_valid`. | Start is refused; a running sequence stops. | Current firmware keeps its stored sleep. A valid Class A command can set SoilNode to a proposed 60 s diagnostic interval, then return it to 600 s after recovery. | Check switched sensor power, RS485 response and probe condition. |
-| MainValve does not move, reports busy/fault, or times out | Actuator reports movement/fault; firmware movement timeout is 180 s and dashboard command timeout is 300 s. | Pump is never started, or the running sequence starts shutdown. | MainValve is awake and reports at least every 60 s; it has no deep sleep. | Inspect actuator, RS485 mode, local override, target angle and pressure interlock. |
+| MainValve does not move, reports busy/fault, or times out | Actuator reports movement/fault, named in the notice; firmware movement timeout is 180 s and dashboard command timeout is 300 s. | Pump is never started, or the running sequence starts shutdown. | MainValve is awake and reports at least every 60 s; it has no deep sleep. | Inspect actuator, RS485 mode, local override, target angle and pressure interlock. |
+| MainValve refuses a command (`rejected`) | The refusal names the command it answers in `reported_command_id`; the sequencer acts only on that. A reused command id is resent once; a pressure interlock, a busy actuator or an actuator fault is not retried. | The shutdown path runs, and the notice names the reported reason (`Main valve open failed: actuator_busy`, `Main valve close failed: pressure_interlock`). | Stale or unattributable phases are ignored, so the deadlines below are what remains. | Act on the reason: an interlock is physics, a busy actuator means a movement was still in flight, an actuator fault needs the actuator. |
 | MainValve pressure is invalid | The current remote-move setting does **not** require valid pressure. | Dashboard does not block solely on invalid pressure unless another main-valve field is bad. | Awake; 60 s heartbeat. | Treat this as a safety gap: validate and enable the required pressure interlock before relying on unattended pressure protection. |
 | MainValve overpressure | MainValve reports `overpressure`; the sequencer detects it. | Start is refused, or the pump-stop sequence begins. | Awake; 60 s heartbeat, plus status events. | Do not simply retry the close command. The firmware currently rejects movement that closes farther during upstream overpressure; after the pump is confirmed stopped, inspect whether that rule also prevents the required final close. |
 | Pump start is not confirmed | Matching command ID never reaches final VFD running state within 150 s. | The sequencer runs the shutdown path; it does not retry Start automatically. | Pump stays awake. It reports every 15 s if running, otherwise every 60 s. | Check VFD fault, Modbus link, armed frequency and pump hydraulics. |
 | Pump stop is not confirmed | No matching final stopped state within 150 s. | Dashboard sends one software `estop`. If that is not confirmed, it enters fault and deliberately leaves valves open. | Pump stays awake; use the 15 s running heartbeat while it may still run. | Treat as an emergency inspection. A network `estop` is not a physical emergency-stop circuit. |
-| Field-valve OPEN command is not acknowledged | No matching field-valve status within 300 s. | Pump is not started; shutdown is requested. | If the valve had reported OPEN, it is already at 15 s. If it remained CLOSED/unknown, current cadence may be the configured closed interval. | Check Class A downlink queue, OTAA session, battery, pulse circuit, polarity and solenoid. Do not resend repeatedly with new IDs without inspection. |
+| Field-valve OPEN command is not acknowledged | No matching field-valve status within 120 s (`fieldValveCommandTimeoutSec`). | Pump is not started; shutdown is requested. | If the valve had reported OPEN, it is already at 15 s. If it remained CLOSED/unknown, current cadence may be the configured closed interval. | Check Class A downlink queue, OTAA session, battery, pulse circuit, polarity and solenoid. Do not resend repeatedly with new IDs without inspection. |
 | Field valve is broken, stuck closed, or closes unexpectedly while commanded OPEN | **Not reliably detectable now.** A PCV can report `open` after a successful pulse even if its mechanism did not move. valve_2 has no flow meter. | The sequence can continue until another condition stops it or the four-hour limit expires. | valve_1/2 report every 15 s only because their last command is OPEN; this is telemetry, not proof of flow. | This is the principal unattended-watering gap. Add proven valve-position feedback or a commissioned per-zone flow/pressure interlock before treating this case as safe. |
-| Field-valve CLOSE command is unconfirmed | No matching status within 300 s. | Dashboard enters fault after the pump stop has been confirmed; MainValve is not closed automatically. **Deliberate, confirmed as a policy choice on 2026-10-07, not an oversight.** | Current CLOSE state can fall back to 60 s field cadence. A future fault-watch state should hold 15 s for up to the existing 300 s timeout. | Inspect the physical valve and water path. Do not assume a reported CLOSE stopped flow. |
+| Field-valve CLOSE command is unconfirmed | No matching status within 120 s (`fieldValveCommandTimeoutSec`). | Dashboard enters fault after the pump stop has been confirmed; MainValve is not closed automatically. **Deliberate, confirmed as a policy choice on 2026-10-07, not an oversight.** | Current CLOSE state can fall back to 60 s field cadence. A future fault-watch state should hold 15 s for up to the existing 120 s timeout. | Inspect the physical valve and water path. Do not assume a reported CLOSE stopped flow. |
 
 Two notes on that row, added after testing on 2026-10-07. First, the fault
 leaves the main valve open — observed live as `main 90°, valve1 open, pump
@@ -173,6 +183,21 @@ main-valve open, one field-valve close), and in the second case re-issuing the
 same close was confirmed by the device within five seconds. Treat a lost downlink
 as a device or radio-side fault to be diagnosed there, not as something the
 dashboard should paper over.
+
+A third note, added 2026-10-08 after those two events were reproduced off-line.
+MainValve repeats the phase and reason of its last status *event* in every later
+heartbeat (bytes 17 and 2), so a refusal from an earlier cycle was still in the
+payload when the next command went out; the sequencer read it as the answer to
+that command. One stale `rejected` therefore failed the next open without the
+valve ever being given its chance to move, and the close that followed reported
+"Main valve close unconfirmed; inspect system" with the valve still shut — the
+two 2026-10-07 events, in the order they happened. The dashboard now acts on a
+status only when it arrived after the command was sent and names it
+(`reported_command_id` for MainValve, the send time for the field valves and the
+pump). A correlated refusal is resent once only for a reused id; the reason is
+now named in the notice, and `retry` is no longer spent on hardware refusals.
+The firmware side still repeats a stale phase, which is why the correlation is in
+the dashboard; the MainValve card had the same guard already.
 | valve_1 flow missing, zero, or TUF error bits present during a run | valve_1 telemetry provides flow, velocity and TUF errors. | The current sequencer does **not** use a minimum-flow interlock. | valve_1 remains at 15 s while commanded OPEN. | Use the data diagnostically now. Implement a commissioned minimum-flow/time-after-pump-start interlock before using it to stop runs automatically. |
 | Radio/OTAA failure on a Class A node | Missing uplinks; a queued downlink cannot reach a sleeping node until its next uplink. | Dashboard marks the node stale and fails closed for Start; a running sequence starts shutdown when its required telemetry becomes stale. | The node continues its stored timer sleep. No dashboard command can reduce it until the node rejoins and opens RX1/RX2. | Diagnose power, credentials, nonce storage, gateway coverage and ChirpStack queue. |
 | Node reboot or last PCV state unknown | Latching PCV starts with physical position unknown after reset. | Firmware sends no pulse at boot. Dashboard must wait for fresh telemetry. | Normal current interval resumes; a device that last reported OPEN gets the 15 s cadence only if that state was retained. | Inspect a field valve before resuming an interrupted watering run. |
@@ -210,7 +235,11 @@ interval cannot be changed remotely.
    The current MainValve rule rejects any command that closes farther while
    upstream pressure is high. The dashboard stops the pump first, but must be
    tested to confirm it can then complete the final close rather than remain in
-   the fault state with MainValve open.
+   the fault state with MainValve open. Since 2026-10-08 that case is at least
+   named: the correlated `pressure_interlock` refusal is not retried and faults
+   as `Main valve close failed: pressure_interlock` instead of waiting out the
+   300 s and reporting a bare `close unconfirmed`. Whether the interlock clears
+   after the pump stops is still unverified on hardware.
 4. **WaterLevel's local GPIO27 load decision uses battery voltage only.** The
    water-level threshold is commented out in the firmware, so the output is
    not a local low-water lockout.
@@ -230,6 +259,15 @@ interval cannot be changed remotely.
    `enterDeepSleep` a seconds parameter and pass the join-retry interval when
    the cycle did not complete a join plus uplink. The successful path is
    unaffected.
+7. **A MainValve still moving when the next command arrives stops the start
+   instead of waiting.** The firmware refuses any command while its movement is
+   active (`actuator_busy`), including the open that begins a new run. The
+   dashboard now stops with `Main valve open failed: actuator_busy` rather than
+   mistaking it for a movement failure, which is safe (the pump is never
+   started) but is not the smoothest operation: the firmware's movement timeout
+   is 180 s and the dashboard's is 300 s, so waiting for the movement to end
+   would also fit inside the existing budget. Unverified on hardware — the
+   observed failures were the stale-phase reads above, not a live busy refusal.
 
 ## Source basis
 

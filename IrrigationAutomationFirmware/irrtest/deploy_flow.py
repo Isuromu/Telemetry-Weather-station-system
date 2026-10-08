@@ -153,12 +153,17 @@ def main():
         print("no conflict prompt - imported directly")
 
     # --- 4. verify the editor model before anything reaches the server -------
+    # `after` is an id -> 1 map of every node, config and group in the workspace, so a
+    # missing id means the import did not land. Checking the name against the whole
+    # file rather than just the tab catches a config node the dialog dropped.
     after = json.loads(c.js(ALL_IDS_JS))
+    want_all = [n["id"] for n in nodes if isinstance(n, dict) and n.get("id")]
     missing = [i for i in want_tab if i not in after]
-    dupes = [i for i in nodes if i not in after]
+    absent = [i for i in want_all if i not in after]
     print("model: %d ids" % len(after))
     print("expected tab ids present: %d/%d" % (len(want_tab) - len(missing), len(want_tab)))
     print("missing from the tab:", missing or "none")
+    print("expected ids absent from the workspace:", absent or "none")
     print("reused config present: %d/%d" % (len([i for i in want_conf if i in after]), len(want_conf)))
     print("nodes still guarding on context:", c.js(j(
         "const o=[];RED.nodes.eachNode(function(n){"

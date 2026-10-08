@@ -90,7 +90,8 @@ worked:
 - **Never read a raw MQTT log or a flow JSON into context.** A single
   `mosquitto_sub` capture is ~400–750 KB of base64 and protobuf. Write a small
   script that answers the question and print only the verdict — `irrtest/correlate.py`
-  turns a log into a one-line-per-command confirmed/lost table.
+  turns a log into a one-line-per-command table: accepted, answered-and-refused
+  (with the reason the device reported), or lost.
 - **Filter with `grep -a`.** The logs contain NUL bytes, so plain `grep` treats
   them as binary and prints nothing — which reads as "no matches" when the data
   is right there.
@@ -140,7 +141,7 @@ exercises `ui-template` → socket.io → sequencer rather than an inject endpoi
 
 ```bash
 python3 irrtest/run_click_cycle.py --water 20 --cycles 3
-python3 irrtest/correlate.py irrtest/mqtt_run4.log   # every command: confirmed or lost
+python3 irrtest/correlate.py irrtest/mqtt_run4.log   # every command: accepted, refused or lost
 ```
 
 A watering cycle is only "clean" when the tally shows `teardown` ending `idle`,

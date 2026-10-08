@@ -41,11 +41,11 @@
     </div>
 
     <section class="ir-panel ir-control-panel">
-      <div class="ir-panel-heading"><div><h2>Watering zones</h2><p>Select one half of the field or both.</p></div><span class="ir-small-tag">OPERATOR CONTROL</span></div>
+      <div class="ir-panel-heading"><div><h2>Watering zones</h2><p>{{ zonesLocked ? 'Locked for the run in progress.' : zonesNote }}</p></div><span class="ir-small-tag">OPERATOR CONTROL</span></div>
       <div class="ir-control-row">
         <div class="ir-zone-options">
-          <label><input type="checkbox" :checked="zoneSelected('valve1')" @change="chooseZone('valve1',$event.target.checked)"><span><b>Half 1</b><small>valve_1</small></span></label>
-          <label><input type="checkbox" :checked="zoneSelected('valve2')" @change="chooseZone('valve2',$event.target.checked)"><span><b>Half 2</b><small>valve_2</small></span></label>
+          <label :class="{'ir-zone-locked':zonesLocked}"><input type="checkbox" :disabled="zonesLocked" :checked="zoneSelected('valve1')" @change="chooseZone('valve1',$event.target.checked)"><span><b>Half 1</b><small>valve_1</small></span></label>
+          <label :class="{'ir-zone-locked':zonesLocked}"><input type="checkbox" :disabled="zonesLocked" :checked="zoneSelected('valve2')" @change="chooseZone('valve2',$event.target.checked)"><span><b>Half 2</b><small>valve_2</small></span></label>
         </div>
         <div class="ir-buttons">
           <button class="ir-start" :disabled="state.phase === 'running' || !state.configured || !!state.check" @pointerdown="showRipple" @click="start($event)"><span class="ir-button-label">Start watering</span></button>
@@ -87,6 +87,15 @@ export default {
         ? `This run: ${sel.map(k => this.names[k] || k).join(' and ')}. ` : '';
       return prefix + 'Shutdown order: stop pump → close selected field valves → close main valve.';
     },
+    // A run's valves are fixed the moment it starts: the sequencer opens and later
+    // closes exactly state.selected. Letting the boxes move while it ran showed a set
+    // that was not the one watering, and a tick during a run looked as if it had been
+    // accepted. Locked for every phase that is running or tearing down; idle is not
+    // running, and a fault is terminal rather than active.
+    zonesLocked() { const p = String(this.state.phase || 'idle'); return p !== 'idle' && p !== 'fault' },
+    zonesNote() { return this.state.phase === 'fault'
+      ? 'Set the zones for the retry; Start closes both field valves first.'
+      : 'Select one half of the field or both.' },
     phaseLabel() { return String(this.state.phase || 'idle').replace(/_/g,' ').toUpperCase() },
     phaseClass() { return this.state.phase === 'running' ? 'ir-phase-running' : this.state.phase === 'fault' ? 'ir-phase-fault' : 'ir-phase-idle' },
     mqttLabel() { const t=String(this.state.mqtt_status||'').toLowerCase(); return t.includes('disconnected') ? 'disconnected' : t.includes('connected') ? 'connected' : t.includes('connecting') ? 'connecting' : 'unknown' },
@@ -173,9 +182,20 @@ export default {
       ], {duration:550,easing:'ease-out'}).onfinish = () => ripple.remove();
     },
     // The selection lives on the server (state.selection), not in this component, so
-    // leaving and returning to the dashboard page does not reset the checkboxes.
-    zoneSelected(k) { const sel = this.state.selection; return !sel ? true : sel[k] === true; },
+    // leaving and returning to the dashboard page does not reset the checkboxes. While
+    // a run is locked the boxes show state.selected instead -- the valves that are
+    // actually being commanded -- so the panel cannot claim a zone that is not watering.
+    zoneSelected(k) {
+      if (this.zonesLocked) {
+        const run = Array.isArray(this.state.selected) ? this.state.selected : [];
+        return run.includes(k);
+      }
+      const sel = this.state.selection;
+      // Before the first start there is no stored selection: both halves are offered.
+      return !sel ? true : sel[k] === true;
+    },
     chooseZone(k,on) {
+      if (this.zonesLocked) return;   // the run's valves are fixed, and the box is disabled
       const next = {valve1:this.zoneSelected('valve1'), valve2:this.zoneSelected('valve2')};
       next[k] = on === true;
       this.send({payload:{kind:'select',valve1:next.valve1,valve2:next.valve2}});
@@ -237,6 +257,7 @@ export default {
 .ir-control-row{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:15px;flex-wrap:wrap}
 .ir-zone-options,.ir-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .ir-zone-options label{display:flex;align-items:center;gap:9px;border:1px solid #dbe5ed;border-radius:9px;padding:9px 13px;min-width:155px;cursor:pointer}
+.ir-zone-options label.ir-zone-locked{background:#f2f5f8;border-color:#e3eaf1;cursor:not-allowed}.ir-zone-options label.ir-zone-locked b,.ir-zone-options label.ir-zone-locked small{color:#8a99a6}.ir-zone-options input:disabled{cursor:not-allowed}
 .ir-zone-options input{width:18px;height:18px;accent-color:#22875b}.ir-zone-options b,.ir-zone-options small{display:block}.ir-zone-options b{font-size:13px}.ir-zone-options small{font-size:11px;color:#718593}
 .ir-buttons button{position:relative;overflow:hidden;isolation:isolate;border:0;border-radius:9px;padding:12px 17px;font:700 13px Inter,Roboto,Arial,sans-serif;cursor:pointer;min-width:145px}
 .ir-button-label{position:relative;z-index:1;pointer-events:none}

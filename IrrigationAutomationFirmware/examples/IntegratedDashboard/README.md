@@ -158,12 +158,30 @@ valve that failed. A *safety* stop clears `pendingStart`, so a run stopped for l
 is never restarted automatically.
 
 The zone checkboxes read their state from the server (`s.selection`, set by a
-`kind:'select'` message whenever one changes, and recorded again on `start`). They are
-deliberately not component-local, because Dashboard 2.0 recreates the template when
-you leave and return to the page, which would silently reset a local selection to
-whatever the component defaults to. While a sequence is not idle the control panel
-also names the valves that run is actually using (`s.selected`), so the display cannot
-disagree with what is watering.
+`kind:'select'` message whenever one changes, and recorded again on `start` — both only
+while the sequence is editable, see below). They are deliberately not component-local,
+because Dashboard 2.0 recreates the template when you leave and return to the page,
+which would silently reset a local selection to whatever the component defaults to.
+While a sequence is not idle the control panel also names the valves that run is
+actually using (`s.selected`), so the display cannot disagree with what is watering.
+
+**The boxes are locked while a run is active** — every phase but `idle` and `fault`.
+A run's valves are fixed when it starts, so ticking a box mid-run changed nothing
+physically while the panel showed a set that was not the one watering; a queued start
+pressed after that would then have carried the ticked set. Locked, the boxes display
+`s.selected` instead of `s.selection`, so they always show the valves being commanded,
+and `Start` during a teardown queues a repeat of that same set. `fault` is deliberately
+not locked: it is terminal rather than active, and a start from `fault` closes both
+field valves first and then opens the chosen set, so the selection has to stay editable
+there — the panel heading says as much, switching to "Locked for the run in progress."
+while it is locked.
+
+The lock is enforced twice, on one rule (`selectAllowed` in the sequencer, `zonesLocked`
+in the panel): `chooseZone` sends nothing while locked, and the sequencer records a
+`select` — or the selection a `start` carries — only in `idle` or `fault`. So a stale
+second tab that still shows idle cannot reshape the next run either. That also means a
+mid-teardown `Start` queues the set the current run is using, since the boxes could not
+have been moved; the queued start is still honoured, it just repeats.
 
 The deliberate limit: a queued start opens nothing until the field valves are closed.
 Deciding "which open valves are not selected" from `pcv_last_commanded` would be unsafe,
@@ -196,11 +214,28 @@ missed the acks — but a refusal *is* an uplink and carries the device's real
 with the corrected id (`retryRefused`) instead of waiting out the deadline, and the
 cards' next command catches up the same way. A field valve refused *only* for its id
 is resent once too (`retryValveOnce`); a reported `pcv_actuation_failed` is hardware
-and faults at once, naming the valve.
+and faults at once, naming the valve. MainValve accepts a smaller id and so refuses
+only on an exact collision, so it is resent only when the refusal names its command
+and the reason is `invalid_command` — see the next paragraph.
 
 Note the counters live in global context, which is in memory unless Node-RED is
 configured for persistent storage: a restart clears them, and the first command per
 device reseeds from the id that device reports.
+
+**A status only answers the command it names.** Every device here repeats the phase or
+reason of its *last* command in later heartbeats until a newer event replaces it, so a
+refusal from an earlier cycle is still in the payload when the next command goes out.
+Read as an answer, one stale `rejected` failed a healthy MainValve open without the
+valve ever being given its chance to move, and the close that followed then reported
+"Main valve close unconfirmed; inspect system" with the valve still shut — both seen
+live on 2026-10-07 and reproduced off-line on 2026-10-08. So the sequencer acts on a
+status only when it arrived after the command was sent *and* it names that command:
+`reported_command_id` for MainValve, the send time for a field valve (which echoes an
+id only for a command it processed) and for the pump (which stores an id only when it
+accepts one, so a refused command carries no id at all). An attributable refusal is
+resent once — and only for a reused id; a pressure interlock, a busy actuator or an
+actuator fault is not retried, and the notice names the reason
+(`Main valve close failed: pressure_interlock`).
 
 **Flash both valves before importing this flow.** The 45-second open limit is
 shorter than the 60-second cadence the valves kept before that firmware change,

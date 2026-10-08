@@ -455,12 +455,24 @@ assert.notEqual(stopped.phase,'running','the safety stop must begin the teardown
 assert.equal(stopped.stopReason,'Maximum watering duration reached');
 
 // --- the zone selection survives leaving the page ---------------------------
-const chosen=startTick(teardown({}),{payload:{kind:'select',valve1:false,valve2:true}});
-assert.deepEqual(chosen.selection,{valve1:false,valve2:true},
+// Kept on the server, not in the component, so leaving and returning to the page does
+// not reset it -- but only from a phase where it is still editable. A run's valves are
+// fixed when it starts, so a select arriving mid-run is ignored here as well as locked
+// in the panel: a stale second tab that still shows idle must not reshape the next run.
+const idleSelect=startTick({...teardown({phase:'idle',selected:[]}),selection:{valve1:true,valve2:true}},
+  {payload:{kind:'select',valve1:false,valve2:true}});
+assert.deepEqual(idleSelect.selection,{valve1:false,valve2:true},
   'the operator selection must be kept on the server so it survives navigation');
+const faultSelect=startTick(teardown({phase:'fault'}),{payload:{kind:'select',valve1:true,valve2:false}});
+assert.deepEqual(faultSelect.selection,{valve1:true,valve2:false},
+  'a fault is not an active run: the zones for the retry stay selectable');
+const midRunSelect=startTick(teardown({selection:{valve1:true,valve2:true}}),
+  {payload:{kind:'select',valve1:false,valve2:true}});
+assert.deepEqual(midRunSelect.selection,{valve1:true,valve2:true},
+  'a select must not reach the next start while the sequence is active');
 const started=startTick(teardown({}),{payload:{kind:'start',valve1:true,valve2:false}});
-assert.deepEqual(started.selection,{valve1:true,valve2:false},
-  'a start must record the selection it was given');
+assert.equal(started.selection,undefined,
+  'a start during a teardown must not record a selection the operator could not change');
 assert(template.includes("zoneSelected('valve1')")&&template.includes("zoneSelected('valve2')"),
   'the checkboxes must read the server-side selection');
 assert(template.includes("kind:'select'"),'changing a checkbox must tell the server');
@@ -469,6 +481,46 @@ if (/v-model="valve1"/.test(template)||/v-model="valve2"/.test(template)) {
 }
 assert(template.includes('{{ runText }}'),
   'the control panel must show which valves the current run is using');
+
+// --- the zone boxes are locked for the run ----------------------------------
+// A run's valves are fixed when it starts; the sequencer opens and later closes exactly
+// state.selected. Ticking a box mid-run showed a set that was not watering and looked as
+// if it had been accepted, so the boxes are disabled while the sequence is active and
+// display state.selected rather than the stored selection for the next start.
+assert(template.includes(':disabled="zonesLocked"'),
+  'the zone checkboxes must be disabled while a sequence is active');
+assert(template.includes("{'ir-zone-locked':zonesLocked}"),
+  'a locked zone box must be styled as locked');
+const component = new Function(vueScript.replace('export default', 'return'))();
+const zoneCtx = phase => ({state:{phase,selection:{valve1:true,valve2:true},selected:['valve1']},
+  zonesLocked:component.computed.zonesLocked.call({state:{phase}}),
+  zoneSelected:component.methods.zoneSelected,
+  send(){ throw new Error('a locked zone box must not send a selection'); }});
+for (const phase of ['running','open_main','wait_main_open','wait_field_open','set_frequency',
+                     'wait_pump_start','stop_pump','wait_pump_stop','close_fields','close_main']) {
+  const ctx=zoneCtx(phase);
+  assert.equal(ctx.zonesLocked,true,`the zone boxes must be locked in ${phase}`);
+  assert.equal(ctx.zoneSelected.call(ctx,'valve1'),true,`${phase} must show the valve the run is using`);
+  assert.equal(ctx.zoneSelected.call(ctx,'valve2'),false,`${phase} must not show a valve the run is not using`);
+  component.methods.chooseZone.call(ctx,'valve2',true);   // must not send, must not throw
+}
+for (const phase of ['idle','fault',undefined]) {
+  const ctx=zoneCtx(phase);
+  assert.equal(ctx.zonesLocked,false,`the zone boxes must stay editable in ${phase||'no phase'}`);
+  assert.equal(ctx.zoneSelected.call(ctx,'valve2'),true,`${phase||'no phase'} must show the stored selection`);
+  ctx.send = m => { ctx.sent = m; };
+  component.methods.chooseZone.call(ctx,'valve2',false);
+  assert.deepEqual(ctx.sent.payload,{kind:'select',valve1:true,valve2:false},
+    `${phase||'no phase'} must still record a selection on the server`);
+}
+// A fault is not an active run: Start from fault closes both field valves first and
+// then opens the chosen set, so the panel must say so and keep the boxes usable.
+assert.equal(component.computed.zonesNote.call({state:{phase:'fault'}}),
+  'Set the zones for the retry; Start closes both field valves first.');
+assert.equal(component.computed.zonesNote.call({state:{phase:'idle'}}),
+  'Select one half of the field or both.');
+assert(template.includes('{{ zonesLocked ? '),
+  'the panel heading must say the zones are locked while a run is active');
 
 // --- a valve refused only for its id ----------------------------------------
 // Being refused for the id alone means the shared counter was behind the valve's own
@@ -549,6 +601,108 @@ const waiting = echo => valveRun({phase:'wait_field_close',phaseAt:base,selected
 assert.equal(waiting(55).s.phase,'wait_field_close',
   'a report that has not echoed the close must not confirm it');
 assert.equal(waiting(56).s.phase,'close_fields','a report echoing the close must confirm it');
+
+// --- a refusal is only ours when the report is newer than our command ---------
+// Every device reports the phase or reason of its LAST command, not of the one in
+// flight, and keeps reporting it in later heartbeats until a newer event replaces it.
+// A refusal from an earlier cycle is therefore still in the payload when the next
+// command goes out. Acting on it failed a healthy open without the valve ever being
+// given its chance to move, and then reported the close that followed as
+// "close unconfirmed" with the valve still shut. Both were seen live on 2026-10-07.
+// MainValve names the command it answers in reported_command_id, so that is the test.
+const mainRefusal = (phase,op,main,nowOffsetMs) => {
+  globalMemory.set('cmd_next_id_main',510);
+  adaptiveMemory.set('irrigation',{phase,phaseAt:base,selected:['valve1','valve2'],
+    step:phase==='wait_main_close'?-1:0,notice:'',
+    pending:{device:'main',op,id:509,at:base,retried:false},
+    devices:{...commonDevices,main:{at:base,actuator_online:true,actuator_fault_code:0,overpressure:false,
+      actual_angle_deg:op==='close'?90:0,valve_moving:false,...main}}});
+  Date.now=()=>base+(nowOffsetMs||0);
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const downlinks=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  // A failing open starts the teardown, which commands the field valves in the same
+  // tick, so a plain downlink count cannot tell a mis-sent main command from it.
+  const toMain=downlinks.filter(m=>m.topic.includes(env.get('MAIN_DEV_EUI')));
+  return {s:adaptiveMemory.get('irrigation'),sent:downlinks.length,toMain:toMain.length};
+};
+const staleOpen=mainRefusal('wait_main_open','open',
+  {command_phase:'rejected',reason:'pressure_interlock',reported_command_id:400,last_command_id:400});
+assert.equal(staleOpen.s.phase,'wait_main_open','a refusal echoing another command id must not fail the open');
+assert.equal(staleOpen.sent,0,'a refusal echoing another command id must not be resent');
+assert.equal(staleOpen.s.notice,'','a stale refusal must not rewrite the notice');
+const staleClose=mainRefusal('wait_main_close','close',
+  {command_phase:'rejected',reason:'pressure_interlock',reported_command_id:400,last_command_id:400});
+assert.equal(staleClose.s.phase,'wait_main_close','a refusal echoing another command id must not fault the close');
+assert.equal(staleClose.s.notice,'','a stale refusal must not claim the close was unconfirmed');
+const staleFailed=mainRefusal('wait_main_open','open',
+  {command_phase:'failed',reason:'movement_timeout',reported_command_id:400,last_command_id:400});
+assert.equal(staleFailed.s.phase,'wait_main_open','a failure from an earlier command must not fail this open');
+// A report that predates the command cannot answer it, even if it echoes the right id.
+const olderReport=mainRefusal('wait_main_open','open',
+  {at:base-5000,command_phase:'rejected',reason:'invalid_command',reported_command_id:509,last_command_id:400});
+assert.equal(olderReport.s.phase,'wait_main_open','a report older than the command must not act on it');
+assert.equal(olderReport.sent,0,'a report older than the command must not be resent to');
+// Ours, and refused for the id alone: the one case worth resending.
+const idRefusedOpen=mainRefusal('wait_main_open','open',
+  {command_phase:'rejected',reason:'invalid_command',reported_command_id:509,last_command_id:400});
+assert.equal(idRefusedOpen.toMain,1,'an id refusal that echoes our command must be resent once');
+assert.equal(idRefusedOpen.s.phase,'wait_main_open','resending must not move the sequence on');
+assert.equal(idRefusedOpen.s.pending.retried,true,'the resend must be marked as the single retry');
+// Ours, and refused by the hardware or the pressure interlock: never retried. The
+// guide is explicit that a close blocked by upstream overpressure must not simply be
+// resent, so the sequence faults and names the reason instead.
+const interlock=mainRefusal('wait_main_close','close',
+  {command_phase:'rejected',reason:'pressure_interlock',reported_command_id:509,last_command_id:400});
+assert.equal(interlock.sent,0,'a pressure interlock must not be resent');
+assert.equal(interlock.s.phase,'fault','a pressure interlock must fault the close');
+assert.equal(interlock.s.notice,'Main valve close failed: pressure_interlock',
+  'the fault must name the reason the valve reported');
+const busy=mainRefusal('wait_main_open','open',
+  {valve_moving:true,command_phase:'rejected',reason:'actuator_busy',reported_command_id:509,last_command_id:400});
+assert.equal(busy.toMain,0,'a busy actuator must not be resent to');
+assert.equal(busy.s.stopReason,'Main valve open failed: actuator_busy',
+  'a busy actuator must start the shutdown and name the reason');
+const failedOpen=mainRefusal('wait_main_open','open',
+  {command_phase:'failed',reason:'actuator_fault',reported_command_id:509,last_command_id:509});
+assert.equal(failedOpen.s.stopReason,'Main valve open failed: actuator_fault',
+  'an actuator failure must be named in the notice');
+
+// A valve refusal that arrived before our resend cannot be the answer to it, or the
+// retry would fault on the very report that justified it. The valve has refused once
+// (that report is still the newest thing it has said), we resent at base+500 and the
+// valve has not answered yet.
+const staleAfterRetry = () => {
+  globalMemory.set('cmd_next_id_valve1',106);
+  adaptiveMemory.set('irrigation',{phase:'wait_field_close',phaseAt:base,selected:['valve1'],step:0,
+    notice:'',pending:null,valveRetried:'valve1',valveCmd:{valve1:106},valveSentAt:{valve1:base+500},
+    devices:{...commonDevices,
+      valve1:{at:base,pcv_last_commanded:'open',status_reason:'invalid_command_rejected',last_command_id:105},
+      pump:pumpOff}});
+  Date.now=()=>base+1000;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const downlinks=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  return {s:adaptiveMemory.get('irrigation'),sent:downlinks.length};
+};
+assert.equal(staleAfterRetry().s.phase,'wait_field_close',
+  'a refusal older than our resend must not fault the sequence');
+assert.equal(staleAfterRetry().sent,0,'a refusal older than our resend must not be resent to again');
+
+// The pump stores an id only for a command it accepted, so a refused command carries
+// no id at all and freshness is the only test. A result that predates the command is
+// not its answer and must not spend the single retry.
+const stalePump = () => {
+  globalMemory.set('cmd_next_id_pump',5);
+  adaptiveMemory.set('irrigation',{phase:'wait_pump_start',phaseAt:base,selected:['valve1'],step:0,notice:'',
+    pending:{device:'pump',op:'start',id:500,at:base,retried:false},
+    devices:{...commonDevices,pump:{at:base-1000,communication_ok:true,configuration_valid:true,
+      vfd_fault_code:0,running:false,frequency_armed:true,last_command_id:305,command_result:'invalid'}}});
+  Date.now=()=>base;
+  const out=new Function('msg','flow','node','env','Buffer','global',control)({payload:{kind:'tick'}},adaptiveFlow,node,env,Buffer,globalCtx);
+  const downlinks=(Array.isArray(out[0])?out[0]:[]).filter(m=>typeof m.topic==='string'&&m.topic.endsWith('/command/down'));
+  return {s:adaptiveMemory.get('irrigation'),sent:downlinks.length};
+};
+assert.equal(stalePump().sent,0,'a pump result older than the command must not be resent to');
+assert.equal(stalePump().s.notice,'','a stale pump refusal must not rewrite the notice');
 
 Date.now=realNow;
 console.log('Irrigation sequence smoke test passed');

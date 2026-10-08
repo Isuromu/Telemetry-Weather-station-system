@@ -1,8 +1,15 @@
-"""Definitive lost-downlink check.
+"""Definitive downlink check: published, answered, or refused?
 
 Reads a mosquitto_sub log written with `-F '%I %t %p'` (ISO arrival time,
-topic, payload) and answers, per device: which command ids were published,
-and did the device ever echo them back?
+topic, payload) and answers, per device: which command ids were published, did
+the device ever echo them back, and was the echo an acceptance or a refusal?
+
+The distinction matters because a device that refuses a command still echoes its
+id, so "did the id come back" alone calls a refused open confirmed. For MainValve
+the id is stored only when the command is accepted, so an id seen in
+`reported_command_id` but never in `last_command_id` is a refusal or a failed
+movement; the report's own phase and reason name it. A PCV reports a refusal
+reason for a command it holds, and the pump stores an id only on acceptance.
 
 Downlink payload shapes seen on this system:
   * valve_1 / valve_2  -> fPort 30, JSON `object` {"pcv": "open"|"close", "command_id": N}
@@ -22,6 +29,17 @@ import re
 LINE = re.compile(r"^(\S+) (\S+) (.*)$")
 
 PUMP_OP = {"03": "set_freq", "04": "start", "01": "stop"}
+
+# Reasons a device reports when it did not carry the command out. MainValve names
+# its phase and reason in the same uplink; a PCV reports status_reason; the pump
+# reports command_result. Kept as one set so any of the three can be checked
+# without a per-device branch.
+REFUSAL_REASONS = {
+    "invalid_command", "duplicate_command", "pressure_interlock",
+    "pressure_sensor_error", "actuator_busy", "movement_timeout",
+    "actuator_fault", "local_override", "modbus_error", "invalid_command_rejected",
+    "pcv_actuation_failed", "lorawan_error",
+}
 
 
 def decode_down(fport, d):
@@ -79,15 +97,29 @@ def main():
         elif topic.endswith("/event/up"):
             o = d.get("object") or {}
             ups.append({"t": t[11:19], "eui": eui, "fcnt": d.get("fCnt"),
-                        "reported": o.get("reported_command_id"), "last": o.get("last_command_id")})
+                        "reported": o.get("reported_command_id"), "last": o.get("last_command_id"),
+                        "why": o.get("command_phase") or o.get("status_reason") or o.get("command_result")})
 
     def keep(r):
         return a.since is None or r["t"] >= a.since
 
+    def verdict(dn, after):
+        """(kind, uplink, why): accepted, refused or lost for this downlink."""
+        for u in after:
+            if dn["id"] == u["last"]:
+                # The id is stored when the command is accepted, so this is an accept
+                # unless the report itself still carries a refusal reason.
+                if u["why"] in REFUSAL_REASONS:
+                    return "refused", u, u["why"]
+                return "accepted", u, u["why"]
+        for u in after:
+            if dn["id"] == u["reported"]:
+                return "refused", u, u["why"]
+        return "lost", None, None
+
     print("device map: " + ", ".join("%s=%s" % (k, v) for k, v in names.items()))
     print("\n%-9s %-9s %-6s %-10s %-6s %s" % ("arrived", "device", "port", "op", "id", "verdict"))
-    lost = 0
-    total = 0
+    lost = refused = total = 0
     for dn in downs:
         if not keep(dn):
             continue
@@ -98,17 +130,23 @@ def main():
                 dn["t"], dev, dn["port"], dn["op"], "-", dn["detail"]))
             continue
         after = [u for u in ups if u["eui"] == dn["eui"] and u["t"] >= dn["t"]]
-        hit = [u for u in after if dn["id"] in (u["reported"], u["last"])]
-        if hit:
-            print("%-9s %-9s %-6s %-10s %-6s confirmed (uplink %s fcnt=%s)" % (
-                dn["t"], dev, dn["port"], dn["op"], dn["id"], hit[0]["t"], hit[0]["fcnt"]))
+        kind, u, why = verdict(dn, after)
+        if kind == "accepted":
+            print("%-9s %-9s %-6s %-10s %-6s accepted (uplink %s fcnt=%s%s)" % (
+                dn["t"], dev, dn["port"], dn["op"], dn["id"], u["t"], u["fcnt"],
+                ", %s" % why if why else ""))
+        elif kind == "refused":
+            refused += 1
+            print("%-9s %-9s %-6s %-10s %-6s *** ANSWERED AND REFUSED *** %s (uplink %s fcnt=%s)" % (
+                dn["t"], dev, dn["port"], dn["op"], dn["id"], why or "-", u["t"], u["fcnt"]))
         else:
             lost += 1
             print("%-9s %-9s %-6s %-10s %-6s *** LOST *** (%d later uplinks, none mention it)" % (
                 dn["t"], dev, dn["port"], dn["op"], dn["id"], len(after)))
-    print("\n%d downlinks, %d lost" % (total, lost))
+    print("\n%d downlinks, %d refused, %d lost" % (total, refused, lost))
     if a.json:
-        json.dump({"total": total, "lost": lost, "down_links": downs}, open("irrtest/correlation.json", "w"), indent=2)
+        json.dump({"total": total, "refused": refused, "lost": lost, "down_links": downs},
+                  open("irrtest/correlation.json", "w"), indent=2)
 
 
 if __name__ == "__main__":
