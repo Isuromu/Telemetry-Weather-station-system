@@ -96,6 +96,9 @@ const pumpMaxAge = () => device('pump').running === true ? cfg.pumpRunningMaxAge
 const pumpFresh = () => fresh('pump',pumpMaxAge());
 const pumpLive = () => fresh('pump',device('pump').running===true?cfg.pumpRunningMaxAgeSec:cfg.pumpOnlineMaxAgeSec);
 const isValve = k => k==='valve1'||k==='valve2';
+// Operator-facing names, so a gate reason never exposes the internal key ('valve2')
+// the flow uses to route messages.
+const VALVE_LABEL = {valve1:'Valve 1', valve2:'Valve 2'};
 // The PCV codec names the uplink states open/closed while the downlink action is
 // open/close, so a state comparison must not reuse the action word.
 const pcvState = op => op==='close' ? 'closed' : op;
@@ -192,9 +195,16 @@ function ready(list) {
   if (!fresh('soil',cfg.soilMaxAgeSec)||t.sensor_valid!==true||num(t.vwc_percent)===null) return 'Soil moisture unavailable or stale';
   if (t.vwc_percent>=cfg.startMoisturePercent) return 'Soil is not dry enough';
   if (!fresh('main',cfg.mainMaxAgeSec)||m.actuator_online!==true||m.overpressure===true||num(m.actuator_fault_code)!==0) return 'Main valve offline, stale or faulted';
-  if (!pumpLive()||p.communication_ok!==true||p.configuration_valid!==true||num(p.vfd_fault_code)!==0||p.running===true) return 'Pump offline, running or faulted';
+  // One reason per state, in this order, so a stale report is never read as a live
+  // fault and a healthy running pump reads as running rather than as a fault. Every
+  // branch still refuses Start, as the single string it replaces did.
+  if (!pumpLive()) return 'Pump status unavailable or stale';
+  if (p.communication_ok!==true) return 'Pump VFD communication fault';
+  if (p.configuration_valid!==true) return 'Pump VFD configuration invalid';
+  if (num(p.vfd_fault_code)!==0) return 'Pump VFD fault';
+  if (p.running===true) return 'Pump already running';
   if (!p.frequency_armed && !(cfg.pumpFrequencyHz>=cfg.pumpMinFrequencyHz&&cfg.pumpFrequencyHz<=cfg.pumpMaxFrequencyHz)) return 'Pump frequency invalid';
-  for (const k of (list||s.selected)) if (!valveFresh(k)) return k+' status unavailable or stale';
+  for (const k of (list||s.selected)) if (!valveFresh(k)) return (VALVE_LABEL[k]||k)+' status unavailable or stale';
   return '';
 }
 // A run's valves are fixed the moment it starts, so the operator's selection is only
@@ -205,6 +215,17 @@ function ready(list) {
 // shows idle cannot reshape the next run. Neither gate can reshape a run in flight --
 // only s.selected does that, and nothing here writes it.
 const selectAllowed = () => s.phase==='idle'||s.phase==='fault';
+// The valves the panel's gate must describe, while the selection is still editable.
+// That is the operator's ticked boxes -- the same set the start branch hands to
+// ready() -- not s.selected, which holds the last run's valves (or both of them,
+// after a stop) and would name a zone the operator has unticked, pinning Start shut
+// on a healthy chosen set. An absent selection means the boxes have never been
+// published, and the panel offers both halves (zoneSelected's `!sel ? true`), so it
+// reads as both rather than as none.
+const tickedValves = () => {
+  const box=s.selection||{valve1:true,valve2:true};
+  return ['valve1','valve2'].filter(k=>box[k]===true);
+};
 function decodePump(e) {
   let b;
   try { b=Buffer.from(e.data||'', 'base64'); } catch (_) { return null; }
@@ -384,6 +405,14 @@ if (s.phase==='wait_pump_start') {if(done('pump','start')) {advance('running');s
   else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump start accepted; waiting for final VFD condition';
   else if(timed(cfg.pumpCommandTimeoutSec)) stop('Pump start unconfirmed');}
 if (s.phase==='stop_pump') {if(p.running===false&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else {command('pump','stop');advance('wait_pump_stop');}}
+// An unanswered stop falls back to the free stop (op 02), which cuts the drive output
+// and lets the pump coast: no control over the flow rate, so the column can reverse onto
+// the non-return valve (water hammer), and unlike a deceleration stop nothing is ramped.
+// See docs/SAFETY.md, "The free stop (estop) is a damaging stop". That is why the
+// escalation must go through a repeated deceleration stop first -- and why the repeat,
+// not a longer pumpStopTimeoutSec, is what this phase is missing: today one lost downlink
+// waits out the whole deadline and reaches straight for the free stop, while the field
+// valves and the main valve each repeat once when silent (valveSilent/mainSilent).
 if (s.phase==='wait_pump_stop') {if((done('pump','stop')||done('pump','estop'))&&pumpFresh()) {s.step=s.selected.length-1;advance('close_fields');}else if(pumpAnswered()&&p.command_result==='invalid'&&retryRefused('pump',s.pending.op)) s.notice='Pump refused the stop; resending with a fresh id';
 else if(p.command_result==='in_progress'&&num(p.last_command_id)===s.pending?.id)s.notice='Pump stop accepted; waiting for final VFD condition';else if(timed(cfg.pumpStopTimeoutSec)){if(s.pending.op==='stop'){command('pump','estop');s.notice='Pump stop unconfirmed; emergency stop sent';}else {s.phase='fault';s.notice='Pump stop unconfirmed. Valves left open; inspect pump.';}}}
 if (s.phase==='close_fields') {if(s.step<0) {if(!beginQueuedStart()) advance('close_main');}else {const k=s.selected[s.step];if(valveReported(k,device(k),pcvState('close'))) s.step--;else {command(k,'close');advance('wait_field_close');}}}
@@ -404,7 +433,8 @@ if (s.phase==='wait_main_close') {
     else if(mainSilent('close')) s.notice='Main valve close unconfirmed; repeating once';
     else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
 }
-s.configured=configured;s.settings=cfg;s.check=ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
+const gate=tickedValves();
+s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?ready(gate):'Select at least one field valve'):ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
 

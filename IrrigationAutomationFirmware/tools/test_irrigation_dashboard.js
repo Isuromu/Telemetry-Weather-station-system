@@ -299,7 +299,7 @@ const beyondPumpOnlineAgeMs = (pumpOnlineAge + 1) * 1000;
 const beyondPumpStoppedAgeMs = (pumpStoppedAge + 1) * 1000;
 assert.equal(pumpTick(stoppedPump(withinPumpOnlineAgeMs)).check,'',
   'a stopped pump within pumpOnlineMaxAgeSec must not refuse Start');
-assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).check,'Pump offline, running or faulted',
+assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).check,'Pump status unavailable or stale',
   'past pumpOnlineMaxAgeSec the Start gate must still refuse');
 adaptiveMemory.set('irrigation',{phase:'stop_pump',selected:['valve1'],step:0,notice:'',pending:null,devices:stoppedPump(beyondPumpStoppedAgeMs)});
 Date.now=()=>base;
@@ -311,6 +311,23 @@ assert.equal(pumpTick(stoppedPump(withinPumpOnlineAgeMs)).devices.pump.stale,fal
   'the card must remain live within pumpOnlineMaxAgeSec');
 assert.equal(pumpTick(stoppedPump(beyondPumpOnlineAgeMs)).devices.pump.stale,true,
   'past pumpOnlineMaxAgeSec the card must read stale');
+// The refusal is split by state, so the operator is told which of five things is wrong
+// instead of one string covering all of them. A healthy *running* pump is the case that
+// matters: the single string it replaces called a running pump "offline, running or
+// faulted", which reads as a fault for the one state that is not one.
+const pumpAt = extra => pumpTick({...commonDevices,
+  pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false,...extra}});
+assert.equal(pumpAt({}).check,'','a healthy stopped pump must clear the Start gate');
+assert.equal(pumpAt({running:true}).check,'Pump already running',
+  'a running pump must read as running, not as a fault');
+assert.equal(pumpAt({communication_ok:false}).check,'Pump VFD communication fault');
+assert.equal(pumpAt({configuration_valid:false}).check,'Pump VFD configuration invalid');
+assert.equal(pumpAt({vfd_fault_code:7}).check,'Pump VFD fault');
+// Staleness is decided first, so a stale report is never reported as a live fault.
+assert.equal(pumpTick({...commonDevices,
+  pump:{at:base-(pumpOnlineAge+1)*1000,communication_ok:false,configuration_valid:false,
+    vfd_fault_code:7,running:true}}).check,'Pump status unavailable or stale',
+  'a stale report must be named as stale before any of its cached fault bits');
 // The valve limits split by state: the same minute of silence is stale while a
 // valve is open and still fresh while it is closed. That is what lets the open
 // half stay tight without the closed half flagging a healthy idle valve.
@@ -538,6 +555,38 @@ if (/v-model="valve1"/.test(template)||/v-model="valve2"/.test(template)) {
 assert(template.includes('{{ runText }}'),
   'the control panel must show which valves the current run is using');
 
+// --- the Start gate describes the boxes the operator ticked -----------------
+// The panel's reason is built from the same set the start branch judges: the operator's
+// selection while it is still editable. Built from s.selected instead -- the last run's
+// valves, or both of them after a stop -- it named a zone the operator had unticked and
+// pinned Start shut on a healthy chosen set, with no way forward. valve2 is open and
+// silent past valveOpenMaxAgeSec here, so it reads stale; valve1 is fresh.
+const staleOpenValve2 = {...commonDevices,
+  valve2:{at:base-(valveOpenAge+1)*1000,pcv_last_commanded:'open'},
+  pump:{at:base,communication_ok:true,configuration_valid:true,vfd_fault_code:0,running:false}};
+const gateTick = extra => startTick(teardown({phase:'idle',step:0,...extra}),{payload:{kind:'tick'}});
+assert.equal(gateTick({selection:{valve1:true,valve2:false},devices:staleOpenValve2}).check,'',
+  'an unticked stale valve must not block the Start of a healthy chosen one');
+assert.equal(gateTick({selection:{valve1:false,valve2:true},devices:staleOpenValve2}).check,
+  'Valve 2 status unavailable or stale','a ticked stale valve must still be named for the operator');
+assert.equal(gateTick({selection:{valve1:false,valve2:false},devices:staleOpenValve2}).check,
+  'Select at least one field valve',
+  'nothing ticked must give the same reason the start branch refuses with');
+assert.equal(gateTick({selection:undefined,devices:staleOpenValve2}).check,
+  'Valve 2 status unavailable or stale',
+  'before a select arrives the panel offers both halves, so the gate must cover both');
+assert.equal(gateTick({phase:'fault',selection:{valve1:true,valve2:false},
+  devices:{...staleOpenValve2,valve1:{at:base-(valveOpenAge+1)*1000,pcv_last_commanded:'open'}}}).check,
+  'Valve 1 status unavailable or stale',
+  'a fault retry is judged on the chosen set too, since the start branch re-checks it');
+// The reason is an operator-facing string, so it must never carry the internal key the
+// flow routes messages by. Anything naming a valve has to come from the label map.
+for (const reason of [gateTick({selection:{valve1:true,valve2:true},devices:staleOpenValve2}).check,
+    gateTick({selection:{valve1:true,valve2:false},
+      devices:{...staleOpenValve2,valve1:{at:base-(valveOpenAge+1)*1000,pcv_last_commanded:'close'}}}).check]) {
+  assert.equal(/\bvalve[12]\b/.test(reason),false,`a gate reason must not ship the key: "${reason}"`);
+}
+
 // --- the zone boxes are locked for the run ----------------------------------
 // A run's valves are fixed when it starts; the sequencer opens and later closes exactly
 // state.selected. Ticking a box mid-run showed a set that was not watering and looked as
@@ -577,6 +626,34 @@ assert.equal(component.computed.zonesNote.call({state:{phase:'idle'}}),
   'Select one half of the field or both.');
 assert(template.includes('{{ zonesLocked ? '),
   'the panel heading must say the zones are locked while a run is active');
+
+// --- the banner says which phase it is ---------------------------------------
+// A fault is terminal: the run stopped mid-teardown and someone has to inspect the
+// system. Read through state.check alone it was dressed as an ordinary Start-gate
+// refusal, which says "try again later" for the one phase that says "do not".
+const banner = state => {
+  const ctx={state};
+  return {cls:component.computed.bannerClass.call(ctx),
+    symbol:component.computed.bannerSymbol.call(ctx),
+    title:component.computed.bannerTitle.call(ctx),
+    body:component.computed.bannerBody.call(ctx)};
+};
+const faultBanner=banner({phase:'fault',notice:'Main valve close unconfirmed; inspect system'});
+assert.equal(faultBanner.cls,'ir-banner-fault','a fault must get its own banner colour');
+assert.equal(faultBanner.symbol,'✕');
+assert.equal(faultBanner.title,'Fault — action required');
+assert.equal(faultBanner.body,'Main valve close unconfirmed; inspect system',
+  'the fault notice must reach the operator, not be replaced by the gate reason');
+assert.equal(banner({phase:'fault',check:'Valve 2 status unavailable or stale'}).body,
+  'Inspect the system before restarting','a fault with no notice must still say what to do');
+assert.equal(banner({phase:'running',notice:'Watering'}).cls,'ir-banner-running');
+assert.equal(banner({phase:'idle',check:'Soil is not dry enough'}).cls,'ir-banner-blocked');
+assert.equal(banner({phase:'idle',check:'Soil is not dry enough'}).title,'Start blocked');
+assert.equal(banner({phase:'idle'}).title,'Ready to water');
+assert.equal(banner({phase:'idle'}).body,'All required checks passed');
+assert(template.includes('ir-banner-fault'),'the fault banner style must ship');
+assert(template.includes('bannerTitle')&&template.includes('bannerBody'),
+  'the banner must switch on phase, not just state.check');
 
 // --- a valve refused only for its id ----------------------------------------
 // Being refused for the id alone means the shared counter was behind the valve's own

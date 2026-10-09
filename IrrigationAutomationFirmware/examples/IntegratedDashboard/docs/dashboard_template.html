@@ -12,11 +12,11 @@
       </div>
     </header>
 
-    <div class="ir-banner" :class="state.phase === 'running' ? 'ir-banner-running' : state.check ? 'ir-banner-blocked' : 'ir-banner-ready'" role="status">
-      <span class="ir-banner-symbol">{{ state.phase === 'running' ? '●' : state.check ? '!' : '✓' }}</span>
+    <div class="ir-banner" :class="bannerClass" role="status">
+      <span class="ir-banner-symbol">{{ bannerSymbol }}</span>
       <div>
-        <strong>{{ state.phase === 'running' ? 'Watering in progress' : state.check ? 'Start blocked' : 'Ready to water' }}</strong>
-        <span>{{ state.phase === 'running' ? (state.notice || 'Monitoring safety conditions') : state.check || state.notice || 'All required checks passed' }}</span>
+        <strong>{{ bannerTitle }}</strong>
+        <span>{{ bannerBody }}</span>
       </div>
     </div>
 
@@ -97,6 +97,31 @@ export default {
       ? 'Set the zones for the retry; Start closes both field valves first.'
       : 'Select one half of the field or both.' },
     phaseLabel() { return String(this.state.phase || 'idle').replace(/_/g,' ').toUpperCase() },
+    // The banner switches on phase, not just state.check. A fault is terminal: it needs
+    // its own colour and wording, because the run stopped mid-teardown and an operator
+    // has to inspect the system. Read through state.check alone it was dressed as an
+    // ordinary Start-gate refusal ("Start blocked"), which reads as "try again later"
+    // for the one state that says "do not".
+    bannerClass() {
+      if (this.state.phase === 'fault') return 'ir-banner-fault';
+      if (this.state.phase === 'running') return 'ir-banner-running';
+      return this.state.check ? 'ir-banner-blocked' : 'ir-banner-ready';
+    },
+    bannerSymbol() {
+      if (this.state.phase === 'fault') return '✕';
+      if (this.state.phase === 'running') return '●';
+      return this.state.check ? '!' : '✓';
+    },
+    bannerTitle() {
+      if (this.state.phase === 'fault') return 'Fault — action required';
+      if (this.state.phase === 'running') return 'Watering in progress';
+      return this.state.check ? 'Start blocked' : 'Ready to water';
+    },
+    bannerBody() {
+      if (this.state.phase === 'fault') return this.state.notice || 'Inspect the system before restarting';
+      if (this.state.phase === 'running') return this.state.notice || 'Monitoring safety conditions';
+      return this.state.check || this.state.notice || 'All required checks passed';
+    },
     phaseClass() { return this.state.phase === 'running' ? 'ir-phase-running' : this.state.phase === 'fault' ? 'ir-phase-fault' : 'ir-phase-idle' },
     mqttLabel() { const t=String(this.state.mqtt_status||'').toLowerCase(); return t.includes('disconnected') ? 'disconnected' : t.includes('connected') ? 'connected' : t.includes('connecting') ? 'connecting' : 'unknown' },
     mqttClass() { return 'ir-mqtt-' + this.mqttLabel },
@@ -232,6 +257,7 @@ export default {
 .ir-banner{display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:11px;margin-bottom:16px;background:#e8f1f7;color:#235a79;border:1px solid #ccdfed}
 .ir-banner-running,.ir-banner-ready{background:#e8f6ed;color:#176b42;border-color:#c7e7d3}
 .ir-banner-blocked{background:#fff5e8;color:#8b5c16;border-color:#f3ddb3}
+.ir-banner-fault{background:#fbe3e3;color:#a63333;border-color:#f0c2c2}
 .ir-banner-symbol{display:grid;place-items:center;flex:none;width:28px;height:28px;border-radius:50%;background:currentColor;color:white;font-weight:800;line-height:1}
 .ir-banner>div{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13px}.ir-banner strong{font-size:14px}
 .ir-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}

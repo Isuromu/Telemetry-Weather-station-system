@@ -39,3 +39,37 @@ commission, or maintain it.
 - Watch for leaks, pipe movement, cavitation, vibration, overheating, and
   abnormal noise.
 - Maximum head and maximum flow are not simultaneous operating values.
+
+## The free stop (`estop`) is a damaging stop, not a better one
+
+Two different stops exist, and the difference matters:
+
+| command | DELIXI write | behaviour |
+|---|---|---|
+| `pump stop` (fPort 50, op 01) | `0x0006` deceleration stop | the drive ramps the motor down over its configured decel time |
+| `pump estop` (fPort 50, op 02) | `0x0005` free stop | the drive cuts its output; motor and impeller coast on their own inertia |
+
+- A free stop removes the only control over the flow rate. Against a static head
+  the column decelerates on its own and can reverse before the impeller stops, so
+  the non-return valve closes onto a reversing flow — a pressure surge in the
+  pipe, valve and casing (water hammer). A deceleration stop ramps the flow down
+  under control instead.
+- Repeated free stops load the check valve and can cavitate the pump on a long
+  drop. Treat a free stop as an event to go and inspect, not as routine shutdown.
+- It is not regeneration that makes this dangerous: coasting applies no braking
+  torque, so nothing is pushed back into the VFD DC bus. A *fast deceleration*
+  stop is what regenerates and can trip the drive on overvoltage — that is a
+  drive decel-time setting, a separate concern from this command.
+- It is also still a software command over LoRaWAN, not a physical emergency-stop
+  circuit (see Functional limits), so it can be lost like any other downlink.
+
+**Policy.** The escalation for an unanswered pump stop must be: resend the
+**deceleration stop** while the pump is still reporting, and reach for the free
+stop only if that also goes unanswered. One lost downlink is not evidence that
+the pump is out of control. Do not raise `pumpStopTimeoutSec` to avoid the
+escalation — the missing step is the repeat, not a longer wait.
+
+Observed 2026-10-09: one lost `stop` downlink took the sequencer straight to the
+free stop at the 150 s deadline. The pump had been reporting normally throughout
+(11 uplinks in that window), so a free stop was issued on a healthy pump for the
+sole reason that one frame did not land.
