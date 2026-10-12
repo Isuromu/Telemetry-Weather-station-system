@@ -2,8 +2,13 @@
 // import invariants the shipped flow has to keep.
 const fs = require('fs');
 const assert = require('assert');
+const { findRunawayLoop, describeLoop } = require('./flow_test_common.js');
 const nodes = JSON.parse(fs.readFileSync('examples/IntegratedDashboard/irrigation_dashboard_flow.json', 'utf8'));
 const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+const runawayLoop = findRunawayLoop(nodes);
+assert.equal(runawayLoop, null, runawayLoop &&
+  `generated flow has a runaway function-node loop: ${describeLoop(nodes, runawayLoop)}`);
 
 // Ids the live canvas already owns. Node-RED's importer preserves incoming ids
 // and reuses or replaces a node whose id it recognises, but adds a *second*

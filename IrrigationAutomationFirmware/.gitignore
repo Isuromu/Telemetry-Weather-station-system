@@ -21,3 +21,7 @@ config/PumpControlLoRaSecrets.h
 /irrtest/deployed_flows_backup_*.json
 /irrtest/shot_*.png
 /irrtest/__pycache__/
+
+# Project-local claudecodex binary, isolated config, auth metadata, and logs.
+/.local-tools/claudecodex/
+/.local/

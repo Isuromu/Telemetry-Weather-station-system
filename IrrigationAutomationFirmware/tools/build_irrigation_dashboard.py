@@ -1,14 +1,14 @@
 """Build the single-page Node-RED Dashboard 2 irrigation flow."""
 
-import json
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "examples" / "IntegratedDashboard" / "irrigation_dashboard_flow.json"
+OUTPUT = "examples/IntegratedDashboard/irrigation_dashboard_flow.json"
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from flow_common import write_flow  # noqa: E402
 # The water tile goes stale on the WaterLevel node's own schedule, and that
 # interval changes between bench and field, so the limit is derived rather than
 # typed in. See tools/water_level_interval.py.
@@ -526,9 +526,7 @@ def build():
         node(UI_THEME, "ui-theme", name="MyTheme", colors={"surface": "#ffffff", "primary": "#0094ce", "bgPage": "#eeeeee", "groupBg": "#ffffff", "groupOutline": "#cccccc"}, sizes={"density": "default", "pagePadding": "12px", "groupGap": "12px", "groupBorderRadius": "4px", "widgetGap": "12px"}),
         node(ID_GLOBAL_CONFIG, "global-config", env=[], modules={"@flowfuse/node-red-dashboard": "1.30.2"}),
     ]
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(nodes, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(OUTPUT)
+    write_flow(nodes, OUTPUT, indent=2, trailing_newline=True)
 
 
 if __name__ == "__main__":

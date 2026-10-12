@@ -57,6 +57,16 @@ mobile plan payload.
 - The initial prototype registry uses logical field id `field-001`, mapped to
   `valve1`, as the commissioned flow-meter field. The name is intentionally a
   stable integration id rather than a crop or location name.
+- Prototype API pairing uses a short-lived QR code to provision a long random
+  token into the mobile app's secure storage.
+- The Raspberry Pi must have a synchronized clock before starting a due plan;
+  while unsynchronized, due plans remain delayed with a named clock reason.
+- On restart during an active run, recovery may attempt only the existing safe
+  stop path after fresh telemetry. If the stop outcome is uncertain, the plan
+  enters `recovery_required`; watering is never resumed or restarted
+  automatically.
+- A newer revision may replace only a `scheduled` or `delayed` plan. An active
+  plan must be cancelled before its target or stop rule can change.
 - `valve1` and `valve2` may be opened together for a controlled stress test.
   Any manually simulated flow for `valve2` is test-only evidence and must be
   labelled `simulated_meter`; it must never make `valve2` a production-capable
@@ -96,7 +106,7 @@ timezone must be retained even if the server stores UTC internally.
   "valid_until": "2026-10-10T16:00:00+05:00",
   "targets": {
     "mode": "selected",
-    "valve_ids": ["valve1"]
+    "field_ids": ["field-001"]
   },
   "run_mode": "parallel",
   "stop": {
@@ -131,7 +141,7 @@ plan, not recreated from a hidden gateway default.
 | `timezone` | IANA zone used for calendar presentation, for example `Asia/Tashkent`. |
 | `start_at` | Intended start time. |
 | `valid_until` | End of the permitted delay window. |
-| `targets` | Explicit valve selection; `all` is resolved to an explicit snapshot when accepted. |
+| `targets` | Explicit field selection; `all` is resolved to an explicit field/valve snapshot when accepted. |
 | `run_mode` | `parallel` in version 1. |
 | `stop` | Requested duration or volume target. `moisture` is reserved for a later schema revision. |
 | `hard_max_runtime_sec` | Mandatory upper execution bound. |
@@ -576,11 +586,15 @@ run active`, `reservoir data stale`, or `meter unavailable`.
 
 ### Phase 0 — freeze the contract
 
-1. Approve this document and resolve the open decisions below.
-2. Define stable field-to-valve and soil-sensor-to-field identifiers.
+1. Contract approved; the remaining deployment and commissioning decisions are
+   listed below.
+2. Use the confirmed prototype registry mapping `field-001` to `valve1`; add
+   other mappings only after site confirmation.
 3. Install and verify the Raspberry Pi SQLite module.
-4. Define prototype local-Wi-Fi token provisioning for the React Native app.
-5. Write payload validation examples, including accepted and rejected plans.
+4. Implement the approved QR token pairing flow for the React Native app.
+5. Add accepted and rejected request fixtures against
+   [`plan-request.schema.json`](plan-request.schema.json) and the semantic
+   capability checks.
 
 ### Phase 1 — persistent plan store and API
 
@@ -629,32 +643,24 @@ run active`, `reservoir data stale`, or `meter unavailable`.
 3. Keep Node-RED as the hardware execution adapter until its replacement is tested.
 4. Port the polished dashboard to the local server without changing plan payloads or device protocols.
 
-## Open decisions before Phase 1
+## Remaining commissioning and deployment decisions
 
-1. **Prototype authentication:** Decide how the React Native app receives and
-   rotates the local gateway token. Recommendation: pair the app at the site,
-   show a short-lived QR pairing code on the gateway dashboard, then store a
-   long random gateway token in the platform secure store.
-2. **Static delay window:** Choose the prototype `valid_until` duration that
-   mobile uses until its UI supports a choice. It must be configuration, not a
-   hidden Node-RED constant.
-3. **Time authority:** The Raspberry Pi needs NTP or another reliable clock.
-   Recommendation: do not start a due plan when its clock is unsynchronised;
-   retain it as delayed and surface the reason.
-4. **Field registry:** Define the initial mapping of mobile field IDs to valves,
-   meter capability, and soil sensors. Begin with one metered field mapped to
-   `valve1`; do not invent future-field mappings.
-5. **Pump capacity:** Set the operator-commissioned maximum parallel valve set
-   or maximum count. Version 1 does not calculate hydraulic capacity from
-   telemetry; it validates plans against this configured limit.
-6. **Restart recovery:** Decide whether a Raspberry Pi restart during a run
-   should automatically enter the existing stop path after fresh telemetry, or
-   require an operator acknowledgement first. Recommendation: never resume or
-   restart watering automatically; attempt only the safe stop path after fresh
-   evidence, then enter `recovery_required` if its outcome is uncertain.
-7. **Revision rule:** Confirm the recommended rule that a newer revision may
-   replace only `scheduled` or `delayed` plans. A running plan must be cancelled
-   first and cannot have its target changed in place.
+1. **SQLite deployment:** Install and verify the Node-RED SQLite node on the
+   Raspberry Pi, then apply
+   [`sqlite/001_initial.sql`](sqlite/001_initial.sql) with
+   `tools/migrate_watering_plan_db.py`. The migration runner uses Python's
+   standard SQLite library and does not install packages. The Node-RED adapter
+   must use prepared statements and keep foreign-key enforcement enabled.
+2. **Production pump capacity:** Commission and record the allowed valve sets
+   only after testing the actual pump and pipe network. The two-valve set is
+   currently test-only and is not production approval.
+3. **Field registry expansion:** Add additional field, valve, meter, or soil
+   sensor mappings only when they are confirmed at the site. The initial
+   production mapping remains `field-001` to `valve1`.
+
+The prototype delay window remains the explicitly transmitted ten hours in
+`valid_until`; it is not a hidden scheduler default. The clock, recovery,
+pairing, and revision policies above are approved implementation decisions.
 
 ## Sources
 

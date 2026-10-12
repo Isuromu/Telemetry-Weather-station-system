@@ -1,5 +1,10 @@
 # IrrigationAutomationFirmware
 
+This is how to run claude + codex agent:
+```sh
+./.local-tools/claudecodex/bin/claudecodex
+```
+
 Modular PIOArduino firmware for a multi-node irrigation automation system.
 The repository currently contains two distinct end-node families:
 

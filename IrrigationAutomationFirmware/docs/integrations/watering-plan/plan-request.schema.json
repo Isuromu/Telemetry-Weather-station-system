@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Approved watering plan request v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "plan_id",
+    "revision",
+    "status",
+    "source",
+    "created_at",
+    "timezone",
+    "start_at",
+    "valid_until",
+    "targets",
+    "run_mode",
+    "stop",
+    "hard_max_runtime_sec"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "plan_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["scheduled", "cancelled"] },
+    "source": { "enum": ["human", "ai"] },
+    "plan_group_id": { "type": ["string", "null"], "maxLength": 128 },
+    "summary": { "type": ["string", "null"], "maxLength": 1000 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "timezone": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "start_at": { "type": "string", "format": "date-time" },
+    "valid_until": { "type": "string", "format": "date-time" },
+    "targets": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["selected", "all"] },
+        "field_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "selected" } } },
+          "then": { "required": ["field_ids"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "all" } } },
+          "then": { "not": { "required": ["field_ids"] } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "run_mode": { "const": "parallel" },
+    "stop": {
+      "type": "object",
+      "required": ["type", "value", "unit"],
+      "properties": {
+        "type": { "enum": ["duration", "volume"] },
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 32 }
+      },
+      "additionalProperties": false
+    },
+    "hard_max_runtime_sec": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}
