@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = [
     (1, ROOT / "docs/integrations/watering-plan/sqlite/001_initial.sql"),
+    (2, ROOT / "docs/integrations/watering-plan/sqlite/002_attempt_tracking.sql"),
 ]
 EXPECTED_TABLES = {
     "watering_plans",
@@ -36,7 +37,7 @@ def current_version(connection, tables):
 def find_migration_file(version, expected_path):
     if expected_path.is_file():
         return expected_path
-    if version == 1:
+    if version in (1, 2):
         script_directory = Path(__file__).resolve().parent
         for candidate in (
             script_directory / "001_initial.sql",

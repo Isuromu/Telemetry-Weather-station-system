@@ -619,6 +619,25 @@ run active`, `reservoir data stale`, or `meter unavailable`.
    mapping, sampling cadence, and stop semantics are commissioned.
 4. Record actual results and make a restart continue only the existing safe stop path.
 
+#### Phase 3 prototype behavior
+
+The temporary Python control-plane implementation persists target evidence on
+each attempt. It anchors duration timing at the first dashboard-confirmed
+`running` phase with a persisted process-monotonic timestamp; dispatch time and
+wall-clock time are not treated as watering time. For a volume plan it captures
+the fresh, commissioned `valve1` positive-total reading immediately before the
+existing dashboard sequence is dispatched, then records the positive-total
+delta in cubic metres while the sequence reports `running`.
+
+Loss of that meter evidence, a decreasing total, a monotonic-clock regression,
+or the accepted hard runtime limit requests the dashboard's existing ordered
+stop sequence and records the named outcome. A target-reached stop is likewise
+only a stop request until the dashboard reports a terminal state. Moisture is
+not an accepted or implemented completion rule. A process restart never derives
+an elapsed duration from wall time or resumes a stored target: the active
+attempt is marked `recovery_required`, and only the dashboard safe-stop path
+may be attempted after fresh state observation.
+
 ### Phase 4 — minimal dashboard changes
 
 1. Add Upcoming, Active, and Recent plan sections to the generated Integrated Dashboard builder.

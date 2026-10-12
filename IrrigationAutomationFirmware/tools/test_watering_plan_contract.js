@@ -56,6 +56,16 @@ const unmeteredResult = validatePlan(unmeteredVolume, { ...config, pathPlanId: u
 assert.equal(unmeteredResult.ok, false);
 assert.equal(unmeteredResult.error.code, 'unsupported_volume_target');
 
+const relabelledValve2 = clone(unmeteredVolume);
+const relabelledConfig = clone(config);
+relabelledConfig.fields[1].flow_meter = 'commissioned';
+relabelledConfig.meterStatusByValve.valve2 = { healthy: true, fresh: true, decoder: 'commissioned' };
+const relabelledResult = validatePlan(relabelledValve2, {
+  ...relabelledConfig, pathPlanId: relabelledValve2.plan_id,
+});
+assert.equal(relabelledResult.ok, false);
+assert.equal(relabelledResult.error.code, 'unsupported_volume_target');
+
 const noOffset = clone(plan);
 noOffset.start_at = '2026-10-12T06:00:00';
 const noOffsetResult = validatePlan(noOffset, { ...config, pathPlanId: noOffset.plan_id });

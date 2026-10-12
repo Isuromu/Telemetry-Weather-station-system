@@ -1,9 +1,11 @@
 # Watering-plan SQLite store
 
-`001_initial.sql` is migration 1 for the temporary Raspberry Pi plan store.
-It defines plan definitions, individual execution attempts, and an append-only
-event history. Payload and valve snapshots are stored as JSON text so the store
-does not depend on SQLite JSON extensions.
+`001_initial.sql` is the initial migration for the temporary Raspberry Pi plan
+store. `002_attempt_tracking.sql` adds Phase 3 result tracking without
+rewriting existing plans. Together they define plan definitions, individual
+execution attempts, and an append-only event history. Payload and valve
+snapshots are stored as JSON text so the store does not depend on SQLite JSON
+extensions.
 
 Initialize or migrate a database with:
 
@@ -33,3 +35,10 @@ state change. Mirror committed events to InfluxDB after the SQLite transaction;
 InfluxDB is an event/telemetry sink, not the authoritative plan store.
 
 The Python prototype runtime now exposes the store, temporary API, scheduler, and generated dashboard sequencer seam. Node-RED SQLite module and Raspberry Pi Node-RED version still need confirmation before claiming Node-RED-native deployment support.
+
+For Phase 3, an attempt stores the dashboard-confirmed monotonic start point,
+the pre-dispatch commissioned `valve1` positive-total meter baseline, latest
+delivered cubic metres, and final elapsed runtime. A monotonic reading is valid
+only for the running process; after a restart the scheduler records
+`recovery_required` and may use the existing dashboard stop path after fresh
+state observation. It never resumes watering from a stored target.

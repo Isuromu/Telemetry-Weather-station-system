@@ -3,6 +3,7 @@
 
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -36,8 +37,8 @@ def payload(plan_id="plan-1", revision=1, start="2026-10-12T10:00:00Z", status="
     }
 
 
-def validate(value):
-    result = subprocess.run(["node", str(CLI)], input=json.dumps({"payload": value, "options": OPTIONS}),
+def validate(value, options=OPTIONS):
+    result = subprocess.run(["node", str(CLI)], input=json.dumps({"payload": value, "options": options}),
                             text=True, capture_output=True, check=True)
     outcome = json.loads(result.stdout)
     assert outcome["ok"], outcome
@@ -110,6 +111,32 @@ class StoreTests(unittest.TestCase):
         self.assertEqual([p["plan_id"] for p in first["items"]], ["a", "b"])
         second = self.store.list_plans(limit=2, cursor=first["next_cursor"])
         self.assertEqual([p["plan_id"] for p in second["items"]], ["c"])
+
+    def test_phase3_migrates_existing_database_and_persists_tracking(self):
+        os.unlink(self.path)
+        initial_schema = ROOT / "docs/integrations/watering-plan/sqlite/001_initial.sql"
+        legacy = sqlite3.connect(self.path)
+        legacy.executescript(initial_schema.read_text(encoding="utf-8"))
+        legacy.close()
+        self.store = WateringPlanStore(self.path)
+        connection = sqlite3.connect(self.path)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(watering_attempts)")}
+        versions = [row[0] for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")]
+        connection.close()
+        self.assertIn("actual_runtime_ms", columns)
+        self.assertEqual(versions, [1, 2])
+
+        self.store.accept_plan(validate(payload("tracked")))
+        claimed = self.store.claim_next_due("2026-10-12T10:01:00Z", "owner")
+        attempt_id = claimed["attempt"]["attempt_id"]
+        self.store.start_attempt_tracking(attempt_id, 5000, "2026-10-12T10:01:00Z")
+        self.store.record_attempt_progress(attempt_id, 1250)
+        self.store.transition_attempt(attempt_id, "completed", "2026-10-12T10:01:02Z",
+                                      reason="duration_target_reached", actual_runtime_ms=2000)
+        attempt = self.store.get_plan("tracked", include_history=True)["attempts"][0]
+        self.assertEqual(attempt["monotonic_start_ms"], 5000)
+        self.assertEqual(attempt["actual_runtime_ms"], 2000)
+        self.assertEqual(attempt["final_reason"], "duration_target_reached")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,11 @@
 Inspect the working tree first and preserve working configuration. Source code
 and code comments must remain in English.
 
+## Commit messages
+
+Every commit message must contain three or four lines and must never include a
+co-author trailer.
+
 ## Read according to the task
 
 - For device work, start with `docs/references/README.md` and the relevant

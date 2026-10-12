@@ -193,8 +193,12 @@ function validatePlan(payload, options) {
     if (!Array.isArray(config.volumeUnits) || !config.volumeUnits.includes(payload.stop.unit)) {
       return fail('unsupported_volume_unit', 'Volume unit is not configured');
     }
-    if (targets.fields.length !== 1 || targets.fields[0].flow_meter !== 'commissioned') {
-      return fail('unsupported_volume_target', 'Volume plans require one commissioned metered field');
+    // Phase 3 implements total-baseline completion only for the deployed
+    // field-001 -> valve1 commissioning path. A future registry entry must not
+    // turn simulated or newly labelled meter data into a production stop rule.
+    if (targets.fields.length !== 1 || targets.valveIds[0] !== 'valve1' ||
+        targets.fields[0].flow_meter !== 'commissioned') {
+      return fail('unsupported_volume_target', 'Volume plans require commissioned valve1 metering');
     }
     const meter = config.meterStatusByValve && config.meterStatusByValve[targets.valveIds[0]];
     if (!meter || meter.healthy !== true || meter.fresh !== true || meter.decoder !== 'commissioned') {

@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
+try:
+    from migrate_watering_plan_db import migrate
+except ImportError:  # pragma: no cover - package invocation
+    from .migrate_watering_plan_db import migrate
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / "docs" / "integrations" / "watering-plan" / "sqlite" / "001_initial.sql"
@@ -57,6 +62,11 @@ class WateringPlanStore:
         return connection
 
     def initialize(self) -> None:
+        # Always run the numbered migrations. This keeps an installed Phase 1/2
+        # database compatible with Phase 3 without recreating its plan history.
+        if self.schema_path == SCHEMA:
+            migrate(self.database)
+            return
         connection = self._connection()
         try:
             exists = connection.execute(
@@ -105,6 +115,14 @@ class WateringPlanStore:
         attempt["resolved_valves"] = cls._decode_json(attempt.pop("resolved_valves_json"))
         return attempt
 
+    def _active_attempt(self, connection: sqlite3.Connection, attempt_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not attempt_id:
+            return None
+        row = connection.execute(
+            "SELECT * FROM watering_attempts WHERE attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        return self._attempt(row) if row else None
+
     def get_plan(self, plan_id: str, include_history: bool = False) -> Dict[str, Any]:
         connection = self._connection()
         try:
@@ -114,6 +132,9 @@ class WateringPlanStore:
             if row is None:
                 raise PlanNotFound(plan_id)
             plan = self._plan(row)
+            active_attempt = self._active_attempt(connection, plan.get("active_attempt_id"))
+            if active_attempt:
+                plan["attempt"] = active_attempt
             if include_history:
                 plan["events"] = self.events(plan_id, connection=connection)
                 plan["attempts"] = [
@@ -390,7 +411,9 @@ class WateringPlanStore:
 
     def transition_attempt(self, attempt_id: str, state: str, now: Optional[str] = None,
                            reason: Optional[str] = None, dashboard_phase: Optional[str] = None,
-                           dashboard_notice: Optional[str] = None) -> Dict[str, Any]:
+                           dashboard_notice: Optional[str] = None,
+                           actual_runtime_ms: Optional[int] = None,
+                           delivered_m3: Optional[float] = None) -> Dict[str, Any]:
         now = normalize_timestamp(now) if now else self._now()
         with self._transaction() as connection:
             attempt = connection.execute("SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
@@ -399,6 +422,10 @@ class WateringPlanStore:
             plan = connection.execute("SELECT * FROM watering_plans WHERE plan_id=?", (attempt["plan_id"],)).fetchone()
             if state not in ("starting", "running", "stopping", "stop_requested", "completed", "failed", "recovery_required"):
                 raise PlanStoreError("invalid_state", "Unsupported attempt state", [state])
+            if actual_runtime_ms is not None and actual_runtime_ms < 0:
+                raise PlanStoreError("invalid_tracking", "actual runtime cannot be negative")
+            if delivered_m3 is not None and delivered_m3 < 0:
+                raise PlanStoreError("invalid_tracking", "delivered volume cannot be negative")
             plan_state = state
             if plan["state"] == "stop_requested" and state in ("starting", "running"):
                 plan_state = "stop_requested"
@@ -407,9 +434,11 @@ class WateringPlanStore:
             connection.execute(
                 """UPDATE watering_attempts SET state=?, actual_started_at=CASE WHEN ?='running' AND actual_started_at IS NULL THEN ? ELSE actual_started_at END,
                    actual_ended_at=CASE WHEN ? IN ('completed','failed','recovery_required') THEN ? ELSE actual_ended_at END,
-                   dashboard_phase=COALESCE(?, dashboard_phase), dashboard_notice=COALESCE(?, dashboard_notice), final_reason=COALESCE(?, final_reason)
+                   dashboard_phase=COALESCE(?, dashboard_phase), dashboard_notice=COALESCE(?, dashboard_notice), final_reason=COALESCE(final_reason, ?),
+                   actual_runtime_ms=COALESCE(?, actual_runtime_ms), delivered_m3=COALESCE(?, delivered_m3)
                    WHERE attempt_id=?""",
-                (state, state, now, state, now, dashboard_phase, dashboard_notice, reason, attempt_id),
+                (state, state, now, state, now, dashboard_phase, dashboard_notice, reason,
+                 actual_runtime_ms, delivered_m3, attempt_id),
             )
             connection.execute(
                 "UPDATE watering_plans SET state=?, updated_at=?, active_attempt_id=CASE WHEN ? IN ('completed','failed','recovery_required') THEN NULL ELSE active_attempt_id END WHERE plan_id=?",
@@ -418,6 +447,63 @@ class WateringPlanStore:
             self._event(connection, plan["plan_id"], plan["revision"], "attempt_state",
                         plan["state"], plan_state, now, reason, {"dashboard_phase": dashboard_phase}, attempt_id)
             return self._plan(connection.execute("SELECT * FROM watering_plans WHERE plan_id=?", (plan["plan_id"],)).fetchone())
+
+    def set_meter_baseline(self, attempt_id: str, baseline_m3: float,
+                           now: Optional[str] = None) -> Dict[str, Any]:
+        """Persist the commissioned positive-total reading before dispatching a volume run."""
+        if baseline_m3 < 0:
+            raise PlanStoreError("invalid_tracking", "meter baseline cannot be negative")
+        now = normalize_timestamp(now) if now else self._now()
+        with self._transaction() as connection:
+            attempt = connection.execute("SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if attempt is None:
+                raise PlanStoreError("attempt_not_found", "Watering attempt was not found", [attempt_id])
+            if attempt["meter_baseline_m3"] is None:
+                connection.execute("UPDATE watering_attempts SET meter_baseline_m3=? WHERE attempt_id=?",
+                                   (baseline_m3, attempt_id))
+                self._event(connection, attempt["plan_id"], attempt["plan_revision"], "meter_baseline_captured",
+                            attempt["state"], attempt["state"], now, "commissioned_positive_total",
+                            {"meter_baseline_m3": baseline_m3}, attempt_id)
+            return self._attempt(connection.execute(
+                "SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone())
+
+    def start_attempt_tracking(self, attempt_id: str, monotonic_start_ms: int,
+                               now: Optional[str] = None) -> Dict[str, Any]:
+        """Persist the monotonic start point once the dashboard reports running."""
+        if monotonic_start_ms < 0:
+            raise PlanStoreError("invalid_tracking", "monotonic start cannot be negative")
+        now = normalize_timestamp(now) if now else self._now()
+        with self._transaction() as connection:
+            attempt = connection.execute("SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if attempt is None:
+                raise PlanStoreError("attempt_not_found", "Watering attempt was not found", [attempt_id])
+            if attempt["monotonic_start_ms"] is None:
+                connection.execute("UPDATE watering_attempts SET monotonic_start_ms=? WHERE attempt_id=?",
+                                   (monotonic_start_ms, attempt_id))
+                self._event(connection, attempt["plan_id"], attempt["plan_revision"], "target_tracking_started",
+                            attempt["state"], attempt["state"], now, "dashboard_running",
+                            {"monotonic_start_ms": monotonic_start_ms}, attempt_id)
+            return self._attempt(connection.execute(
+                "SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone())
+
+    def record_attempt_progress(self, attempt_id: str, actual_runtime_ms: int,
+                                delivered_m3: Optional[float] = None) -> Dict[str, Any]:
+        """Keep restart-visible target evidence current without changing plan state."""
+        if actual_runtime_ms < 0 or (delivered_m3 is not None and delivered_m3 < 0):
+            raise PlanStoreError("invalid_tracking", "Attempt progress cannot be negative")
+        with self._transaction() as connection:
+            attempt = connection.execute("SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
+            if attempt is None:
+                raise PlanStoreError("attempt_not_found", "Watering attempt was not found", [attempt_id])
+            connection.execute(
+                "UPDATE watering_attempts SET actual_runtime_ms=?, delivered_m3=COALESCE(?, delivered_m3) WHERE attempt_id=?",
+                (actual_runtime_ms, delivered_m3, attempt_id),
+            )
+            return self._attempt(connection.execute(
+                "SELECT * FROM watering_attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone())
 
     def reconcile_active_attempts(self, now: Optional[str] = None) -> int:
         now = normalize_timestamp(now) if now else self._now()
@@ -445,7 +531,13 @@ class WateringPlanStore:
             row = connection.execute(
                 "SELECT * FROM watering_plans WHERE state IN ('starting','running','stopping','stop_requested') ORDER BY updated_at LIMIT 1"
             ).fetchone()
-            return self._plan(row) if row else None
+            if row is None:
+                return None
+            plan = self._plan(row)
+            attempt = self._active_attempt(connection, plan.get("active_attempt_id"))
+            if attempt:
+                plan["attempt"] = attempt
+            return plan
         finally:
             connection.close()
 
