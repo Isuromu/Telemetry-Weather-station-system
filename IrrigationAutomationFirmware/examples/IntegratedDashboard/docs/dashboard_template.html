@@ -55,6 +55,36 @@
       <p class="ir-sequence">{{ runText }}</p>
     </section>
 
+    <section class="ir-panel ir-plans-panel">
+      <div class="ir-panel-heading"><div><h2>Watering plans</h2><p>{{ state.planApiStatus || 'Plan service status unknown' }}</p></div><span class="ir-small-tag">SCHEDULE</span></div>
+      <div class="ir-plan-columns">
+        <div class="ir-plan-column"><h3>Upcoming</h3>
+          <article v-for="p in upcomingPlans" :key="p.plan_id" class="ir-plan-row">
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small v-if="p.last_delay_reason">Delayed: {{ p.last_delay_reason }}</small></div>
+            <span class="ir-plan-state">{{ p.state }}</span>
+            <button class="ir-plan-action" :disabled="planBusy" @click="changePlan(p,'Cancel this scheduled plan?')">Cancel</button>
+          </article>
+          <p v-if="!upcomingPlans.length" class="ir-plan-empty">No upcoming plans.</p>
+        </div>
+        <div class="ir-plan-column"><h3>Active</h3>
+          <article v-for="p in activePlans" :key="p.plan_id" class="ir-plan-row">
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.dashboard_notice || p.last_delay_reason || p.state }}</small></div>
+            <span class="ir-plan-state">{{ p.state }}</span>
+            <button class="ir-plan-action ir-plan-stop" :disabled="planBusy" @click="changePlan(p,'Request the existing ordered stop sequence?')">Request stop</button>
+          </article>
+          <p v-if="!activePlans.length" class="ir-plan-empty">No active plan.</p>
+        </div>
+        <div class="ir-plan-column"><h3>Recent</h3>
+          <article v-for="p in recentPlans" :key="p.plan_id" class="ir-plan-row ir-plan-recent">
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.final_reason || p.last_delay_reason || p.state }}</small></div>
+            <span class="ir-plan-state">{{ p.state }}</span>
+          </article>
+          <p v-if="!recentPlans.length" class="ir-plan-empty">No completed plans yet.</p>
+        </div>
+      </div>
+      <p class="ir-footnote">A stop request is acknowledged before the physical stop is confirmed. The dashboard sequencer reports the final outcome.</p>
+    </section>
+
     <section class="ir-panel ir-limits-panel">
       <div class="ir-panel-heading"><div><h2>Safety limits</h2><p>Editable in the Irrigation settings function node.</p></div><span class="ir-small-tag">CURRENT SETTINGS</span></div>
       <div class="ir-limits">
@@ -73,7 +103,7 @@
 export default {
   data() {
     return {
-      state: {phase:'idle',devices:{}}, now:Date.now(), timer:null,
+      state: {phase:'idle',devices:{}}, now:Date.now(), timer:null, planBusy:false,
       names: {water:'Reservoir',soil:'Soil',main:'Main valve',valve1:'Valve 1',valve2:'Valve 2',pump:'Pump'},
       icons: {water:'💧',soil:'🌱',main:'⚙',valve1:'↔',valve2:'↔',pump:'◉'}
     }
@@ -81,6 +111,10 @@ export default {
   computed: {
     settings() { return this.state.settings || {} },
     cards() { return Object.fromEntries(Object.keys(this.names).map(k => [k,this.state.devices?.[k] || {stale:true}])) },
+    planItems() { return Array.isArray(this.state.wateringPlans) ? this.state.wateringPlans : [] },
+    upcomingPlans() { return this.planItems.filter(p => ['scheduled','delayed'].includes(p.state)) },
+    activePlans() { return this.planItems.filter(p => ['starting','running','stopping','stop_requested','recovery_required'].includes(p.state)) },
+    recentPlans() { return this.planItems.filter(p => ['completed','failed','expired','cancelled'].includes(p.state)).slice(-5).reverse() },
     runText() {
       const sel = Array.isArray(this.state.selected) ? this.state.selected : [];
       const prefix = this.state.phase && this.state.phase !== 'idle' && sel.length
@@ -134,6 +168,9 @@ export default {
   beforeUnmount() { if(this.timer)clearInterval(this.timer) },
   methods: {
     fmt(v,suffix='') { return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) + suffix : '—' },
+    planTarget(p) { const valves=Array.isArray(p.resolved_valves)?p.resolved_valves:[]; const stop=p.payload?.stop||{}; return `${valves.join(' + ') || 'Target unavailable'} · ${stop.value ?? '—'} ${stop.unit || stop.type || ''}` },
+    planTime(v) { const d=new Date(v); return Number.isNaN(d.getTime()) ? 'Time unavailable' : new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tashkent',dateStyle:'medium',timeStyle:'short'}).format(d) },
+    changePlan(p,prompt) { if(this.planBusy||!window.confirm(prompt)) return; this.planBusy=true; this.send({payload:{kind:'plan_cancel',plan_id:p.plan_id}}); window.setTimeout(()=>{this.planBusy=false},5000) },
     invalid(k,d) {
       return (k === 'water' && d.pressure_valid !== true) ||
         (k === 'soil' && d.sensor_valid !== true) ||
@@ -278,6 +315,7 @@ export default {
 .ir-card-footer{border-top:1px solid #edf1f4;padding-top:9px;margin-top:auto;color:#738592;font-size:11px;align-items:flex-start}
 .ir-card-footer time{text-align:right}
 .ir-panel{margin-top:13px;padding:17px 19px;border:1px solid #dbe5ed;border-radius:13px;background:#fff}
+.ir-plan-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}.ir-plan-column{min-width:0}.ir-plan-column h3{margin:0 0 8px;color:#38566a;font-size:13px;text-transform:uppercase;letter-spacing:.06em}.ir-plan-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;padding:11px 0;border-top:1px solid #edf1f4}.ir-plan-row>div{display:flex;flex-direction:column;gap:4px;min-width:0}.ir-plan-row b,.ir-plan-row span,.ir-plan-row small{overflow-wrap:anywhere}.ir-plan-row>div span,.ir-plan-row small,.ir-plan-empty{font-size:12px;color:#627786}.ir-plan-row small{color:#96631c}.ir-plan-state{align-self:start;padding:4px 7px;border-radius:6px;background:#eaf0f4;color:#3c586a;font-size:10px;font-weight:800;text-transform:uppercase}.ir-plan-action{grid-column:1/-1;justify-self:start;border:1px solid #cbdbe5;border-radius:7px;padding:6px 10px;background:#f6fafc;color:#285a77;font-weight:700;cursor:pointer}.ir-plan-stop{color:#a63333;border-color:#edc6c6;background:#fff7f7}.ir-plan-action:disabled{opacity:.5;cursor:not-allowed}.ir-plan-empty{margin:0;padding:10px 0;border-top:1px solid #edf1f4}
 .ir-panel-heading{display:flex;align-items:start;justify-content:space-between;gap:12px}.ir-panel-heading h2{font-size:17px;margin:0;color:#1a3445}
 .ir-small-tag{font-size:10px;font-weight:800;color:#7890a0;letter-spacing:.1em;white-space:nowrap}
 .ir-control-row{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:15px;flex-wrap:wrap}
@@ -294,5 +332,6 @@ export default {
 .ir-sequence,.ir-footnote{font-size:11px;color:#728491;margin:13px 0 0}
 .ir-limits{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.ir-limits span{border:1px solid #dfe9ef;background:#f6f9fb;border-radius:8px;padding:9px 11px;font-size:12px;color:#5b7382}.ir-limits b{color:#1d4359}
 @media(max-width:1000px){.ir-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:850px){.ir-plan-columns{grid-template-columns:1fr}}
 @media(max-width:650px){.irrigation-dashboard{padding:12px}.ir-header{align-items:flex-start;flex-direction:column}.ir-header h1{font-size:24px}.ir-grid{grid-template-columns:1fr}.ir-card{min-height:170px}.ir-control-row{align-items:stretch}.ir-buttons{width:100%}.ir-buttons button{flex:1}}
 </style>

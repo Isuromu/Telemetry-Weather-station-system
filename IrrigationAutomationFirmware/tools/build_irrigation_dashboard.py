@@ -435,6 +435,7 @@ if (s.phase==='wait_main_close') {
 }
 const gate=tickedValves();
 s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?ready(gate):'Select at least one field valve'):ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
+s.wateringPlans=flow.get('watering_plan_snapshot')||[];s.planApiStatus=(flow.get('watering_plan_api_status')||'Waiting for plan service')+(flow.get('watering_plan_action_status')?' · '+flow.get('watering_plan_action_status'):'');
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
 
@@ -463,6 +464,35 @@ const token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');
 msg.statusCode=auth===`Bearer ${token}`&&token?200:401;
 msg.payload=msg.statusCode===200?{api_version:'v1',data:flow.get('irrigation')||{phase:'idle'}}:{api_version:'v1',error:{code:'unauthorized',message:'Internal token invalid',details:[]}};
 return msg;'''
+
+PLAN_LIST_REQUEST = r'''const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\/$/,'');
+const token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');
+if (!/^https?:\/\//.test(base)||!token) {flow.set('watering_plan_api_status','Plan service unavailable: configure API URL and token');return [null,{payload:{kind:'plan_snapshot'}}];}
+msg.method='GET';msg.url=base+'/api/v1/watering-plans?limit=50';msg.headers={Authorization:'Bearer '+token};return [msg,null];'''
+
+PLAN_CANCEL_REQUEST = r'''const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\/$/,'');
+const token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');
+const id=String(msg.payload?.plan_id||'');
+if (!/^https?:\/\//.test(base)||!token||!id||id.length>128) {flow.set('watering_plan_api_status','Plan action unavailable: API configuration or plan id invalid');return null;}
+msg.method='POST';msg.url=base+'/api/v1/watering-plans/'+encodeURIComponent(id)+'/cancel';msg.headers={Authorization:'Bearer '+token,'Content-Type':'application'+'/json'};msg.payload={};return msg;'''
+
+PLAN_LIST_RESULT = r'''let body=msg.payload;
+if (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}
+if (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300||!Array.isArray(body?.data?.items)) {
+  flow.set('watering_plan_api_status','Plan service unavailable: '+(body?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};
+}
+flow.set('watering_plan_snapshot',body.data.items);
+flow.set('watering_plan_api_status','Plan list updated '+new Date().toLocaleTimeString());
+return {payload:{kind:'plan_snapshot'}};'''
+
+PLAN_CANCEL_RESULT = r'''let body=msg.payload;
+if (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}
+if (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300) flow.set('watering_plan_action_status','Action failed: '+(body?.error?.message||'request failed'));
+else flow.set('watering_plan_action_status',body?.data?.state==='stop_requested'?'Stop requested; awaiting sequencer confirmation':'Cancellation accepted');
+return {payload:{kind:'refresh_plan_list'}};'''
+
+PLAN_UI_ROUTE = r'''if (msg.payload?.kind==='plan_cancel') return [null,msg];
+return [msg,null];'''
 
 
 # Do not rename the `cardValue` method to `value`: Dashboard 2's ui-template render
@@ -512,6 +542,14 @@ ID_PLAN_COMMAND_RESPONSE = "7a3f6b8c0d1e2f33"
 ID_PLAN_STATE_IN = "8b4a7c9d0e1f3044"
 ID_PLAN_STATE = "9c5b8d0e1f203155"
 ID_PLAN_STATE_RESPONSE = "ad6c9e1f20314266"
+ID_PLAN_REFRESH_TICK = "be7da2f304253677"
+ID_PLAN_LIST_REQUEST = "cf8eb30415263788"
+ID_PLAN_LIST_HTTP = "d09fc41526374899"
+ID_PLAN_LIST_RESULT = "e1a0d526374859aa"
+ID_PLAN_UI_ROUTE = "f2b1e63748596abb"
+ID_PLAN_CANCEL_REQUEST = "03c2f748596a7bcc"
+ID_PLAN_CANCEL_HTTP = "14d308596a7b8cdd"
+ID_PLAN_CANCEL_RESULT = "25e4196a7b8c9dee"
 
 # z only. No tab node ships, so the import dialog's "Import to" list decides
 # which flow the nodes join and no second tab is ever created.
@@ -538,10 +576,13 @@ def build():
     canvas_nodes = [ID_TICK, ID_SETTINGS, ID_SUBSCRIBE_TICK, ID_SUBSCRIBE,
                     ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI,
                     ID_PLAN_COMMAND_IN, ID_PLAN_COMMAND, ID_PLAN_COMMAND_RESPONSE,
-                    ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE]
+                    ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE,
+                    ID_PLAN_REFRESH_TICK, ID_PLAN_LIST_REQUEST, ID_PLAN_LIST_HTTP,
+                    ID_PLAN_LIST_RESULT, ID_PLAN_UI_ROUTE, ID_PLAN_CANCEL_REQUEST,
+                    ID_PLAN_CANCEL_HTTP, ID_PLAN_CANCEL_RESULT]
     nodes = [
         node(ID_CANVAS, "group", z=FLOW_ID, style=CANVAS_STYLE, nodes=canvas_nodes,
-             x=74, y=39, w=1502, h=322),
+             x=74, y=39, w=2200, h=700),
         node(ID_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh safety and settings", props=[{"p":"payload"}], repeat="5", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=720, y=80, wires=[[ID_SETTINGS]]),
         node(ID_SETTINGS, "function", z=FLOW_ID, g=ID_CANVAS, name="Irrigation settings — edit limits here", func=SETTINGS, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=860, y=140, wires=[[ID_CONTROL]]),
         node(ID_SUBSCRIBE_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh ChirpStack subscription", props=[{"p":"payload"}], repeat="", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=250, y=100, wires=[[ID_SUBSCRIBE]]),
@@ -550,7 +591,15 @@ def build():
         node(ID_STATUS, "status", z=FLOW_ID, g=ID_CANVAS, name="MQTT connection", scope=[ID_MQTT_IN, ID_MQTT_OUT], x=710, y=300, wires=[[ID_CONTROL]]),
         node(ID_CONTROL, "function", z=FLOW_ID, g=ID_CANVAS, name="Safety checks and irrigation sequence", func=CONTROL, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1090, y=280, wires=[[ID_MQTT_OUT],[ID_UI]]),
         node(ID_MQTT_OUT, "mqtt out", z=FLOW_ID, g=ID_CANVAS, name="ChirpStack downlinks", topic="", qos="", retain="", respTopic="", contentType="", userProps="", correl="", expiry="", broker=BROKER, x=1410, y=240, wires=[]),
-        node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="17", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_CONTROL]]),
+        node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="30", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_PLAN_UI_ROUTE]]),
+        node(ID_PLAN_UI_ROUTE, "function", z=FLOW_ID, g=ID_CANVAS, name="Route watering-plan dashboard actions", func=PLAN_UI_ROUTE, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1640, y=360, wires=[[ID_CONTROL],[ID_PLAN_CANCEL_REQUEST]]),
+        node(ID_PLAN_REFRESH_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh watering plans", props=[{"p":"payload"}], repeat="15", crontab="", once=True, onceDelay="1", topic="", payload="", payloadType="date", x=240, y=640, wires=[[ID_PLAN_LIST_REQUEST]]),
+        node(ID_PLAN_LIST_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request watering-plan list", func=PLAN_LIST_REQUEST, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=460, y=640, wires=[[ID_PLAN_LIST_HTTP],[ID_CONTROL]]),
+        node(ID_PLAN_LIST_HTTP, "http request", z=FLOW_ID, g=ID_CANVAS, name="Read watering plans", method="use", ret="obj", paytoqs="ignore", url="", tls="", persist=False, proxy="", insecureHTTPParser=False, authType="", senderr=False, x=680, y=640, wires=[[ID_PLAN_LIST_RESULT]]),
+        node(ID_PLAN_LIST_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Store watering-plan snapshot", func=PLAN_LIST_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=900, y=640, wires=[[ID_CONTROL]]),
+        node(ID_PLAN_CANCEL_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request plan cancellation or stop", func=PLAN_CANCEL_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1840, y=420, wires=[[ID_PLAN_CANCEL_HTTP]]),
+        node(ID_PLAN_CANCEL_HTTP, "http request", z=FLOW_ID, g=ID_CANVAS, name="Cancel watering plan", method="use", ret="obj", paytoqs="ignore", url="", tls="", persist=False, proxy="", insecureHTTPParser=False, authType="", senderr=False, x=2040, y=420, wires=[[ID_PLAN_CANCEL_RESULT]]),
+        node(ID_PLAN_CANCEL_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Record plan action and refresh", func=PLAN_CANCEL_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=2240, y=420, wires=[[ID_PLAN_LIST_REQUEST]]),
         node(ID_PLAN_COMMAND_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal watering-plan command", url="/internal/irrigation/command", method="post", upload=False, swaggerDoc="", x=260, y=420, wires=[[ID_PLAN_COMMAND]]),
         node(ID_PLAN_COMMAND, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize watering-plan command", func=PLAN_COMMAND, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=420, wires=[[ID_CONTROL],[ID_PLAN_COMMAND_RESPONSE]]),
         node(ID_PLAN_COMMAND_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan command response", statusCode="", headers={}, x=760, y=460, wires=[]),

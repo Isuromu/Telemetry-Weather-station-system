@@ -268,6 +268,13 @@ class WateringPlanStore:
             more = len(rows) > limit
             rows = rows[:limit]
             data = [self._plan(row) for row in rows]
+            for plan in data:
+                attempt = connection.execute(
+                    "SELECT * FROM watering_attempts WHERE plan_id = ? ORDER BY attempt_number DESC LIMIT 1",
+                    (plan["plan_id"],),
+                ).fetchone()
+                if attempt is not None:
+                    plan["attempt"] = self._attempt(attempt)
             next_cursor = None
             if more:
                 last = data[-1]
