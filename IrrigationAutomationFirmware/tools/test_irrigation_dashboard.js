@@ -23,6 +23,10 @@ const IDS = {
   planCommandIn: '5e1d4f6c8a9b0c11', planCommand: '6f2e5a7b9c0d1e22',
   planCommandResponse: '7a3f6b8c0d1e2f33', planStateIn: '8b4a7c9d0e1f3044',
   planState: '9c5b8d0e1f203155', planStateResponse: 'ad6c9e1f20314266',
+  planRefreshTick: 'be7da2f304253677', planListRequest: 'cf8eb30415263788',
+  planListHttp: 'd09fc41526374899', planListResult: 'e1a0d526374859aa',
+  planUiRoute: 'f2b1e63748596abb', planCancelRequest: '03c2f748596a7bcc',
+  planCancelHttp: '14d308596a7b8cdd', planCancelResult: '25e4196a7b8c9dee',
   page: 'irrigation_page', group: 'irrigation_group',
   base: 'f53e93e9ba219e63', theme: 'e49416861823a329'
 };
@@ -46,7 +50,10 @@ for (const n of nodes.filter(n => !GLOBAL.has(n.type))) {
 const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqttIn,
                IDS.status, IDS.control, IDS.mqttOut, IDS.ui,
                IDS.planCommandIn, IDS.planCommand, IDS.planCommandResponse,
-               IDS.planStateIn, IDS.planState, IDS.planStateResponse];
+               IDS.planStateIn, IDS.planState, IDS.planStateResponse,
+               IDS.planRefreshTick, IDS.planListRequest, IDS.planListHttp,
+               IDS.planListResult, IDS.planUiRoute, IDS.planCancelRequest,
+               IDS.planCancelHttp, IDS.planCancelResult];
 assert(byId[IDS.canvas] && byId[IDS.canvas].type === 'group', 'the canvas group node is part of the export');
 assert.deepEqual([...byId[IDS.canvas].nodes].sort(), [...wired].sort(),
   'the canvas group must list exactly the flow nodes, or the canvas loses its frame on import');
@@ -69,6 +76,24 @@ assert.equal(byId[IDS.group].page, IDS.page);
 const settings = byId[IDS.settings].func;
 const control = byId[IDS.control].func;
 const template = byId[IDS.ui].format;
+assert.equal(byId[IDS.planRefreshTick].repeat,'15','plan list refreshes at a bounded cadence');
+assert.equal(byId[IDS.planListHttp].type,'http request');
+assert.equal(byId[IDS.planCancelHttp].type,'http request');
+assert(byId[IDS.planCancelResult].wires[0].includes(IDS.planListRequest),
+  'accepted cancel/stop action refreshes the plan snapshot');
+for (const label of ['Upcoming','Active','Recent','Request stop','Cancel this scheduled plan?'])
+  assert(template.includes(label),`dashboard plan section/control missing: ${label}`);
+assert(template.includes('p.source')&&template.includes('p.start_at')&&
+  template.includes('p.last_delay_reason')&&template.includes('p.attempt?.final_reason'),
+  'plan cards must expose source, due time, delay reason and final outcome');
+assert(!/\bvalue\s*\(/.test(template), 'Dashboard template methods must not shadow Dashboard 2 value context');
+const dashboardScript = template.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
+assert(dashboardScript, 'dashboard Vue script is present');
+const dashboardComponent = new Function(dashboardScript.replace('export default', 'return'))();
+assert.deepEqual(dashboardComponent.computed.upcomingPlans.call({planItems:[{state:'scheduled'},{state:'completed'}]}),
+  [{state:'scheduled'}], 'upcoming section selects only scheduled or delayed plans');
+assert.deepEqual(dashboardComponent.computed.recentPlans.call({planItems:[{state:'failed'}]}),
+  [{state:'failed'}], 'recent section retains terminal plan outcomes');
 const subscribeNode = byId[IDS.subscribe];
 assert.deepEqual(byId[IDS.tick].wires[0], [IDS.settings]);
 assert.deepEqual(byId[IDS.subscribeTick].wires[0], [IDS.subscribe]);

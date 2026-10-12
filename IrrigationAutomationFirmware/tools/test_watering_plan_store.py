@@ -137,6 +137,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(attempt["monotonic_start_ms"], 5000)
         self.assertEqual(attempt["actual_runtime_ms"], 2000)
         self.assertEqual(attempt["final_reason"], "duration_target_reached")
+        dashboard_plan = self.store.list_plans()["items"][0]
+        self.assertEqual(dashboard_plan["attempt"]["final_reason"], "duration_target_reached")
 
 
 if __name__ == "__main__":
