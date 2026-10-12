@@ -32,6 +32,4 @@ adapter should insert an event in the same transaction as every plan or attempt
 state change. Mirror committed events to InfluxDB after the SQLite transaction;
 InfluxDB is an event/telemetry sink, not the authoritative plan store.
 
-The Node-RED SQLite module and the Raspberry Pi's Node-RED version still need
-to be confirmed before choosing the adapter API or claiming deployment support.
-This migration alone does not expose an HTTP API or start the scheduler.
+The Python prototype runtime now exposes the store, temporary API, scheduler, and generated dashboard sequencer seam. Node-RED SQLite module and Raspberry Pi Node-RED version still need confirmation before claiming Node-RED-native deployment support.

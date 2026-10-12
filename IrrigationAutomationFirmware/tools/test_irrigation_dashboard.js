@@ -20,6 +20,9 @@ const IDS = {
   subscribe: '405c9e29995e8efe', mqttIn: 'ed30a564d5bb461a',
   status: '50c3e5351eac102c', control: '1406698c9cd792c5',
   mqttOut: '03424753ad790e6b', ui: 'd490a04f3084b9da',
+  planCommandIn: '5e1d4f6c8a9b0c11', planCommand: '6f2e5a7b9c0d1e22',
+  planCommandResponse: '7a3f6b8c0d1e2f33', planStateIn: '8b4a7c9d0e1f3044',
+  planState: '9c5b8d0e1f203155', planStateResponse: 'ad6c9e1f20314266',
   page: 'irrigation_page', group: 'irrigation_group',
   base: 'f53e93e9ba219e63', theme: 'e49416861823a329'
 };
@@ -41,7 +44,9 @@ for (const n of nodes.filter(n => !GLOBAL.has(n.type))) {
 }
 
 const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqttIn,
-               IDS.status, IDS.control, IDS.mqttOut, IDS.ui];
+               IDS.status, IDS.control, IDS.mqttOut, IDS.ui,
+               IDS.planCommandIn, IDS.planCommand, IDS.planCommandResponse,
+               IDS.planStateIn, IDS.planState, IDS.planStateResponse];
 assert(byId[IDS.canvas] && byId[IDS.canvas].type === 'group', 'the canvas group node is part of the export');
 assert.deepEqual([...byId[IDS.canvas].nodes].sort(), [...wired].sort(),
   'the canvas group must list exactly the flow nodes, or the canvas loses its frame on import');
@@ -179,6 +184,16 @@ const env = {get:k=>{
       valve1:'0000000000000004',valve2:'0000000000000005',pump:'0000000000000006'})[name];
 }};
 const node = {status:()=>{}};
+const planEnv = {get:k=>k==='IRRIGATION_INTERNAL_TOKEN'?'secret':env.get(k)};
+const planCommand = new Function('msg','flow','env',byId[IDS.planCommand].func);
+const unauthorized = planCommand({req:{headers:{}},payload:{operation_id:'op-unauth',action:'stop'}},flow,planEnv);
+assert.equal(unauthorized[1].statusCode,401);
+const accepted = planCommand({req:{headers:{authorization:'Bearer secret'}},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
+assert.equal(accepted[1].statusCode,202);
+assert.equal(accepted[0].payload.kind,'start');
+const duplicate = planCommand({req:{headers:{authorization:'Bearer secret'}},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
+assert.equal(duplicate[0],null);
+assert.equal(duplicate[1].payload.data.duplicate,true);
 const configure = new Function('msg','flow','node','env','Buffer','global',settings);
 const run = new Function('msg','flow','node','env','Buffer','global',control);
 const take = msg => run(msg,flow,node,env,Buffer,globalCtx);

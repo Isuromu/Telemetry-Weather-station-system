@@ -21,7 +21,13 @@
       "50c3e5351eac102c",
       "1406698c9cd792c5",
       "03424753ad790e6b",
-      "d490a04f3084b9da"
+      "d490a04f3084b9da",
+      "5e1d4f6c8a9b0c11",
+      "6f2e5a7b9c0d1e22",
+      "7a3f6b8c0d1e2f33",
+      "8b4a7c9d0e1f3044",
+      "9c5b8d0e1f203155",
+      "ad6c9e1f20314266"
     ],
     "x": 74,
     "y": 39,
@@ -231,6 +237,111 @@
         "1406698c9cd792c5"
       ]
     ]
+  },
+  {
+    "id": "5e1d4f6c8a9b0c11",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Internal watering-plan command",
+    "url": "/internal/irrigation/command",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 260,
+    "y": 420,
+    "wires": [
+      [
+        "6f2e5a7b9c0d1e22"
+      ]
+    ]
+  },
+  {
+    "id": "6f2e5a7b9c0d1e22",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Authorize watering-plan command",
+    "func": "// Internal scheduler seam. Token-gated and never emits device commands itself.\nconst auth=String(msg.req?.headers?.authorization||'');\nconst token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');\nconst reply=(status,data,error)=>{msg.statusCode=status;msg.payload=error?{api_version:'v1',error}:{api_version:'v1',data};return [null,msg];};\nif (!token||auth!==`Bearer ${token}`) return reply(401,null,{code:'unauthorized',message:'Internal token invalid',details:[]});\nconst body=msg.payload&&typeof msg.payload==='object'?msg.payload:{};\nconst op=typeof body.operation_id==='string'&&body.operation_id;\nif (!op||!['start','stop'].includes(body.action)) return reply(400,null,{code:'invalid_command',message:'operation_id and action are required',details:[]});\nconst seen=flow.get('watering_plan_operations')||{};\nif (seen[op]) {msg.payload={api_version:'v1',data:{accepted:true,duplicate:true,operation_id:op,state:flow.get('irrigation')||{phase:'idle'}}};msg.statusCode=200;return [null,msg];}\nif (body.action==='start') {\n  const valves=body.valves&&typeof body.valves==='object'?body.valves:{};\n  const selected=['valve1','valve2'].filter(k=>valves[k]===true);\n  if (!selected.length||Object.keys(valves).some(k=>!['valve1','valve2'].includes(k))) return reply(422,null,{code:'unsupported_valve',message:'Only configured dashboard valve keys are supported',details:[]});\n  msg.payload={kind:'start',valve1:valves.valve1===true,valve2:valves.valve2===true,operation_id:op};\n} else msg.payload={kind:'stop',operation_id:op};\nseen[op]={action:body.action,accepted_at:Date.now()};flow.set('watering_plan_operations',seen);\nconst state=flow.get('irrigation')||{phase:'idle'};\nreturn [msg,{statusCode:202,payload:{api_version:'v1',data:{accepted:true,duplicate:false,operation_id:op,state}}}];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 420,
+    "wires": [
+      [
+        "1406698c9cd792c5"
+      ],
+      [
+        "7a3f6b8c0d1e2f33"
+      ]
+    ]
+  },
+  {
+    "id": "7a3f6b8c0d1e2f33",
+    "type": "http response",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Watering-plan command response",
+    "statusCode": "",
+    "headers": {},
+    "x": 760,
+    "y": 460,
+    "wires": []
+  },
+  {
+    "id": "8b4a7c9d0e1f3044",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Internal irrigation state",
+    "url": "/internal/irrigation/state",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 260,
+    "y": 520,
+    "wires": [
+      [
+        "9c5b8d0e1f203155"
+      ]
+    ]
+  },
+  {
+    "id": "9c5b8d0e1f203155",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Authorize irrigation state",
+    "func": "const auth=String(msg.req?.headers?.authorization||'');\nconst token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');\nmsg.statusCode=auth===`Bearer ${token}`&&token?200:401;\nmsg.payload=msg.statusCode===200?{api_version:'v1',data:flow.get('irrigation')||{phase:'idle'}}:{api_version:'v1',error:{code:'unauthorized',message:'Internal token invalid',details:[]}};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 520,
+    "wires": [
+      [
+        "ad6c9e1f20314266"
+      ]
+    ]
+  },
+  {
+    "id": "ad6c9e1f20314266",
+    "type": "http response",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Irrigation state response",
+    "statusCode": "",
+    "headers": {},
+    "x": 760,
+    "y": 560,
+    "wires": []
   },
   {
     "id": "irrigation_group",

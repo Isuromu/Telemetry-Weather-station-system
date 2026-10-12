@@ -438,6 +438,32 @@ s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?read
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
 
+PLAN_COMMAND = r'''// Internal scheduler seam. Token-gated and never emits device commands itself.
+const auth=String(msg.req?.headers?.authorization||'');
+const token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');
+const reply=(status,data,error)=>{msg.statusCode=status;msg.payload=error?{api_version:'v1',error}:{api_version:'v1',data};return [null,msg];};
+if (!token||auth!==`Bearer ${token}`) return reply(401,null,{code:'unauthorized',message:'Internal token invalid',details:[]});
+const body=msg.payload&&typeof msg.payload==='object'?msg.payload:{};
+const op=typeof body.operation_id==='string'&&body.operation_id;
+if (!op||!['start','stop'].includes(body.action)) return reply(400,null,{code:'invalid_command',message:'operation_id and action are required',details:[]});
+const seen=flow.get('watering_plan_operations')||{};
+if (seen[op]) {msg.payload={api_version:'v1',data:{accepted:true,duplicate:true,operation_id:op,state:flow.get('irrigation')||{phase:'idle'}}};msg.statusCode=200;return [null,msg];}
+if (body.action==='start') {
+  const valves=body.valves&&typeof body.valves==='object'?body.valves:{};
+  const selected=['valve1','valve2'].filter(k=>valves[k]===true);
+  if (!selected.length||Object.keys(valves).some(k=>!['valve1','valve2'].includes(k))) return reply(422,null,{code:'unsupported_valve',message:'Only configured dashboard valve keys are supported',details:[]});
+  msg.payload={kind:'start',valve1:valves.valve1===true,valve2:valves.valve2===true,operation_id:op};
+} else msg.payload={kind:'stop',operation_id:op};
+seen[op]={action:body.action,accepted_at:Date.now()};flow.set('watering_plan_operations',seen);
+const state=flow.get('irrigation')||{phase:'idle'};
+return [msg,{statusCode:202,payload:{api_version:'v1',data:{accepted:true,duplicate:false,operation_id:op,state}}}];'''
+
+PLAN_STATE = r'''const auth=String(msg.req?.headers?.authorization||'');
+const token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');
+msg.statusCode=auth===`Bearer ${token}`&&token?200:401;
+msg.payload=msg.statusCode===200?{api_version:'v1',data:flow.get('irrigation')||{phase:'idle'}}:{api_version:'v1',error:{code:'unauthorized',message:'Internal token invalid',details:[]}};
+return msg;'''
+
 
 # Do not rename the `cardValue` method to `value`: Dashboard 2's ui-template render
 # context already binds `value`, which shadows a user method of that name and throws
@@ -480,6 +506,12 @@ ID_CONTROL = "1406698c9cd792c5"
 ID_MQTT_OUT = "03424753ad790e6b"
 ID_UI = "d490a04f3084b9da"
 ID_GLOBAL_CONFIG = "c7c03261e21b3272"
+ID_PLAN_COMMAND_IN = "5e1d4f6c8a9b0c11"
+ID_PLAN_COMMAND = "6f2e5a7b9c0d1e22"
+ID_PLAN_COMMAND_RESPONSE = "7a3f6b8c0d1e2f33"
+ID_PLAN_STATE_IN = "8b4a7c9d0e1f3044"
+ID_PLAN_STATE = "9c5b8d0e1f203155"
+ID_PLAN_STATE_RESPONSE = "ad6c9e1f20314266"
 
 # z only. No tab node ships, so the import dialog's "Import to" list decides
 # which flow the nodes join and no second tab is ever created.
@@ -504,7 +536,9 @@ BREAKPOINTS = [{"name": "Default", "px": "0", "cols": "3"},
 
 def build():
     canvas_nodes = [ID_TICK, ID_SETTINGS, ID_SUBSCRIBE_TICK, ID_SUBSCRIBE,
-                    ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI]
+                    ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI,
+                    ID_PLAN_COMMAND_IN, ID_PLAN_COMMAND, ID_PLAN_COMMAND_RESPONSE,
+                    ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE]
     nodes = [
         node(ID_CANVAS, "group", z=FLOW_ID, style=CANVAS_STYLE, nodes=canvas_nodes,
              x=74, y=39, w=1502, h=322),
@@ -517,6 +551,12 @@ def build():
         node(ID_CONTROL, "function", z=FLOW_ID, g=ID_CANVAS, name="Safety checks and irrigation sequence", func=CONTROL, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1090, y=280, wires=[[ID_MQTT_OUT],[ID_UI]]),
         node(ID_MQTT_OUT, "mqtt out", z=FLOW_ID, g=ID_CANVAS, name="ChirpStack downlinks", topic="", qos="", retain="", respTopic="", contentType="", userProps="", correl="", expiry="", broker=BROKER, x=1410, y=240, wires=[]),
         node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="17", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_CONTROL]]),
+        node(ID_PLAN_COMMAND_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal watering-plan command", url="/internal/irrigation/command", method="post", upload=False, swaggerDoc="", x=260, y=420, wires=[[ID_PLAN_COMMAND]]),
+        node(ID_PLAN_COMMAND, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize watering-plan command", func=PLAN_COMMAND, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=420, wires=[[ID_CONTROL],[ID_PLAN_COMMAND_RESPONSE]]),
+        node(ID_PLAN_COMMAND_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan command response", statusCode="", headers={}, x=760, y=460, wires=[]),
+        node(ID_PLAN_STATE_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal irrigation state", url="/internal/irrigation/state", method="get", upload=False, swaggerDoc="", x=260, y=520, wires=[[ID_PLAN_STATE]]),
+        node(ID_PLAN_STATE, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize irrigation state", func=PLAN_STATE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=520, wires=[[ID_PLAN_STATE_RESPONSE]]),
+        node(ID_PLAN_STATE_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Irrigation state response", statusCode="", headers={}, x=760, y=560, wires=[]),
         node(GROUP, "ui-group", z=FLOW_ID, name="Irrigation", page=PAGE, width="12", height="1", order=1, showTitle=False, className="", visible="true", disabled="false", groupType="default"),
         node(PAGE, "ui-page", z=FLOW_ID, name="Irrigation", ui=UI_BASE, path="/irrigation", icon="water", layout="grid", theme=UI_THEME, breakpoints=BREAKPOINTS, order=4, className="", visible=True, disabled=False),
         # Shared singletons, shipped so a fresh canvas gets them. Their ids match
