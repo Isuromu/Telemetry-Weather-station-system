@@ -2,7 +2,19 @@
 // Keep this dependency-free so a Node-RED function/node adapter and future
 // local server implement the same version-1 plan acceptance rules.
 
-const crypto = require('crypto');
+// `require` is unavailable inside a Node-RED function node, which inlines this
+// file verbatim. The digest is advisory there: the store recomputes the
+// canonical SHA-256 with its own crypto before it writes a plan row, so the
+// empty fallback below never reaches storage. In Node and the CLI the real
+// digest is produced, so the contract test's 64-hex assertion still holds.
+let nodeCrypto = null;
+try { nodeCrypto = require('crypto'); } catch (_) { nodeCrypto = null; }
+
+function payloadHash(text) {
+  return nodeCrypto && typeof nodeCrypto.createHash === 'function'
+    ? nodeCrypto.createHash('sha256').update(text).digest('hex')
+    : '';
+}
 
 const ISO_WITH_OFFSET = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/;
 const PLAN_KEYS = new Set([
@@ -79,7 +91,7 @@ function canonicalPayload(payload) {
 
 function canonicalDigest(payload) {
   const text = canonicalPayload(payload);
-  return { canonicalPayload: text, payloadSha256: crypto.createHash('sha256').update(text).digest('hex') };
+  return { canonicalPayload: text, payloadSha256: payloadHash(text) };
 }
 
 function normalizeRegistry(fields) {

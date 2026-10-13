@@ -30,17 +30,26 @@
       "ad6c9e1f20314266",
       "be7da2f304253677",
       "cf8eb30415263788",
-      "d09fc41526374899",
       "e1a0d526374859aa",
       "f2b1e63748596abb",
       "03c2f748596a7bcc",
-      "14d308596a7b8cdd",
-      "25e4196a7b8c9dee"
+      "25e4196a7b8c9dee",
+      "1a2b3c4d5e6f7081",
+      "36f5196a7b8c9def",
+      "47a62a7b8c9def01",
+      "58b73b8c9def0123",
+      "69c84c9def012345",
+      "7ad95def01234567",
+      "8bea6ef012345678",
+      "9cfb7f0123456789",
+      "ad0c80123456789a",
+      "be1d9123456789ab",
+      "cf2ea23456789abc"
     ],
     "x": 74,
     "y": 39,
-    "w": 2200,
-    "h": 700
+    "w": 2400,
+    "h": 1000
   },
   {
     "id": "fd327e43632c19d6",
@@ -302,8 +311,8 @@
     "z": "irrigation_single_page",
     "g": "dc658b3ab3f2917e",
     "name": "Request watering-plan list",
-    "func": "const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\\/$/,'');\nconst token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');\nif (!/^https?:\\/\\//.test(base)||!token) {flow.set('watering_plan_api_status','Plan service unavailable: configure API URL and token');return [null,{payload:{kind:'plan_snapshot'}}];}\nmsg.method='GET';msg.url=base+'/api/v1/watering-plans?limit=50';msg.headers={Authorization:'Bearer '+token};return [msg,null];",
-    "outputs": 2,
+    "func": "// The dashboard reads the same SQLite store the mobile API writes, so it needs\n// no outbound HTTP client and no bearer token. The store node's single output\n// reaches PLAN_STORE_MUX, which routes msg.planConsumer here.\nmsg.action='list';msg.query={limit:50};msg.planConsumer='dashboard';return msg;",
+    "outputs": 1,
     "timeout": 0,
     "noerr": 0,
     "initialize": "",
@@ -313,34 +322,7 @@
     "y": 640,
     "wires": [
       [
-        "d09fc41526374899"
-      ],
-      [
-        "1406698c9cd792c5"
-      ]
-    ]
-  },
-  {
-    "id": "d09fc41526374899",
-    "type": "http request",
-    "z": "irrigation_single_page",
-    "g": "dc658b3ab3f2917e",
-    "name": "Read watering plans",
-    "method": "use",
-    "ret": "obj",
-    "paytoqs": "ignore",
-    "url": "",
-    "tls": "",
-    "persist": false,
-    "proxy": "",
-    "insecureHTTPParser": false,
-    "authType": "",
-    "senderr": false,
-    "x": 680,
-    "y": 640,
-    "wires": [
-      [
-        "e1a0d526374859aa"
+        "36f5196a7b8c9def"
       ]
     ]
   },
@@ -350,7 +332,7 @@
     "z": "irrigation_single_page",
     "g": "dc658b3ab3f2917e",
     "name": "Store watering-plan snapshot",
-    "func": "let body=msg.payload;\nif (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}\nif (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300||!Array.isArray(body?.data?.items)) {\n  flow.set('watering_plan_api_status','Plan service unavailable: '+(body?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};\n}\nflow.set('watering_plan_snapshot',body.data.items);\nflow.set('watering_plan_api_status','Plan list updated '+new Date().toLocaleTimeString());\nreturn {payload:{kind:'plan_snapshot'}};",
+    "func": "const result=msg.payload&&msg.payload.result;\nif (!msg.payload?.ok||!result) {flow.set('watering_plan_api_status','Plan store unavailable: '+(msg.payload?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};}\nflow.set('watering_plan_snapshot',result.items||[]);\nflow.set('watering_plan_api_status','Plan list updated '+new Date().toLocaleTimeString());\nreturn {payload:{kind:'plan_snapshot'}};",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -371,7 +353,7 @@
     "z": "irrigation_single_page",
     "g": "dc658b3ab3f2917e",
     "name": "Request plan cancellation or stop",
-    "func": "const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\\/$/,'');\nconst token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');\nconst id=String(msg.payload?.plan_id||'');\nif (!/^https?:\\/\\//.test(base)||!token||!id||id.length>128) {flow.set('watering_plan_api_status','Plan action unavailable: API configuration or plan id invalid');return null;}\nmsg.method='POST';msg.url=base+'/api/v1/watering-plans/'+encodeURIComponent(id)+'/cancel';msg.headers={Authorization:'Bearer '+token,'Content-Type':'application'+'/json'};msg.payload={};return msg;",
+    "func": "const id=String(msg.payload?.plan_id||'');\nif (!id||id.length>128) {flow.set('watering_plan_action_status','Plan action unavailable: plan id invalid');return null;}\nmsg.action='cancel';msg.planId=id;msg.planConsumer='cancel';return msg;",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -382,31 +364,7 @@
     "y": 420,
     "wires": [
       [
-        "14d308596a7b8cdd"
-      ]
-    ]
-  },
-  {
-    "id": "14d308596a7b8cdd",
-    "type": "http request",
-    "z": "irrigation_single_page",
-    "g": "dc658b3ab3f2917e",
-    "name": "Cancel watering plan",
-    "method": "use",
-    "ret": "obj",
-    "paytoqs": "ignore",
-    "url": "",
-    "tls": "",
-    "persist": false,
-    "proxy": "",
-    "insecureHTTPParser": false,
-    "authType": "",
-    "senderr": false,
-    "x": 2040,
-    "y": 420,
-    "wires": [
-      [
-        "25e4196a7b8c9dee"
+        "36f5196a7b8c9def"
       ]
     ]
   },
@@ -416,7 +374,7 @@
     "z": "irrigation_single_page",
     "g": "dc658b3ab3f2917e",
     "name": "Record plan action and refresh",
-    "func": "let body=msg.payload;\nif (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}\nif (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300) flow.set('watering_plan_action_status','Action failed: '+(body?.error?.message||'request failed'));\nelse flow.set('watering_plan_action_status',body?.data?.state==='stop_requested'?'Stop requested; awaiting sequencer confirmation':'Cancellation accepted');\nreturn {payload:{kind:'refresh_plan_list'}};",
+    "func": "const result=msg.payload&&msg.payload.result;\nif (!msg.payload?.ok) flow.set('watering_plan_action_status','Action failed: '+(msg.payload?.error?.message||'request failed'));\nelse flow.set('watering_plan_action_status',result&&result.state==='stop_requested'?'Stop requested; awaiting sequencer confirmation':'Cancellation accepted');\n// Re-render through CONTROL. It must not re-enter PLAN_LIST_REQUEST: the store\n// is a pass-through node to the loop guard, so a cancel-result-to-list edge\n// would close a function-node cycle with the shared store in it.\nreturn {payload:{kind:'plan_snapshot'}};",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -427,7 +385,7 @@
     "y": 420,
     "wires": [
       [
-        "cf8eb30415263788"
+        "1406698c9cd792c5"
       ]
     ]
   },
@@ -535,6 +493,214 @@
     "x": 760,
     "y": 560,
     "wires": []
+  },
+  {
+    "id": "36f5196a7b8c9def",
+    "type": "watering-plan-store",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Watering-plan SQLite store",
+    "databasePath": "/var/lib/node-red/watering-plans.sqlite3",
+    "migrationsDir": "",
+    "x": 930,
+    "y": 780,
+    "wires": [
+      [
+        "1a2b3c4d5e6f7081"
+      ]
+    ]
+  },
+  {
+    "id": "1a2b3c4d5e6f7081",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Route plan store results",
+    "func": "// One durable store, three consumers. The store node only rewrites msg.payload,\n// so msg.planConsumer survives to separate the dashboard list, the dashboard\n// cancel, and the mobile response formatter.\nconst consumer=String(msg.planConsumer||'dashboard');\nif (consumer==='mobile') return [msg,null,null];\nif (consumer==='cancel') return [null,msg,null];\nreturn [null,null,msg];",
+    "outputs": 3,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1120,
+    "y": 1060,
+    "wires": [
+      [
+        "58b73b8c9def0123"
+      ],
+      [
+        "25e4196a7b8c9dee"
+      ],
+      [
+        "e1a0d526374859aa"
+      ]
+    ]
+  },
+  {
+    "id": "47a62a7b8c9def01",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Authorize and route mobile watering API",
+    "func": "const planContract=(function(){\nconst module={exports:{}};\nconst require=function(){throw new Error('require is unavailable in the Node-RED function sandbox');};\n// Shared validation and canonicalization for watering-plan API adapters.\n// Keep this dependency-free so a Node-RED function/node adapter and future\n// local server implement the same version-1 plan acceptance rules.\n\n// `require` is unavailable inside a Node-RED function node, which inlines this\n// file verbatim. The digest is advisory there: the store recomputes the\n// canonical SHA-256 with its own crypto before it writes a plan row, so the\n// empty fallback below never reaches storage. In Node and the CLI the real\n// digest is produced, so the contract test's 64-hex assertion still holds.\nlet nodeCrypto = null;\ntry { nodeCrypto = require('crypto'); } catch (_) { nodeCrypto = null; }\n\nfunction payloadHash(text) {\n  return nodeCrypto && typeof nodeCrypto.createHash === 'function'\n    ? nodeCrypto.createHash('sha256').update(text).digest('hex')\n    : '';\n}\n\nconst ISO_WITH_OFFSET = /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d{1,9})?(?:Z|[+-](?:0\\d|1\\d|2[0-3]):[0-5]\\d)$/;\nconst PLAN_KEYS = new Set([\n  'schema_version', 'plan_id', 'revision', 'status', 'source', 'plan_group_id',\n  'summary', 'created_at', 'timezone', 'start_at', 'valid_until', 'targets',\n  'run_mode', 'stop', 'hard_max_runtime_sec',\n]);\nconst TARGET_KEYS = new Set(['mode', 'field_ids']);\nconst STOP_KEYS = new Set(['type', 'value', 'unit']);\n\nconst fail = (code, message, details) => ({ ok: false, error: { code, message, details: details || [] } });\nconst isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);\nconst finitePositive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;\n\nfunction unexpectedKeys(object, allowed) {\n  return Object.keys(object).filter(key => !allowed.has(key));\n}\n\nfunction parseTimestamp(value, field) {\n  if (typeof value !== 'string') return fail('invalid_timestamp', field + ' must be an ISO 8601 string with an explicit offset');\n  const match = ISO_WITH_OFFSET.exec(value);\n  if (!match) return fail('invalid_timestamp', field + ' must include an explicit UTC offset');\n  const year = Number(match[1]);\n  const month = Number(match[2]);\n  const day = Number(match[3]);\n  const hour = Number(match[4]);\n  const minute = Number(match[5]);\n  const second = Number(match[6]);\n  const calendar = new Date(Date.UTC(year, month - 1, day));\n  if (month < 1 || month > 12 || day < 1 || calendar.getUTCFullYear() !== year ||\n      calendar.getUTCMonth() !== month - 1 || calendar.getUTCDate() !== day ||\n      hour > 23 || minute > 59 || second > 59) {\n    return fail('invalid_timestamp', field + ' is not a valid calendar timestamp');\n  }\n  const milliseconds = Date.parse(value);\n  if (!Number.isFinite(milliseconds)) return fail('invalid_timestamp', field + ' could not be parsed');\n  return { ok: true, milliseconds };\n}\n\nfunction validTimeZone(value) {\n  if (typeof value !== 'string' || !value) return false;\n  try {\n    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();\n    return true;\n  } catch (_) {\n    return false;\n  }\n}\n\nfunction canonicalize(value) {\n  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;\n  if (typeof value === 'number') {\n    if (!Number.isFinite(value)) throw new TypeError('Canonical JSON cannot contain a non-finite number');\n    return value;\n  }\n  if (Array.isArray(value)) return value.map(canonicalize);\n  if (!isObject(value)) throw new TypeError('Canonical JSON supports only JSON values');\n  const output = {};\n  for (const key of Object.keys(value).sort()) output[key] = canonicalize(value[key]);\n  return output;\n}\n\nfunction canonicalJson(value) {\n  return JSON.stringify(canonicalize(value));\n}\n\nfunction canonicalPayload(payload) {\n  const copy = canonicalize(payload);\n  if (copy.targets && Array.isArray(copy.targets.field_ids)) {\n    copy.targets.field_ids.sort();\n  }\n  return JSON.stringify(copy);\n}\n\nfunction canonicalDigest(payload) {\n  const text = canonicalPayload(payload);\n  return { canonicalPayload: text, payloadSha256: payloadHash(text) };\n}\n\nfunction normalizeRegistry(fields) {\n  if (!Array.isArray(fields)) return fail('gateway_configuration_invalid', 'Field registry is not configured');\n  const byFieldId = new Map();\n  for (const field of fields) {\n    if (!isObject(field) || typeof field.field_id !== 'string' || !field.field_id ||\n        typeof field.valve_id !== 'string' || !field.valve_id) {\n      return fail('gateway_configuration_invalid', 'Field registry contains an invalid field mapping');\n    }\n    if (byFieldId.has(field.field_id)) {\n      return fail('gateway_configuration_invalid', 'Field registry contains a duplicate field id', [field.field_id]);\n    }\n    byFieldId.set(field.field_id, field);\n  }\n  return { ok: true, byFieldId };\n}\n\nfunction resolveTargets(targets, registry) {\n  if (!isObject(targets) || unexpectedKeys(targets, TARGET_KEYS).length) {\n    return fail('invalid_targets', 'targets contains unsupported fields');\n  }\n  let fieldIds;\n  if (targets.mode === 'selected') {\n    if (!Array.isArray(targets.field_ids) || !targets.field_ids.length ||\n        targets.field_ids.some(value => typeof value !== 'string' || !value)) {\n      return fail('invalid_targets', 'Selected plans require one or more field_ids');\n    }\n    if (new Set(targets.field_ids).size !== targets.field_ids.length) {\n      return fail('duplicate_target', 'Selected field_ids must be unique');\n    }\n    fieldIds = [...targets.field_ids].sort();\n  } else if (targets.mode === 'all') {\n    if (Object.prototype.hasOwnProperty.call(targets, 'field_ids')) {\n      return fail('invalid_targets', 'All-fields plans must not carry field_ids');\n    }\n    fieldIds = [...registry.byFieldId.values()]\n      .filter(field => field.enabled === true)\n      .map(field => field.field_id)\n      .sort();\n  } else {\n    return fail('invalid_targets', 'targets.mode must be selected or all');\n  }\n  if (!fieldIds.length) return fail('no_enabled_targets', 'No enabled fields match this plan');\n  const fields = [];\n  for (const fieldId of fieldIds) {\n    const field = registry.byFieldId.get(fieldId);\n    if (!field || field.enabled !== true) {\n      return fail('unknown_or_disabled_field', 'Plan targets an unknown or disabled field', [fieldId]);\n    }\n    fields.push(field);\n  }\n  const valveIds = fields.map(field => field.valve_id);\n  if (new Set(valveIds).size !== valveIds.length) {\n    return fail('gateway_configuration_invalid', 'Field registry maps selected fields to the same valve');\n  }\n  return { ok: true, fieldIds, fields, valveIds: valveIds.sort() };\n}\n\nfunction allowedValveSet(valveIds, configuredSets) {\n  if (!Array.isArray(configuredSets)) return false;\n  const expected = valveIds.join('\\u0000');\n  return configuredSets.some(set => Array.isArray(set) && [...set].sort().join('\\u0000') === expected);\n}\n\nfunction validatePlan(payload, options) {\n  const config = options || {};\n  if (!isObject(payload)) return fail('invalid_payload', 'Plan payload must be a JSON object');\n  const unknown = unexpectedKeys(payload, PLAN_KEYS);\n  if (unknown.length) return fail('invalid_payload', 'Plan payload contains unsupported fields', unknown.sort());\n  if (payload.schema_version !== 1) return fail('unsupported_schema_version', 'Only schema_version 1 is supported');\n  if (typeof payload.plan_id !== 'string' || !payload.plan_id) return fail('invalid_plan_id', 'plan_id is required');\n  if (config.pathPlanId !== undefined && payload.plan_id !== config.pathPlanId) {\n    return fail('plan_id_mismatch', 'URL plan_id does not match payload plan_id');\n  }\n  if (!Number.isInteger(payload.revision) || payload.revision < 1) return fail('invalid_revision', 'revision must be a positive integer');\n  if (payload.status !== 'scheduled' && payload.status !== 'cancelled') return fail('invalid_status', 'status must be scheduled or cancelled');\n  if (payload.source !== 'human' && payload.source !== 'ai') return fail('invalid_source', 'source must be human or ai');\n  if (!validTimeZone(payload.timezone)) return fail('invalid_timezone', 'timezone must be a valid IANA timezone');\n  for (const field of ['created_at', 'start_at', 'valid_until']) {\n    const result = parseTimestamp(payload[field], field);\n    if (!result.ok) return result;\n  }\n  const startAt = parseTimestamp(payload.start_at, 'start_at').milliseconds;\n  const validUntil = parseTimestamp(payload.valid_until, 'valid_until').milliseconds;\n  if (startAt >= validUntil) return fail('invalid_time_window', 'start_at must be before valid_until');\n  if (config.clockSynchronized !== true) return fail('clock_unsynchronized', 'Gateway clock is not synchronized');\n  if (payload.run_mode !== 'parallel') return fail('unsupported_run_mode', 'Only parallel run_mode is supported');\n  if (!Number.isInteger(payload.hard_max_runtime_sec) || payload.hard_max_runtime_sec < 1) {\n    return fail('invalid_hard_max_runtime', 'hard_max_runtime_sec must be a positive integer');\n  }\n  if (!Number.isInteger(config.gatewayMaxRuntimeSec) || config.gatewayMaxRuntimeSec < 1) {\n    return fail('gateway_configuration_invalid', 'Gateway maximum run duration is not configured');\n  }\n  const registry = normalizeRegistry(config.fields);\n  if (!registry.ok) return registry;\n  const targets = resolveTargets(payload.targets, registry);\n  if (!targets.ok) return targets;\n  if (!allowedValveSet(targets.valveIds, config.allowedValveSets)) {\n    return fail('parallel_capacity_not_commissioned', 'Selected valve set is not approved for this pump');\n  }\n  if (!isObject(payload.stop) || unexpectedKeys(payload.stop, STOP_KEYS).length ||\n      !finitePositive(payload.stop.value) || typeof payload.stop.unit !== 'string' || !payload.stop.unit) {\n    return fail('invalid_stop_rule', 'stop must contain a supported positive type, value, and unit');\n  }\n  if (payload.stop.type === 'duration') {\n    if (!Array.isArray(config.durationUnits) || !config.durationUnits.includes(payload.stop.unit)) {\n      return fail('unsupported_duration_unit', 'Duration unit is not configured');\n    }\n  } else if (payload.stop.type === 'volume') {\n    if (!Array.isArray(config.volumeUnits) || !config.volumeUnits.includes(payload.stop.unit)) {\n      return fail('unsupported_volume_unit', 'Volume unit is not configured');\n    }\n    // Phase 3 implements total-baseline completion only for the deployed\n    // field-001 -> valve1 commissioning path. A future registry entry must not\n    // turn simulated or newly labelled meter data into a production stop rule.\n    if (targets.fields.length !== 1 || targets.valveIds[0] !== 'valve1' ||\n        targets.fields[0].flow_meter !== 'commissioned') {\n      return fail('unsupported_volume_target', 'Volume plans require commissioned valve1 metering');\n    }\n    const meter = config.meterStatusByValve && config.meterStatusByValve[targets.valveIds[0]];\n    if (!meter || meter.healthy !== true || meter.fresh !== true || meter.decoder !== 'commissioned') {\n      return fail('meter_unavailable', 'Commissioned flow-meter evidence is unavailable');\n    }\n  } else {\n    return fail('unsupported_stop_type', 'Only duration and volume stop rules are supported');\n  }\n  const digest = canonicalDigest(payload);\n  return {\n    ok: true,\n    value: {\n      ...digest,\n      plan: payload,\n      resolvedFieldIds: targets.fieldIds,\n      resolvedValveIds: targets.valveIds,\n      acceptedMaxRuntimeSec: Math.min(payload.hard_max_runtime_sec, config.gatewayMaxRuntimeSec),\n    },\n  };\n}\n\nmodule.exports = { canonicalJson, canonicalDigest, validatePlan };\n\nreturn module.exports;})()\n;\n// Public mobile API. It only stores and reads plans; the ordered sequencer\n// stays behind CONTROL and the internal token seam, and this node never emits\n// device commands. Validation is the shared contract the prototype API uses\n// (tools/watering_plan_contract.js, inlined above by the builder), and each\n// request goes either to the durable store (port 1) or straight to the response\n// formatter (port 2).\nconst respond=(status,data,error)=>{msg.mobileStatus=status;if(error)msg.mobileError=error;else msg.mobileData=data;return [null,msg];};\nconst request=msg.req||{};\nconst headers=request.headers||{};\nconst requestId=String(headers['x-request-id']||'').slice(0,128)||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;\nmsg.mobileRequestId=requestId;\nconst token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');\nif (!token||String(headers.authorization||'')!==`Bearer ${token}`) return respond(401,null,{code:'unauthorized',message:'Bearer credential is invalid',details:[]});\nconst method=String(request.method||'').toUpperCase();\nconst path=String(request.path||'');\nconst readJson=(value,fallback)=>{if(typeof value!=='string'||!value)return fallback;try{const parsed=JSON.parse(value);return parsed===undefined?fallback:parsed;}catch(_){return fallback;}};\nconst clockSynchronized=String(env.get('IRRIGATION_CLOCK_SYNCHRONIZED')||'false').toLowerCase()==='true';\nconst gatewayMaxRuntimeSec=Number(env.get('IRRIGATION_GATEWAY_MAX_RUNTIME_SEC'))||14400;\n// Prototype registry: field-001 is the one commissioned, metered field. Site\n// mappings and allowed valve sets arrive as environment JSON so a deployment\n// never edits this node.\nconst fields=readJson(env.get('IRRIGATION_FIELD_REGISTRY'),[{field_id:'field-001',display_name:'Field 1',valve_id:'valve1',flow_meter:'commissioned',enabled:true}]);\nconst allowedValveSets=readJson(env.get('IRRIGATION_ALLOWED_VALVE_SETS'),[['valve1']]);\nconst durationUnits=String(env.get('IRRIGATION_DURATION_UNITS')||'seconds,minutes,hours').split(',').map(value=>value.trim()).filter(Boolean);\nconst volumeUnits=String(env.get('IRRIGATION_VOLUME_UNITS')||'m3').split(',').map(value=>value.trim()).filter(Boolean);\nconst meterStatusByValve=readJson(env.get('IRRIGATION_METER_STATUS_JSON'),null);\nif (method==='GET'&&path==='/api/v1/health') return respond(200,{time:new Date().toISOString(),clock_synchronized:clockSynchronized});\nif (method==='GET'&&path==='/api/v1/device-state') {\n  const state=flow.get('irrigation');\n  if (!state||typeof state!=='object') return respond(200,{generated_at:new Date().toISOString(),status:'unavailable',reason:'sequencer_state_unavailable',devices:[]});\n  const devices=Object.keys(state.devices||{}).map(key=>{const device=state.devices[key]||{};return {device:key,phase:state.phase||null,observed_at:device.last_seen||null,age_sec:typeof device.at==='number'?Math.round((Date.now()-device.at)/1000):null,stale:device.stale===true,data:device};});\n  return respond(200,{generated_at:new Date().toISOString(),phase:state.phase||'idle',status:devices.some(device=>device.stale)?'stale':'available',devices});\n}\nif (method==='GET'&&path==='/api/v1/watering-plans') {\n  const query=request.query||{};\n  let limit;\n  if (query.limit!==undefined&&query.limit!=='') {limit=Number(query.limit);if(!Number.isInteger(limit)||limit<1) return respond(400,null,{code:'invalid_payload',message:'limit must be a positive integer',details:[]});}\n  msg.action='list';msg.query={fromAt:query.from,toAt:query.to,limit,cursor:query.cursor};msg.planConsumer='mobile';return [msg,null];\n}\nconst cancelMatch=/^\\/api\\/v1\\/watering-plans\\/([^/]+)\\/cancel$/.exec(path);\nconst detailMatch=/^\\/api\\/v1\\/watering-plans\\/([^/]+)$/.exec(path);\nconst planId=String((request.params&&request.params.plan_id)||(cancelMatch&&cancelMatch[1])||(detailMatch&&detailMatch[1])||'');\nif (detailMatch&&method==='GET') {if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});msg.action='get';msg.planId=planId;msg.includeHistory=true;msg.planConsumer='mobile';return [msg,null];}\nif (cancelMatch&&method==='POST') {if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});msg.action='cancel';msg.planId=planId;msg.planConsumer='mobile';return [msg,null];}\nif (detailMatch&&method==='PUT') {\n  if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});\n  const outcome=planContract.validatePlan(msg.payload,{pathPlanId:planId,clockSynchronized,gatewayMaxRuntimeSec,durationUnits,volumeUnits,fields,allowedValveSets,meterStatusByValve});\n  if (!outcome.ok) return respond(422,null,outcome.error);\n  msg.action='accept';msg.plan=outcome.value.plan;msg.resolvedValveIds=outcome.value.resolvedValveIds;msg.acceptedMaxRuntimeSec=outcome.value.acceptedMaxRuntimeSec;msg.planConsumer='mobile';return [msg,null];\n}\nreturn respond(404,null,{code:'not_found',message:'API path was not found',details:[]});",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 780,
+    "wires": [
+      [
+        "36f5196a7b8c9def"
+      ],
+      [
+        "58b73b8c9def0123"
+      ]
+    ]
+  },
+  {
+    "id": "58b73b8c9def0123",
+    "type": "function",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Format mobile watering API response",
+    "func": "const planRecord=(function(){\nconst module={exports:{}};\nconst require=function(){throw new Error('require is unavailable in the Node-RED function sandbox');};\n// Projection from the durable store row to the mobile WateringPlanRecord.\n//\n// This mirrors WateringPlanService._public_plan in tools/watering_plan_api.py so\n// the Python prototype and the generated Node-RED flow serve the same record\n// shape: the accepted plan payload flattened at the top level, the store's\n// current state and timestamps merged in, and at most one execution summary.\n// The builder inlines this file verbatim into the mobile API result function,\n// so keep it dependency-free.\n'use strict';\n\nfunction publicPlan(stored) {\n  if (!stored || typeof stored !== 'object') return stored;\n  let plan = stored.payload;\n  if (typeof plan === 'string') {\n    try { plan = JSON.parse(plan); } catch (_) { plan = {}; }\n  }\n  if (!plan || typeof plan !== 'object' || Array.isArray(plan)) plan = {};\n  const record = Object.assign({}, plan);\n  record.state = stored.state;\n  record.accepted_at = stored.accepted_at;\n  record.updated_at = stored.updated_at;\n  if (stored.last_delay_reason) record.delay_reason = stored.last_delay_reason;\n  const attempts = stored.attempts || [];\n  const attempt = stored.attempt || (attempts.length ? attempts[attempts.length - 1] : null);\n  if (attempt) {\n    const execution = {};\n    if (attempt.operation_id !== undefined && attempt.operation_id !== null) execution.operation_id = attempt.operation_id;\n    if (attempt.actual_started_at !== undefined && attempt.actual_started_at !== null) execution.actual_started_at = attempt.actual_started_at;\n    if (attempt.actual_ended_at !== undefined && attempt.actual_ended_at !== null) execution.actual_ended_at = attempt.actual_ended_at;\n    if (attempt.delivered_m3 !== undefined && attempt.delivered_m3 !== null) execution.actual_volume_m3 = attempt.delivered_m3;\n    if (attempt.final_reason !== undefined && attempt.final_reason !== null) execution.stop_reason = attempt.final_reason;\n    record.execution = execution;\n  }\n  if ('events' in stored) record.events = stored.events;\n  for (const key of ['created', 'replaced', 'idempotent']) {\n    if (key in stored) record[key] = stored[key];\n  }\n  return record;\n}\n\nmodule.exports = { publicPlan };\n\nreturn module.exports;})()\n;\n// The single place a mobile API response envelope is built. The route node sets\n// msg.mobileStatus/mobileData/mobileError for its own replies; the store leaves\n// its {ok,action,result} payload. The branches below cover both.\nconst requestId=String(msg.mobileRequestId||'unknown');\nconst STATUS={unauthorized:401,not_found:404,method_not_allowed:405,\n  invalid_payload:400,invalid_plan_id:400,invalid_cursor:400,invalid_timestamp:400,plan_id_mismatch:400,\n  plan_not_found:404,\n  revision_conflict:409,stale_revision:409,active_revision_conflict:409,active_plan_revision_conflict:409,\n  unsupported_schema_version:422,invalid_revision:422,invalid_status:422,invalid_source:422,invalid_timezone:422,\n  invalid_time_window:422,clock_unsynchronized:422,unsupported_run_mode:422,invalid_hard_max_runtime:422,\n  parallel_capacity_not_commissioned:422,invalid_stop_rule:422,unsupported_duration_unit:422,unsupported_volume_unit:422,\n  unsupported_volume_target:422,meter_unavailable:422,unsupported_stop_type:422,invalid_targets:422,duplicate_target:422,\n  no_enabled_targets:422,unknown_or_disabled_field:422,gateway_configuration_invalid:422,\n  validator_unavailable:500,internal_error:500};\nconst send=(status,error,data)=>{msg.statusCode=status;msg.headers={'Content-Type':'application'+'/json'};msg.payload=error?{api_version:'v1',request_id:requestId,error}:{api_version:'v1',request_id:requestId,data};return msg;};\nif (typeof msg.payload?.ok!=='boolean') {\n  if (msg.mobileError) return send(STATUS[msg.mobileError.code]||msg.mobileStatus||500,msg.mobileError,null);\n  return send(msg.mobileStatus||200,null,msg.mobileData===undefined?null:msg.mobileData);\n}\nif (!msg.payload.ok) {const error=msg.payload.error||{code:'internal_error',message:'Plan store failed',details:[]};return send(STATUS[error.code]||500,error,null);}\nconst result=msg.payload.result;\nif (msg.action==='list') return send(200,null,{items:(result.items||[]).map(planRecord.publicPlan),next_cursor:result.next_cursor===undefined?null:result.next_cursor});\nconst status=msg.action==='accept'?(result.created?201:200):(msg.action==='cancel'&&result.state==='stop_requested'?202:200);\nreturn send(status,null,planRecord.publicPlan(result));",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1200,
+    "y": 780,
+    "wires": [
+      [
+        "cf2ea23456789abc"
+      ]
+    ]
+  },
+  {
+    "id": "69c84c9def012345",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API health",
+    "url": "/api/v1/health",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 250,
+    "y": 720,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
+  },
+  {
+    "id": "cf2ea23456789abc",
+    "type": "http response",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1460,
+    "y": 780,
+    "wires": []
+  },
+  {
+    "id": "7ad95def01234567",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API device state",
+    "url": "/api/v1/device-state",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 270,
+    "y": 760,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
+  },
+  {
+    "id": "8bea6ef012345678",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API plan list",
+    "url": "/api/v1/watering-plans",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 260,
+    "y": 800,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
+  },
+  {
+    "id": "9cfb7f0123456789",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API plan detail",
+    "url": "/api/v1/watering-plans/:plan_id",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 280,
+    "y": 840,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
+  },
+  {
+    "id": "ad0c80123456789a",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API plan write",
+    "url": "/api/v1/watering-plans/:plan_id",
+    "method": "put",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 280,
+    "y": 880,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
+  },
+  {
+    "id": "be1d9123456789ab",
+    "type": "http in",
+    "z": "irrigation_single_page",
+    "g": "dc658b3ab3f2917e",
+    "name": "Mobile API plan cancel",
+    "url": "/api/v1/watering-plans/:plan_id/cancel",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 290,
+    "y": 920,
+    "wires": [
+      [
+        "47a62a7b8c9def01"
+      ]
+    ]
   },
   {
     "id": "irrigation_group",

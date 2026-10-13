@@ -24,9 +24,14 @@ const IDS = {
   planCommandResponse: '7a3f6b8c0d1e2f33', planStateIn: '8b4a7c9d0e1f3044',
   planState: '9c5b8d0e1f203155', planStateResponse: 'ad6c9e1f20314266',
   planRefreshTick: 'be7da2f304253677', planListRequest: 'cf8eb30415263788',
-  planListHttp: 'd09fc41526374899', planListResult: 'e1a0d526374859aa',
+  planListResult: 'e1a0d526374859aa',
   planUiRoute: 'f2b1e63748596abb', planCancelRequest: '03c2f748596a7bcc',
-  planCancelHttp: '14d308596a7b8cdd', planCancelResult: '25e4196a7b8c9dee',
+  planCancelResult: '25e4196a7b8c9dee', planStoreMux: '1a2b3c4d5e6f7081',
+  mobileStore: '36f5196a7b8c9def', mobileRoute: '47a62a7b8c9def01',
+  mobileResult: '58b73b8c9def0123', mobileHealth: '69c84c9def012345',
+  mobileDeviceState: '7ad95def01234567', mobileList: '8bea6ef012345678',
+  mobileDetail: '9cfb7f0123456789', mobilePut: 'ad0c80123456789a',
+  mobileCancel: 'be1d9123456789ab', mobileResponse: 'cf2ea23456789abc',
   page: 'irrigation_page', group: 'irrigation_group',
   base: 'f53e93e9ba219e63', theme: 'e49416861823a329'
 };
@@ -51,9 +56,12 @@ const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqt
                IDS.status, IDS.control, IDS.mqttOut, IDS.ui,
                IDS.planCommandIn, IDS.planCommand, IDS.planCommandResponse,
                IDS.planStateIn, IDS.planState, IDS.planStateResponse,
-               IDS.planRefreshTick, IDS.planListRequest, IDS.planListHttp,
-               IDS.planListResult, IDS.planUiRoute, IDS.planCancelRequest,
-               IDS.planCancelHttp, IDS.planCancelResult];
+               IDS.planRefreshTick, IDS.planListRequest, IDS.planListResult,
+               IDS.planUiRoute, IDS.planCancelRequest, IDS.planCancelResult,
+               IDS.planStoreMux, IDS.mobileStore,
+               IDS.mobileRoute, IDS.mobileResult, IDS.mobileHealth,
+               IDS.mobileDeviceState, IDS.mobileList, IDS.mobileDetail,
+               IDS.mobilePut, IDS.mobileCancel, IDS.mobileResponse];
 assert(byId[IDS.canvas] && byId[IDS.canvas].type === 'group', 'the canvas group node is part of the export');
 assert.deepEqual([...byId[IDS.canvas].nodes].sort(), [...wired].sort(),
   'the canvas group must list exactly the flow nodes, or the canvas loses its frame on import');
@@ -77,10 +85,34 @@ const settings = byId[IDS.settings].func;
 const control = byId[IDS.control].func;
 const template = byId[IDS.ui].format;
 assert.equal(byId[IDS.planRefreshTick].repeat,'15','plan list refreshes at a bounded cadence');
-assert.equal(byId[IDS.planListHttp].type,'http request');
-assert.equal(byId[IDS.planCancelHttp].type,'http request');
-assert(byId[IDS.planCancelResult].wires[0].includes(IDS.planListRequest),
-  'accepted cancel/stop action refreshes the plan snapshot');
+assert.equal(byId[IDS.mobileStore].type, 'watering-plan-store');
+assert(byId[IDS.mobileStore].databasePath.length > 0, 'the store node must name a database file');
+assert.equal(byId[IDS.mobileRoute].type, 'function');
+assert.equal(byId[IDS.mobileResult].type, 'function');
+assert.equal(byId[IDS.mobileResponse].type, 'http response');
+assert.equal(byId[IDS.planStoreMux].type, 'function');
+// No outbound client ships: the dashboard reads the same durable store the
+// mobile API writes, so it needs neither an external URL nor a second token.
+assert(!nodes.some(n => n.type === 'http request'), 'the dashboard must not ship an outbound http request');
+assert(!/IRRIGATION_PLAN_API_URL/.test(JSON.stringify(byId[IDS.planListRequest])),
+  'the plan list must not read an external API URL');
+for (const id of [IDS.mobileHealth, IDS.mobileDeviceState, IDS.mobileList, IDS.mobileDetail, IDS.mobilePut, IDS.mobileCancel]) {
+  assert.equal(byId[id].type, 'http in');
+  assert(byId[id].wires[0].includes(IDS.mobileRoute), `${id} must enter authenticated mobile API router`);
+}
+assert.deepEqual(byId[IDS.mobileRoute].wires[0], [IDS.mobileStore], 'mobile plan operations must use durable store');
+assert.deepEqual(byId[IDS.mobileRoute].wires[1], [IDS.mobileResult], 'mobile read-only responses bypass store');
+assert.deepEqual(byId[IDS.mobileStore].wires[0], [IDS.planStoreMux], 'the single store feeds the consumer mux');
+assert.deepEqual(byId[IDS.planStoreMux].wires,
+  [[IDS.mobileResult],[IDS.planCancelResult],[IDS.planListResult]],
+  'the mux separates the mobile, dashboard cancel and dashboard list consumers');
+assert.deepEqual(byId[IDS.mobileResult].wires[0], [IDS.mobileResponse]);
+assert.deepEqual(byId[IDS.planListRequest].wires[0], [IDS.mobileStore], 'the dashboard list reads the store');
+assert.deepEqual(byId[IDS.planCancelRequest].wires[0], [IDS.mobileStore], 'the dashboard cancel writes the store');
+assert(!byId[IDS.mobileRoute].wires.flat().includes(IDS.control), 'mobile API must not bypass scheduler into CONTROL');
+assert(!byId[IDS.mobileRoute].func.includes('IRRIGATION_INTERNAL_TOKEN'), 'mobile and internal tokens must remain separate');
+assert(byId[IDS.planCancelResult].wires[0].includes(IDS.control),
+  'accepted cancel/stop action re-renders without a function-node cycle through the store');
 for (const label of ['Upcoming','Active','Recent','Request stop','Cancel this scheduled plan?'])
   assert(template.includes(label),`dashboard plan section/control missing: ${label}`);
 assert(template.includes('p.source')&&template.includes('p.start_at')&&
@@ -219,6 +251,140 @@ assert.equal(accepted[0].payload.kind,'start');
 const duplicate = planCommand({req:{headers:{authorization:'Bearer secret'}},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
 assert.equal(duplicate[0],null);
 assert.equal(duplicate[1].payload.data.duplicate,true);
+
+// --- Public mobile API: execute the generated route and result bodies -------
+// The wiring above says nothing about behaviour, so drive the two functions the
+// way Node-RED does and assert the envelopes. This is what catches a route reply
+// answered as a 500, or a valid plan rejected by a broken timestamp rule.
+const contractSource = fs.readFileSync('tools/watering_plan_contract.js', 'utf8');
+const recordSource = fs.readFileSync('tools/watering_plan_record.js', 'utf8');
+assert(byId[IDS.mobileRoute].func.includes(contractSource),
+  'the mobile route must inline tools/watering_plan_contract.js verbatim');
+assert(byId[IDS.mobileResult].func.includes(recordSource),
+  'the mobile result must inline tools/watering_plan_record.js verbatim');
+const { publicPlan } = require('./watering_plan_record.js');
+const mobileRoute = new Function('msg','flow','node','env','Buffer','global', byId[IDS.mobileRoute].func);
+const mobileResult = new Function('msg','flow','node','env','Buffer','global', byId[IDS.mobileResult].func);
+const mobileMux = new Function('msg','flow','node','env','Buffer','global', byId[IDS.planStoreMux].func);
+const mobileMemory = new Map();
+const mobileFlow = {get:k=>mobileMemory.get(k),set:(k,v)=>mobileMemory.set(k,v)};
+const mobileEnvVars = {IRRIGATION_PLAN_API_TOKEN:'mobile-secret'};
+const mobileEnv = {get:k=>mobileEnvVars[k]};
+const routeIn = (method,path,extra) => Object.assign({
+  method, path, params:{}, query:{},
+  headers:{authorization:'Bearer mobile-secret','x-request-id':'req-1'}
+}, extra);
+// The route hands the message to the store (port 1) or the formatter (port 2);
+// storeReply then stands in for the store node's own output.
+const api = msg => { const out = mobileRoute(msg,mobileFlow,node,mobileEnv,Buffer,globalCtx); return out[0] || out[1]; };
+const format = msg => mobileResult(msg,mobileFlow,node,mobileEnv,Buffer,globalCtx);
+const storeReply = (msg,result) => { msg.payload = {ok:true, action:msg.action, result}; return msg; };
+const validPlan = {
+  plan_id:'p1', schema_version:1, revision:1, status:'scheduled', source:'human',
+  created_at:'2026-10-13T10:00:00+05:00', timezone:'Asia/Tashkent',
+  start_at:'2026-10-15T06:00:00+05:00', valid_until:'2026-10-15T16:00:00+05:00',
+  targets:{mode:'selected',field_ids:['field-001']}, run_mode:'parallel',
+  stop:{type:'duration',value:60,unit:'seconds'}, hard_max_runtime_sec:3600
+};
+
+// A message with no req must not throw: the all-flow smoke pass sends one.
+assert.doesNotThrow(() => mobileRoute({payload:{}},mobileFlow,node,mobileEnv,Buffer,globalCtx),
+  'the mobile route must survive a message with no req');
+// health: 200, echoed request id, boolean clock, and never the token.
+let mobileMsg = format(api({req:routeIn('GET','/api/v1/health'),payload:{}}));
+assert.equal(mobileMsg.statusCode, 200);
+assert.equal(mobileMsg.payload.request_id, 'req-1');
+assert.equal(typeof mobileMsg.payload.data.clock_synchronized, 'boolean');
+assert(!JSON.stringify(mobileMsg.payload).includes('mobile-secret'), 'a response must never carry the token');
+// missing bearer -> 401, not 500.
+mobileMsg = format(api({req:{method:'GET',path:'/api/v1/health',headers:{}},payload:{}}));
+assert.equal(mobileMsg.statusCode, 401);
+assert.equal(mobileMsg.payload.error.code, 'unauthorized');
+// unknown path -> 404.
+mobileMsg = format(api({req:routeIn('GET','/api/v1/unknown'),payload:{}}));
+assert.equal(mobileMsg.statusCode, 404);
+// deep path is matched from the concrete path, never req.route, and the clock
+// gate rejects a due plan while the gateway clock is unsynchronized.
+mobileMsg = format(api({req:routeIn('PUT','/api/v1/watering-plans/p1',{params:{plan_id:'p1'}}),payload:validPlan}));
+assert.equal(mobileMsg.statusCode, 422);
+assert.equal(mobileMsg.payload.error.code, 'clock_unsynchronized');
+mobileEnvVars.IRRIGATION_CLOCK_SYNCHRONIZED = 'true';
+mobileMsg = api({req:routeIn('PUT','/api/v1/watering-plans/p1',{params:{plan_id:'p1'}}),payload:validPlan});
+assert.equal(mobileMsg.action, 'accept');
+assert.deepEqual(mobileMsg.resolvedValveIds, ['valve1']);
+assert.equal(mobileMsg.acceptedMaxRuntimeSec, Math.min(validPlan.hard_max_runtime_sec, 14400),
+  'the accepted runtime is the lower of the request and the gateway maximum');
+mobileMsg = api({req:routeIn('PUT','/api/v1/watering-plans/p1',{params:{plan_id:'p1'}}),payload:Object.assign({},validPlan,{hard_max_runtime_sec:99999})});
+assert.equal(mobileMsg.acceptedMaxRuntimeSec, 14400, 'the gateway ceiling caps a larger request');
+// all-fields resolves to the commissioned snapshot.
+mobileMsg = api({req:routeIn('PUT','/api/v1/watering-plans/p2',{params:{plan_id:'p2'}}),payload:Object.assign({},validPlan,{plan_id:'p2',targets:{mode:'all'}})});
+assert.equal(mobileMsg.action, 'accept');
+assert.deepEqual(mobileMsg.resolvedValveIds, ['valve1']);
+// path/body plan_id mismatch -> 400 with the contract's code.
+mobileMsg = format(api({req:routeIn('PUT','/api/v1/watering-plans/other',{params:{plan_id:'other'}}),payload:validPlan}));
+assert.equal(mobileMsg.statusCode, 400);
+assert.equal(mobileMsg.payload.error.code, 'plan_id_mismatch');
+// volume: rejected until the meter is commissioned, accepted once it is.
+const volumePlan = Object.assign({},validPlan,{plan_id:'p3',stop:{type:'volume',value:40,unit:'m3'}});
+mobileMsg = format(api({req:routeIn('PUT','/api/v1/watering-plans/p3',{params:{plan_id:'p3'}}),payload:volumePlan}));
+assert.equal(mobileMsg.payload.error.code, 'meter_unavailable');
+mobileEnvVars.IRRIGATION_METER_STATUS_JSON = JSON.stringify({valve1:{healthy:true,fresh:true,decoder:'commissioned'}});
+mobileMsg = api({req:routeIn('PUT','/api/v1/watering-plans/p3',{params:{plan_id:'p3'}}),payload:volumePlan});
+assert.equal(mobileMsg.action, 'accept');
+delete mobileEnvVars.IRRIGATION_METER_STATUS_JSON;
+// list query mapping, and a non-numeric limit.
+mobileMsg = api({req:routeIn('GET','/api/v1/watering-plans',{query:{from:'a',to:'b',limit:'25',cursor:'c'}}),payload:{}});
+assert.equal(mobileMsg.action, 'list');
+assert.deepEqual(mobileMsg.query, {fromAt:'a',toAt:'b',limit:25,cursor:'c'});
+mobileMsg = format(api({req:routeIn('GET','/api/v1/watering-plans',{query:{limit:'abc'}}),payload:{}}));
+assert.equal(mobileMsg.statusCode, 400);
+assert.equal(mobileMsg.payload.error.code, 'invalid_payload');
+// store round-trips: statuses and the shared record projection.
+const storeRow = {payload:validPlan,state:'scheduled',accepted_at:'a',updated_at:'b',
+  last_delay_reason:'pump run active',
+  attempts:[{operation_id:'op',delivered_m3:1.5,final_reason:'sequence_completed'}]};
+const acceptPut = () => api({req:routeIn('PUT','/api/v1/watering-plans/p1',{params:{plan_id:'p1'}}),payload:validPlan});
+const acceptResult = Object.assign({created:true},storeRow);
+mobileMsg = format(storeReply(acceptPut(), acceptResult));
+assert.equal(mobileMsg.statusCode, 201);
+assert.equal(mobileMsg.payload.data.plan_id, 'p1');
+assert.equal(mobileMsg.payload.data.delay_reason, 'pump run active');
+assert.deepEqual(mobileMsg.payload.data.execution, {operation_id:'op',actual_volume_m3:1.5,stop_reason:'sequence_completed'});
+assert.deepEqual(mobileMsg.payload.data, publicPlan(acceptResult),
+  'the generated projection must match tools/watering_plan_record.js');
+mobileMsg = format(storeReply(acceptPut(), {created:false,idempotent:true,payload:validPlan,state:'scheduled'}));
+assert.equal(mobileMsg.statusCode, 200);
+mobileMsg = format(storeReply(api({req:routeIn('GET','/api/v1/watering-plans'),payload:{}}), {items:[storeRow],next_cursor:'n'}));
+assert.equal(mobileMsg.statusCode, 200);
+assert.equal(mobileMsg.payload.data.items.length, 1);
+assert.equal(mobileMsg.payload.data.next_cursor, 'n');
+mobileMsg = format(storeReply(api({req:routeIn('POST','/api/v1/watering-plans/p1/cancel',{params:{plan_id:'p1'}}),payload:{}}), {state:'stop_requested'}));
+assert.equal(mobileMsg.statusCode, 202);
+for (const [code, status] of [['plan_not_found',404],['revision_conflict',409],['invalid_cursor',400],['unexpected',500]]) {
+  const failed = api({req:routeIn('GET','/api/v1/watering-plans/p1',{params:{plan_id:'p1'}}),payload:{}});
+  failed.payload = {ok:false, action:'get', error:{code,message:'x',details:[]}};
+  assert.equal(format(failed).statusCode, status, `store code ${code} must map to ${status}`);
+}
+// device-state reads the live sequencer snapshot and marks it stale/unavailable.
+mobileFlow.set('irrigation', {phase:'running', devices:{pump:{at:Date.now(),last_seen:'2026-01-01T00:00:00Z',stale:false}}});
+mobileMsg = format(api({req:routeIn('GET','/api/v1/device-state'),payload:{}}));
+assert.equal(mobileMsg.statusCode, 200);
+assert.equal(mobileMsg.payload.data.status, 'available');
+assert.equal(mobileMsg.payload.data.devices[0].observed_at, '2026-01-01T00:00:00Z');
+mobileMemory.clear();
+mobileMsg = format(api({req:routeIn('GET','/api/v1/device-state'),payload:{}}));
+assert.equal(mobileMsg.payload.data.status, 'unavailable');
+// every semantic code the contract can emit must be mapped, so a new one cannot
+// fall through to an unexplained 500.
+for (const match of contractSource.matchAll(/fail\('([a-z_]+)'/g)) {
+  assert(byId[IDS.mobileResult].func.includes(match[1]),
+    `the result node must map the contract code ${match[1]}`);
+}
+// the mux fans one store reply out by tag.
+assert.equal(mobileMux({planConsumer:'mobile',payload:{}},{},node,mobileEnv,Buffer,globalCtx)[0].planConsumer, 'mobile');
+assert.equal(mobileMux({planConsumer:'cancel',payload:{}},{},node,mobileEnv,Buffer,globalCtx)[1].planConsumer, 'cancel');
+assert(mobileMux({payload:{}},{},node,mobileEnv,Buffer,globalCtx)[2] !== null, 'an untagged reply goes to the dashboard list');
+
 const configure = new Function('msg','flow','node','env','Buffer','global',settings);
 const run = new Function('msg','flow','node','env','Buffer','global',control);
 const take = msg => run(msg,flow,node,env,Buffer,globalCtx);

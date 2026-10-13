@@ -19,6 +19,32 @@ def node(node_id, kind, **kwargs):
     return {"id": node_id, "type": kind, **kwargs}
 
 
+# The dashboard's own watering ceiling, in seconds. This single value is both
+# the sequencer's `maxWateringSec` setting and the gateway maximum the mobile
+# plan API enforces, so the two can never disagree.
+MAX_WATERING_SEC = 14400
+
+
+def _inline_module(relative_path):
+    """Return a Node-RED function body fragment that inlines a CommonJS file.
+
+    A Function node has no `require` and no `module`, so wrap the file's source
+    verbatim in an IIFE that supplies a throwing `require` stub and a local
+    `module.exports`. The source needs no regex handling, which is what lets a
+    test assert the generated function contains the file byte for byte. Any
+    `require` call inside must already tolerate absence (see
+    tools/watering_plan_contract.js) or it will throw here, on purpose.
+    """
+    source = (ROOT / relative_path).read_text(encoding="utf-8")
+    prefix = ("(function(){\nconst module={exports:{}};\n"
+              "const require=function(){throw new Error('require is unavailable in the Node-RED function sandbox');};\n")
+    return prefix + source + "\nreturn module.exports;})()\n"
+
+
+PLAN_CONTRACT_SOURCE = _inline_module("tools/watering_plan_contract.js")
+PLAN_RECORD_SOURCE = _inline_module("tools/watering_plan_record.js")
+
+
 SETTINGS = r'''// Edit all site thresholds, limits and timeouts here (seconds unless noted).
 // waterMaxAgeSec is generated to match the WaterLevel node's reporting interval;
 // change that interval in tools/water_level_interval.py and regenerate.
@@ -64,7 +90,7 @@ const settings = {
   // main valve open, in both the open and the close case.
   mainCommandTimeoutSec: 300, fieldValveCommandTimeoutSec: 120,
   pumpCommandTimeoutSec: 150, pumpStopTimeoutSec: 150,
-  maxWateringSec: 14400
+  maxWateringSec: ''' + str(MAX_WATERING_SEC) + r'''
 };
 flow.set('irrigation_settings', settings);
 msg.payload = {kind:'tick'};
@@ -468,31 +494,113 @@ msg.statusCode=auth===`Bearer ${token}`&&token?200:401;
 msg.payload=msg.statusCode===200?{api_version:'v1',data:flow.get('irrigation')||{phase:'idle'}}:{api_version:'v1',error:{code:'unauthorized',message:'Internal token invalid',details:[]}};
 return msg;'''
 
-PLAN_LIST_REQUEST = r'''const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\/$/,'');
+MOBILE_API_ROUTE = ('const planContract=' + PLAN_CONTRACT_SOURCE + ';\n' + r'''// Public mobile API. It only stores and reads plans; the ordered sequencer
+// stays behind CONTROL and the internal token seam, and this node never emits
+// device commands. Validation is the shared contract the prototype API uses
+// (tools/watering_plan_contract.js, inlined above by the builder), and each
+// request goes either to the durable store (port 1) or straight to the response
+// formatter (port 2).
+const respond=(status,data,error)=>{msg.mobileStatus=status;if(error)msg.mobileError=error;else msg.mobileData=data;return [null,msg];};
+const request=msg.req||{};
+const headers=request.headers||{};
+const requestId=String(headers['x-request-id']||'').slice(0,128)||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,10)}`;
+msg.mobileRequestId=requestId;
 const token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');
-if (!/^https?:\/\//.test(base)||!token) {flow.set('watering_plan_api_status','Plan service unavailable: configure API URL and token');return [null,{payload:{kind:'plan_snapshot'}}];}
-msg.method='GET';msg.url=base+'/api/v1/watering-plans?limit=50';msg.headers={Authorization:'Bearer '+token};return [msg,null];'''
-
-PLAN_CANCEL_REQUEST = r'''const base=String(env.get('IRRIGATION_PLAN_API_URL')||'').replace(/\/$/,'');
-const token=String(env.get('IRRIGATION_PLAN_API_TOKEN')||'');
-const id=String(msg.payload?.plan_id||'');
-if (!/^https?:\/\//.test(base)||!token||!id||id.length>128) {flow.set('watering_plan_api_status','Plan action unavailable: API configuration or plan id invalid');return null;}
-msg.method='POST';msg.url=base+'/api/v1/watering-plans/'+encodeURIComponent(id)+'/cancel';msg.headers={Authorization:'Bearer '+token,'Content-Type':'application'+'/json'};msg.payload={};return msg;'''
-
-PLAN_LIST_RESULT = r'''let body=msg.payload;
-if (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}
-if (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300||!Array.isArray(body?.data?.items)) {
-  flow.set('watering_plan_api_status','Plan service unavailable: '+(body?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};
+if (!token||String(headers.authorization||'')!==`Bearer ${token}`) return respond(401,null,{code:'unauthorized',message:'Bearer credential is invalid',details:[]});
+const method=String(request.method||'').toUpperCase();
+const path=String(request.path||'');
+const readJson=(value,fallback)=>{if(typeof value!=='string'||!value)return fallback;try{const parsed=JSON.parse(value);return parsed===undefined?fallback:parsed;}catch(_){return fallback;}};
+const clockSynchronized=String(env.get('IRRIGATION_CLOCK_SYNCHRONIZED')||'false').toLowerCase()==='true';
+const gatewayMaxRuntimeSec=Number(env.get('IRRIGATION_GATEWAY_MAX_RUNTIME_SEC'))||''' + str(MAX_WATERING_SEC) + r''';
+// Prototype registry: field-001 is the one commissioned, metered field. Site
+// mappings and allowed valve sets arrive as environment JSON so a deployment
+// never edits this node.
+const fields=readJson(env.get('IRRIGATION_FIELD_REGISTRY'),[{field_id:'field-001',display_name:'Field 1',valve_id:'valve1',flow_meter:'commissioned',enabled:true}]);
+const allowedValveSets=readJson(env.get('IRRIGATION_ALLOWED_VALVE_SETS'),[['valve1']]);
+const durationUnits=String(env.get('IRRIGATION_DURATION_UNITS')||'seconds,minutes,hours').split(',').map(value=>value.trim()).filter(Boolean);
+const volumeUnits=String(env.get('IRRIGATION_VOLUME_UNITS')||'m3').split(',').map(value=>value.trim()).filter(Boolean);
+const meterStatusByValve=readJson(env.get('IRRIGATION_METER_STATUS_JSON'),null);
+if (method==='GET'&&path==='/api/v1/health') return respond(200,{time:new Date().toISOString(),clock_synchronized:clockSynchronized});
+if (method==='GET'&&path==='/api/v1/device-state') {
+  const state=flow.get('irrigation');
+  if (!state||typeof state!=='object') return respond(200,{generated_at:new Date().toISOString(),status:'unavailable',reason:'sequencer_state_unavailable',devices:[]});
+  const devices=Object.keys(state.devices||{}).map(key=>{const device=state.devices[key]||{};return {device:key,phase:state.phase||null,observed_at:device.last_seen||null,age_sec:typeof device.at==='number'?Math.round((Date.now()-device.at)/1000):null,stale:device.stale===true,data:device};});
+  return respond(200,{generated_at:new Date().toISOString(),phase:state.phase||'idle',status:devices.some(device=>device.stale)?'stale':'available',devices});
 }
-flow.set('watering_plan_snapshot',body.data.items);
+if (method==='GET'&&path==='/api/v1/watering-plans') {
+  const query=request.query||{};
+  let limit;
+  if (query.limit!==undefined&&query.limit!=='') {limit=Number(query.limit);if(!Number.isInteger(limit)||limit<1) return respond(400,null,{code:'invalid_payload',message:'limit must be a positive integer',details:[]});}
+  msg.action='list';msg.query={fromAt:query.from,toAt:query.to,limit,cursor:query.cursor};msg.planConsumer='mobile';return [msg,null];
+}
+const cancelMatch=/^\/api\/v1\/watering-plans\/([^/]+)\/cancel$/.exec(path);
+const detailMatch=/^\/api\/v1\/watering-plans\/([^/]+)$/.exec(path);
+const planId=String((request.params&&request.params.plan_id)||(cancelMatch&&cancelMatch[1])||(detailMatch&&detailMatch[1])||'');
+if (detailMatch&&method==='GET') {if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});msg.action='get';msg.planId=planId;msg.includeHistory=true;msg.planConsumer='mobile';return [msg,null];}
+if (cancelMatch&&method==='POST') {if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});msg.action='cancel';msg.planId=planId;msg.planConsumer='mobile';return [msg,null];}
+if (detailMatch&&method==='PUT') {
+  if(!planId||planId.length>128) return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});
+  const outcome=planContract.validatePlan(msg.payload,{pathPlanId:planId,clockSynchronized,gatewayMaxRuntimeSec,durationUnits,volumeUnits,fields,allowedValveSets,meterStatusByValve});
+  if (!outcome.ok) return respond(422,null,outcome.error);
+  msg.action='accept';msg.plan=outcome.value.plan;msg.resolvedValveIds=outcome.value.resolvedValveIds;msg.acceptedMaxRuntimeSec=outcome.value.acceptedMaxRuntimeSec;msg.planConsumer='mobile';return [msg,null];
+}
+return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});''')
+
+MOBILE_API_RESULT = ('const planRecord=' + PLAN_RECORD_SOURCE + ';\n' + r'''// The single place a mobile API response envelope is built. The route node sets
+// msg.mobileStatus/mobileData/mobileError for its own replies; the store leaves
+// its {ok,action,result} payload. The branches below cover both.
+const requestId=String(msg.mobileRequestId||'unknown');
+const STATUS={unauthorized:401,not_found:404,method_not_allowed:405,
+  invalid_payload:400,invalid_plan_id:400,invalid_cursor:400,invalid_timestamp:400,plan_id_mismatch:400,
+  plan_not_found:404,
+  revision_conflict:409,stale_revision:409,active_revision_conflict:409,active_plan_revision_conflict:409,
+  unsupported_schema_version:422,invalid_revision:422,invalid_status:422,invalid_source:422,invalid_timezone:422,
+  invalid_time_window:422,clock_unsynchronized:422,unsupported_run_mode:422,invalid_hard_max_runtime:422,
+  parallel_capacity_not_commissioned:422,invalid_stop_rule:422,unsupported_duration_unit:422,unsupported_volume_unit:422,
+  unsupported_volume_target:422,meter_unavailable:422,unsupported_stop_type:422,invalid_targets:422,duplicate_target:422,
+  no_enabled_targets:422,unknown_or_disabled_field:422,gateway_configuration_invalid:422,
+  validator_unavailable:500,internal_error:500};
+const send=(status,error,data)=>{msg.statusCode=status;msg.headers={'Content-Type':'application'+'/json'};msg.payload=error?{api_version:'v1',request_id:requestId,error}:{api_version:'v1',request_id:requestId,data};return msg;};
+if (typeof msg.payload?.ok!=='boolean') {
+  if (msg.mobileError) return send(STATUS[msg.mobileError.code]||msg.mobileStatus||500,msg.mobileError,null);
+  return send(msg.mobileStatus||200,null,msg.mobileData===undefined?null:msg.mobileData);
+}
+if (!msg.payload.ok) {const error=msg.payload.error||{code:'internal_error',message:'Plan store failed',details:[]};return send(STATUS[error.code]||500,error,null);}
+const result=msg.payload.result;
+if (msg.action==='list') return send(200,null,{items:(result.items||[]).map(planRecord.publicPlan),next_cursor:result.next_cursor===undefined?null:result.next_cursor});
+const status=msg.action==='accept'?(result.created?201:200):(msg.action==='cancel'&&result.state==='stop_requested'?202:200);
+return send(status,null,planRecord.publicPlan(result));''')
+
+PLAN_LIST_REQUEST = r'''// The dashboard reads the same SQLite store the mobile API writes, so it needs
+// no outbound HTTP client and no bearer token. The store node's single output
+// reaches PLAN_STORE_MUX, which routes msg.planConsumer here.
+msg.action='list';msg.query={limit:50};msg.planConsumer='dashboard';return msg;'''
+
+PLAN_CANCEL_REQUEST = r'''const id=String(msg.payload?.plan_id||'');
+if (!id||id.length>128) {flow.set('watering_plan_action_status','Plan action unavailable: plan id invalid');return null;}
+msg.action='cancel';msg.planId=id;msg.planConsumer='cancel';return msg;'''
+
+PLAN_STORE_MUX = r'''// One durable store, three consumers. The store node only rewrites msg.payload,
+// so msg.planConsumer survives to separate the dashboard list, the dashboard
+// cancel, and the mobile response formatter.
+const consumer=String(msg.planConsumer||'dashboard');
+if (consumer==='mobile') return [msg,null,null];
+if (consumer==='cancel') return [null,msg,null];
+return [null,null,msg];'''
+
+PLAN_LIST_RESULT = r'''const result=msg.payload&&msg.payload.result;
+if (!msg.payload?.ok||!result) {flow.set('watering_plan_api_status','Plan store unavailable: '+(msg.payload?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};}
+flow.set('watering_plan_snapshot',result.items||[]);
 flow.set('watering_plan_api_status','Plan list updated '+new Date().toLocaleTimeString());
 return {payload:{kind:'plan_snapshot'}};'''
 
-PLAN_CANCEL_RESULT = r'''let body=msg.payload;
-if (typeof body==='string') {try {body=JSON.parse(body);} catch (_) {body={};}}
-if (Number(msg.statusCode||200)<200||Number(msg.statusCode||200)>=300) flow.set('watering_plan_action_status','Action failed: '+(body?.error?.message||'request failed'));
-else flow.set('watering_plan_action_status',body?.data?.state==='stop_requested'?'Stop requested; awaiting sequencer confirmation':'Cancellation accepted');
-return {payload:{kind:'refresh_plan_list'}};'''
+PLAN_CANCEL_RESULT = r'''const result=msg.payload&&msg.payload.result;
+if (!msg.payload?.ok) flow.set('watering_plan_action_status','Action failed: '+(msg.payload?.error?.message||'request failed'));
+else flow.set('watering_plan_action_status',result&&result.state==='stop_requested'?'Stop requested; awaiting sequencer confirmation':'Cancellation accepted');
+// Re-render through CONTROL. It must not re-enter PLAN_LIST_REQUEST: the store
+// is a pass-through node to the loop guard, so a cancel-result-to-list edge
+// would close a function-node cycle with the shared store in it.
+return {payload:{kind:'plan_snapshot'}};'''
 
 PLAN_UI_ROUTE = r'''if (msg.payload?.kind==='plan_cancel') return [null,msg];
 return [msg,null];'''
@@ -547,12 +655,21 @@ ID_PLAN_STATE = "9c5b8d0e1f203155"
 ID_PLAN_STATE_RESPONSE = "ad6c9e1f20314266"
 ID_PLAN_REFRESH_TICK = "be7da2f304253677"
 ID_PLAN_LIST_REQUEST = "cf8eb30415263788"
-ID_PLAN_LIST_HTTP = "d09fc41526374899"
 ID_PLAN_LIST_RESULT = "e1a0d526374859aa"
 ID_PLAN_UI_ROUTE = "f2b1e63748596abb"
 ID_PLAN_CANCEL_REQUEST = "03c2f748596a7bcc"
-ID_PLAN_CANCEL_HTTP = "14d308596a7b8cdd"
 ID_PLAN_CANCEL_RESULT = "25e4196a7b8c9dee"
+ID_PLAN_STORE_MUX = "1a2b3c4d5e6f7081"
+ID_MOBILE_STORE = "36f5196a7b8c9def"
+ID_MOBILE_ROUTE = "47a62a7b8c9def01"
+ID_MOBILE_RESULT = "58b73b8c9def0123"
+ID_MOBILE_HEALTH = "69c84c9def012345"
+ID_MOBILE_DEVICE_STATE = "7ad95def01234567"
+ID_MOBILE_LIST = "8bea6ef012345678"
+ID_MOBILE_DETAIL = "9cfb7f0123456789"
+ID_MOBILE_PUT = "ad0c80123456789a"
+ID_MOBILE_CANCEL = "be1d9123456789ab"
+ID_MOBILE_RESPONSE = "cf2ea23456789abc"
 
 # z only. No tab node ships, so the import dialog's "Import to" list decides
 # which flow the nodes join and no second tab is ever created.
@@ -580,12 +697,15 @@ def build():
                     ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI,
                     ID_PLAN_COMMAND_IN, ID_PLAN_COMMAND, ID_PLAN_COMMAND_RESPONSE,
                     ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE,
-                    ID_PLAN_REFRESH_TICK, ID_PLAN_LIST_REQUEST, ID_PLAN_LIST_HTTP,
-                    ID_PLAN_LIST_RESULT, ID_PLAN_UI_ROUTE, ID_PLAN_CANCEL_REQUEST,
-                    ID_PLAN_CANCEL_HTTP, ID_PLAN_CANCEL_RESULT]
+                    ID_PLAN_REFRESH_TICK, ID_PLAN_LIST_REQUEST, ID_PLAN_LIST_RESULT,
+                    ID_PLAN_UI_ROUTE, ID_PLAN_CANCEL_REQUEST, ID_PLAN_CANCEL_RESULT,
+                    ID_PLAN_STORE_MUX, ID_MOBILE_STORE,
+                    ID_MOBILE_ROUTE, ID_MOBILE_RESULT, ID_MOBILE_HEALTH,
+                    ID_MOBILE_DEVICE_STATE, ID_MOBILE_LIST, ID_MOBILE_DETAIL,
+                    ID_MOBILE_PUT, ID_MOBILE_CANCEL, ID_MOBILE_RESPONSE]
     nodes = [
         node(ID_CANVAS, "group", z=FLOW_ID, style=CANVAS_STYLE, nodes=canvas_nodes,
-             x=74, y=39, w=2200, h=700),
+             x=74, y=39, w=2400, h=1000),
         node(ID_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh safety and settings", props=[{"p":"payload"}], repeat="5", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=720, y=80, wires=[[ID_SETTINGS]]),
         node(ID_SETTINGS, "function", z=FLOW_ID, g=ID_CANVAS, name="Irrigation settings — edit limits here", func=SETTINGS, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=860, y=140, wires=[[ID_CONTROL]]),
         node(ID_SUBSCRIBE_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh ChirpStack subscription", props=[{"p":"payload"}], repeat="", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=250, y=100, wires=[[ID_SUBSCRIBE]]),
@@ -597,18 +717,30 @@ def build():
         node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="30", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_PLAN_UI_ROUTE]]),
         node(ID_PLAN_UI_ROUTE, "function", z=FLOW_ID, g=ID_CANVAS, name="Route watering-plan dashboard actions", func=PLAN_UI_ROUTE, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1640, y=360, wires=[[ID_CONTROL],[ID_PLAN_CANCEL_REQUEST]]),
         node(ID_PLAN_REFRESH_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh watering plans", props=[{"p":"payload"}], repeat="15", crontab="", once=True, onceDelay="1", topic="", payload="", payloadType="date", x=240, y=640, wires=[[ID_PLAN_LIST_REQUEST]]),
-        node(ID_PLAN_LIST_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request watering-plan list", func=PLAN_LIST_REQUEST, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=460, y=640, wires=[[ID_PLAN_LIST_HTTP],[ID_CONTROL]]),
-        node(ID_PLAN_LIST_HTTP, "http request", z=FLOW_ID, g=ID_CANVAS, name="Read watering plans", method="use", ret="obj", paytoqs="ignore", url="", tls="", persist=False, proxy="", insecureHTTPParser=False, authType="", senderr=False, x=680, y=640, wires=[[ID_PLAN_LIST_RESULT]]),
+        node(ID_PLAN_LIST_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request watering-plan list", func=PLAN_LIST_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=460, y=640, wires=[[ID_MOBILE_STORE]]),
         node(ID_PLAN_LIST_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Store watering-plan snapshot", func=PLAN_LIST_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=900, y=640, wires=[[ID_CONTROL]]),
-        node(ID_PLAN_CANCEL_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request plan cancellation or stop", func=PLAN_CANCEL_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1840, y=420, wires=[[ID_PLAN_CANCEL_HTTP]]),
-        node(ID_PLAN_CANCEL_HTTP, "http request", z=FLOW_ID, g=ID_CANVAS, name="Cancel watering plan", method="use", ret="obj", paytoqs="ignore", url="", tls="", persist=False, proxy="", insecureHTTPParser=False, authType="", senderr=False, x=2040, y=420, wires=[[ID_PLAN_CANCEL_RESULT]]),
-        node(ID_PLAN_CANCEL_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Record plan action and refresh", func=PLAN_CANCEL_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=2240, y=420, wires=[[ID_PLAN_LIST_REQUEST]]),
+        node(ID_PLAN_CANCEL_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request plan cancellation or stop", func=PLAN_CANCEL_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1840, y=420, wires=[[ID_MOBILE_STORE]]),
+        node(ID_PLAN_CANCEL_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Record plan action and refresh", func=PLAN_CANCEL_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=2240, y=420, wires=[[ID_CONTROL]]),
         node(ID_PLAN_COMMAND_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal watering-plan command", url="/internal/irrigation/command", method="post", upload=False, swaggerDoc="", x=260, y=420, wires=[[ID_PLAN_COMMAND]]),
         node(ID_PLAN_COMMAND, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize watering-plan command", func=PLAN_COMMAND, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=420, wires=[[ID_CONTROL],[ID_PLAN_COMMAND_RESPONSE]]),
         node(ID_PLAN_COMMAND_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan command response", statusCode="", headers={}, x=760, y=460, wires=[]),
         node(ID_PLAN_STATE_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal irrigation state", url="/internal/irrigation/state", method="get", upload=False, swaggerDoc="", x=260, y=520, wires=[[ID_PLAN_STATE]]),
         node(ID_PLAN_STATE, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize irrigation state", func=PLAN_STATE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=520, wires=[[ID_PLAN_STATE_RESPONSE]]),
         node(ID_PLAN_STATE_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Irrigation state response", statusCode="", headers={}, x=760, y=560, wires=[]),
+        # One durable SQLite store serves the public mobile API and the
+        # dashboard. It never wires to MQTT or CONTROL; the mux below separates
+        # its consumers by msg.planConsumer.
+        node(ID_MOBILE_STORE, "watering-plan-store", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan SQLite store", databasePath="/var/lib/node-red/watering-plans.sqlite3", migrationsDir="", x=930, y=780, wires=[[ID_PLAN_STORE_MUX]]),
+        node(ID_PLAN_STORE_MUX, "function", z=FLOW_ID, g=ID_CANVAS, name="Route plan store results", func=PLAN_STORE_MUX, outputs=3, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1120, y=1060, wires=[[ID_MOBILE_RESULT],[ID_PLAN_CANCEL_RESULT],[ID_PLAN_LIST_RESULT]]),
+        node(ID_MOBILE_ROUTE, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize and route mobile watering API", func=MOBILE_API_ROUTE, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=650, y=780, wires=[[ID_MOBILE_STORE],[ID_MOBILE_RESULT]]),
+        node(ID_MOBILE_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Format mobile watering API response", func=MOBILE_API_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1200, y=780, wires=[[ID_MOBILE_RESPONSE]]),
+        node(ID_MOBILE_HEALTH, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API health", url="/api/v1/health", method="get", upload=False, swaggerDoc="", x=250, y=720, wires=[[ID_MOBILE_ROUTE]]),
+        node(ID_MOBILE_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Mobile API response", statusCode="", headers={}, x=1460, y=780, wires=[]),
+        node(ID_MOBILE_DEVICE_STATE, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API device state", url="/api/v1/device-state", method="get", upload=False, swaggerDoc="", x=270, y=760, wires=[[ID_MOBILE_ROUTE]]),
+        node(ID_MOBILE_LIST, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API plan list", url="/api/v1/watering-plans", method="get", upload=False, swaggerDoc="", x=260, y=800, wires=[[ID_MOBILE_ROUTE]]),
+        node(ID_MOBILE_DETAIL, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API plan detail", url="/api/v1/watering-plans/:plan_id", method="get", upload=False, swaggerDoc="", x=280, y=840, wires=[[ID_MOBILE_ROUTE]]),
+        node(ID_MOBILE_PUT, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API plan write", url="/api/v1/watering-plans/:plan_id", method="put", upload=False, swaggerDoc="", x=280, y=880, wires=[[ID_MOBILE_ROUTE]]),
+        node(ID_MOBILE_CANCEL, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API plan cancel", url="/api/v1/watering-plans/:plan_id/cancel", method="post", upload=False, swaggerDoc="", x=290, y=920, wires=[[ID_MOBILE_ROUTE]]),
         node(GROUP, "ui-group", z=FLOW_ID, name="Irrigation", page=PAGE, width="12", height="1", order=1, showTitle=False, className="", visible="true", disabled="false", groupType="default"),
         node(PAGE, "ui-page", z=FLOW_ID, name="Irrigation", ui=UI_BASE, path="/irrigation", icon="water", layout="grid", theme=UI_THEME, breakpoints=BREAKPOINTS, order=4, className="", visible=True, disabled=False),
         # Shared singletons, shipped so a fresh canvas gets them. Their ids match

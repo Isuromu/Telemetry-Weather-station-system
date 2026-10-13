@@ -42,6 +42,13 @@ analytics, screenshots, or repository configuration.
 
 ## API client rules
 
+The repository includes a typed, transport-only client at
+[`irrigationApi.ts`](irrigationApi.ts). Configure it once with the selected
+connection profile and an access-token getter backed by the app's secure
+storage. The module accepts an injected `fetch` and request-ID factory for
+platform setup and mock-server integration. It does not store credentials,
+retry requests, or create a new plan identity; the app owns those decisions.
+
 All requests use JSON and these headers:
 
 ```http
@@ -82,7 +89,7 @@ payload, `plan_id`, and `revision`.
 
 ```ts
 type StopRule =
-  | { type: "duration"; value: number; unit: "sec" }
+  | { type: "duration"; value: number; unit: "seconds" | "minutes" | "hours" }
   | { type: "volume"; value: number; unit: "m3" };
 
 type WateringPlanRequest = {
@@ -99,7 +106,7 @@ type WateringPlanRequest = {
   valid_until: string;
   targets: {
     mode: "selected";
-    valve_ids: string[];
+    field_ids: string[];
   };
   run_mode: "parallel";
   stop: StopRule;
@@ -107,11 +114,11 @@ type WateringPlanRequest = {
 };
 ```
 
-The UI selects a logical field. Before submission, the app resolves it to the
-configured `valve_ids`. For the first prototype, keep the mapping in a small
-versioned app configuration: `field-001 -> valve1`. Do not derive valve IDs
-from a displayed field name. A future field-catalog API can replace this local
-configuration without changing the plan request shape.
+The UI selects a logical field. Before submission, the app sends the logical
+`field_ids`; the API resolves them through the gateway registry. The first
+prototype maps `field-001` to `valve1`. Do not derive valve IDs from a displayed
+field name. A future field-catalog API can replace local field configuration
+without changing the plan request shape.
 
 Use ISO 8601 timestamps with an explicit offset, for example
 `2026-10-10T06:00:00+05:00`, and include `timezone: "Asia/Tashkent"`. The
@@ -349,3 +356,28 @@ submitting. The Pi never receives a recurrence expression.
 6. Test against a mock `/api/v1` server first, then the Node-RED endpoint with
    duplicate delivery, timeout retry, delayed plan, active cancellation, and
    Pi restart cases.
+
+## Phase 5 field commissioning record
+
+The client module completes the repository-side API integration boundary. The
+following checks require the actual React Native app and commissioned site
+hardware; record date, software versions, plan IDs, and observed outcomes
+before enabling broader targets:
+
+1. Confirm the app stores the QR-provisioned token in iOS Keychain or Android
+   Keystore, calls health successfully, and blocks scheduling when the Pi clock
+   is unsynchronized.
+2. Submit a short duration plan to `field-001` / `valve1`; verify the ordered
+   sequencer phases and final result in the API and dashboard.
+3. Submit a volume plan to `valve1`; verify the commissioned meter baseline,
+   positive-total delta, target stop request, and final stop acknowledgement.
+4. Exercise duplicate delivery and timeout retry with the same `plan_id`,
+   revision, and body; then exercise delayed start, future cancellation, active
+   stop request, Pi restart, radio loss, and flow-meter loss. Confirm no case
+   resumes watering automatically after a restart or reports a requested stop
+   as a confirmed physical stop.
+5. Keep multi-valve duration disabled until the actual pump and pipe network
+   demonstrate the requested valve set at its intended configuration. The
+   current two-valve allow-list remains stress-test-only.
+
+No site commissioning result is claimed by the repository implementation.

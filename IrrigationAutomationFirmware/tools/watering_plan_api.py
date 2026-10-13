@@ -111,22 +111,24 @@ class WateringPlanService:
                 result = self.store.list_plans(
                     query.get("from", [None])[0], query.get("to", [None])[0],
                     int(query.get("limit", [50])[0]), query.get("cursor", [None])[0])
+                result["items"] = [self._public_plan(plan) for plan in result["items"]]
                 return self._success(request_id, result)
             plan_id, action = self._plan_route(route)
             if plan_id is None:
                 return self._error(request_id, 404, "not_found", "API path was not found")
             if method == "GET" and action is None:
-                return self._success(request_id, self.store.get_plan(plan_id, include_history=True))
+                return self._success(request_id, self._public_plan(
+                    self.store.get_plan(plan_id, include_history=True)))
             if method == "PUT" and action is None:
                 payload = self._json_body(body)
                 validation = self._validate(payload, plan_id)
                 result = self.store.accept_plan(validation)
                 status = 201 if result.get("created") else 200
-                return self._success(request_id, result, status)
+                return self._success(request_id, self._public_plan(result), status)
             if method == "POST" and action == "cancel":
                 result = self.store.cancel_plan(plan_id)
                 status = 202 if result["state"] == "stop_requested" else 200
-                return self._success(request_id, result, status)
+                return self._success(request_id, self._public_plan(result), status)
             return self._error(request_id, 405, "method_not_allowed", "HTTP method is not supported")
         except AuthError as error:
             return self._error(request_id, 401, error.code, error.message, error.details)
@@ -148,6 +150,41 @@ class WateringPlanService:
         expected = "Bearer " + self.token
         if not value or not secrets.compare_digest(value, expected):
             raise AuthError({"code": "unauthorized", "message": "Bearer credential is invalid", "details": []})
+
+    @staticmethod
+    def _public_plan(stored: Dict[str, Any]) -> Dict[str, Any]:
+        """Expose the shared mobile record shape instead of SQLite columns."""
+        plan = stored.get("payload")
+        if not isinstance(plan, dict):
+            try:
+                plan = json.loads(plan)
+            except (TypeError, json.JSONDecodeError):
+                plan = {}
+        record = dict(plan)
+        record.update({
+            "state": stored.get("state"),
+            "accepted_at": stored.get("accepted_at"),
+            "updated_at": stored.get("updated_at"),
+        })
+        if stored.get("last_delay_reason"):
+            record["delay_reason"] = stored["last_delay_reason"]
+        attempts = stored.get("attempts") or []
+        attempt = stored.get("attempt") or (attempts[-1] if attempts else None)
+        if attempt:
+            execution = {
+                "operation_id": attempt.get("operation_id"),
+                "actual_started_at": attempt.get("actual_started_at"),
+                "actual_ended_at": attempt.get("actual_ended_at"),
+                "actual_volume_m3": attempt.get("delivered_m3"),
+                "stop_reason": attempt.get("final_reason"),
+            }
+            record["execution"] = {key: value for key, value in execution.items() if value is not None}
+        if "events" in stored:
+            record["events"] = stored["events"]
+        for key in ("created", "replaced", "idempotent"):
+            if key in stored:
+                record[key] = stored[key]
+        return record
 
     @staticmethod
     def _json_body(body: bytes) -> Dict[str, Any]:

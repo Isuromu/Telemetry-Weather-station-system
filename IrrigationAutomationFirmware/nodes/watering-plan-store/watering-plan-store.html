@@ -1,0 +1,22 @@
+<script type="text/javascript">
+RED.nodes.registerType('watering-plan-store', {
+  category: 'storage', color: '#d9e8b4',
+  defaults: {
+    name: { value: '' },
+    databasePath: { value: '/var/lib/node-red/watering-plans.sqlite3', required: true },
+    migrationsDir: { value: '' }
+  },
+  inputs: 1, outputs: 1, icon: 'db.svg',
+  label: function() { return this.name || 'watering plan store'; },
+  paletteLabel: 'watering plan store'
+});
+</script>
+<script type="text/x-red" data-template-name="watering-plan-store">
+  <div class="form-row"><label for="node-input-name"><i class="fa fa-tag"></i> Name</label><input id="node-input-name"></div>
+  <div class="form-row"><label for="node-input-databasePath"><i class="fa fa-database"></i> Database</label><input id="node-input-databasePath" placeholder="/var/lib/node-red/watering-plans.sqlite3"></div>
+  <div class="form-row"><label for="node-input-migrationsDir"><i class="fa fa-folder"></i> Migrations</label><input id="node-input-migrationsDir" placeholder="Package default or WATERING_PLAN_MIGRATIONS_DIR"></div>
+</script>
+<script type="text/x-red" data-help-name="watering-plan-store">
+  <p>Persists accepted watering plans in SQLite using the shared numbered SQL migrations.</p>
+  <p>Set <code>msg.action</code> to <code>accept</code>, <code>get</code>, <code>list</code>, <code>cancel</code>, <code>claim</code>, or <code>recover</code>. Successful results are written to <code>msg.payload.result</code>.</p>
+</script>

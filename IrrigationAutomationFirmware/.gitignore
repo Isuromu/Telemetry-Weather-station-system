@@ -25,3 +25,7 @@ config/PumpControlLoRaSecrets.h
 # Project-local claudecodex binary, isolated config, auth metadata, and logs.
 /.local-tools/claudecodex/
 /.local/
+
+# Custom Node-RED node dependencies. The package source is tracked; its npm
+# install tree is rebuilt on the Pi and must not enter git.
+/nodes/watering-plan-store/node_modules/

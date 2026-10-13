@@ -60,18 +60,24 @@ also has a raw payload fallback for both the 17-byte protocol-v1 and 22-byte
 protocol-v2 status formats. Commands use the existing FPort 30 main/field
 valve formats and FPort 50 pump format.
 
-The schedule panel reads the temporary watering-plan API through Node-RED's
-HTTP Request nodes, so the API credential stays on the Pi and is never sent to
-the browser. Configure `IRRIGATION_PLAN_API_URL` to the API base URL reachable
-from the Node-RED process (for example `http://127.0.0.1:8088`) and
-`IRRIGATION_PLAN_API_TOKEN` to the same bearer token configured for that API.
-Node-RED refreshes Upcoming, Active, and Recent plans every 15 seconds. Cancel
-on a future plan calls the API cancellation route; Request stop on an active
+The schedule panel and the public mobile API share one durable SQLite store
+through the `watering-plan-store` node, so the plan credential stays on the Pi
+and a mobile-submitted plan reaches the dashboard without a second copy. Node-RED
+refreshes Upcoming, Active, and Recent plans every 15 seconds from the store.
+Cancel on a future plan writes the store directly; Request stop on an active
 plan records `stop_requested` and lets the existing sequencer perform its
 ordered shutdown. The dashboard labels the acknowledgement as a request until
-the sequencer reports its terminal outcome. If either setting is missing or
-the API is unavailable, the plan panel reports the service error and the
+the sequencer reports its terminal outcome. If the store node is not installed
+or its database cannot be opened, the plan panel reports the store error and the
 device controls continue to work.
+
+The same flow serves `GET /api/v1/health`, `GET /api/v1/device-state`,
+`GET`/`PUT /api/v1/watering-plans[/{plan_id}]` and
+`POST /api/v1/watering-plans/{plan_id}/cancel` for the mobile app. Those routes
+validate every plan against the shared contract, persist it to the same store,
+and never reach the sequencer. See
+`docs/integrations/watering-plan/NODE_RED_NATIVE_API_DEPLOYMENT.md` for the
+required `IRRIGATION_*` environment.
 
 After importing, deploy the flow and open
 `/dashboard/irrigation` on the Node-RED host. Six device cards
