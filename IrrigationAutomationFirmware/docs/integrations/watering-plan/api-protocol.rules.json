@@ -1,0 +1,141 @@
+{
+  "protocol_version": "v1",
+  "ownership_note": "Field shape: plan-request.schema.json. Payload acceptance codes: tools/watering_plan_contract.js (its ERROR_CODES export must equal contract_error_codes here). This file owns transport and lifecycle only. A new backend is written from API_PROTOCOL_SPEC.md and validated by tools/test_watering_plan_backend.py.",
+  "routes": [
+    {"method": "GET", "path": "/api/v1/health", "success": [200], "error_codes": ["unauthorized"]},
+    {"method": "GET", "path": "/api/v1/device-state", "success": [200], "error_codes": ["unauthorized"]},
+    {"method": "GET", "path": "/api/v1/watering-plans", "success": [200], "error_codes": ["unauthorized", "invalid_payload", "invalid_cursor"]},
+    {"method": "GET", "path": "/api/v1/watering-plans/{plan_id}", "success": [200], "error_codes": ["unauthorized", "not_found"]},
+    {"method": "PUT", "path": "/api/v1/watering-plans/{plan_id}", "success": [201, 200], "error_codes": ["unauthorized", "invalid_json", "validator_unavailable", "revision_conflict", "stale_revision", "active_revision_conflict", "internal_error"]},
+    {"method": "POST", "path": "/api/v1/watering-plans/{plan_id}/cancel", "success": [202, 200], "error_codes": ["unauthorized", "not_found", "internal_error"]}
+  ],
+  "default_errors": {
+    "unknown_path": {"status": 404, "code": "not_found"},
+    "unsupported_method": {"status": 405, "code": "method_not_allowed"},
+    "unauthorized": {"status": 401, "code": "unauthorized"}
+  },
+  "contract_error_codes": [
+    "unsupported_schema_version", "invalid_plan_id", "plan_id_mismatch", "invalid_revision",
+    "invalid_status", "invalid_source", "invalid_timezone", "invalid_timestamp",
+    "invalid_time_window", "clock_unsynchronized", "unsupported_run_mode",
+    "invalid_hard_max_runtime", "parallel_capacity_not_commissioned", "invalid_stop_rule",
+    "unsupported_duration_unit", "unsupported_volume_unit", "unsupported_volume_target",
+    "meter_unavailable", "unsupported_stop_type", "invalid_targets", "duplicate_target",
+    "no_enabled_targets", "unknown_or_disabled_field", "gateway_configuration_invalid",
+    "invalid_payload"
+  ],
+  "transport_error_codes": [
+    "unauthorized", "not_found", "method_not_allowed", "invalid_json",
+    "validator_unavailable", "internal_error"
+  ],
+  "store_error_codes": [
+    "plan_not_found", "revision_conflict", "stale_revision", "active_revision_conflict",
+    "invalid_cursor", "attempt_not_found", "invalid_state", "invalid_tracking"
+  ],
+  "error_status": {
+    "unauthorized": 401,
+    "not_found": 404,
+    "plan_not_found": 404,
+    "method_not_allowed": 405,
+    "invalid_payload": 400,
+    "invalid_plan_id": 400,
+    "plan_id_mismatch": 400,
+    "invalid_cursor": 400,
+    "invalid_json": 400,
+    "revision_conflict": 409,
+    "stale_revision": 409,
+    "active_revision_conflict": 409,
+    "attempt_not_found": 409,
+    "invalid_state": 409,
+    "invalid_tracking": 409,
+    "unsupported_schema_version": 422,
+    "invalid_revision": 422,
+    "invalid_status": 422,
+    "invalid_source": 422,
+    "invalid_timezone": 422,
+    "invalid_timestamp": 422,
+    "invalid_time_window": 422,
+    "clock_unsynchronized": 422,
+    "unsupported_run_mode": 422,
+    "invalid_hard_max_runtime": 422,
+    "parallel_capacity_not_commissioned": 422,
+    "invalid_stop_rule": 422,
+    "unsupported_duration_unit": 422,
+    "unsupported_volume_unit": 422,
+    "unsupported_volume_target": 422,
+    "meter_unavailable": 422,
+    "unsupported_stop_type": 422,
+    "invalid_targets": 422,
+    "duplicate_target": 422,
+    "no_enabled_targets": 422,
+    "unknown_or_disabled_field": 422,
+    "gateway_configuration_invalid": 422,
+    "validator_unavailable": 500,
+    "internal_error": 500
+  },
+  "error_code_aliases": {
+    "active_plan_revision_conflict": "active_revision_conflict"
+  },
+  "write_outcomes": {
+    "accept": {"created": 201, "idempotent": 200, "replaced": 200},
+    "cancel": {"future": {"state": "cancelled", "status": 200}, "active": {"state": "stop_requested", "status": 202}, "terminal": {"state": "unchanged", "status": 200}}
+  },
+  "plan_states": [
+    "scheduled", "delayed", "starting", "running", "stopping", "stop_requested",
+    "completed", "failed", "expired", "cancelled", "recovery_required"
+  ],
+  "attempt_states": [
+    "starting", "running", "stopping", "stop_requested", "completed", "failed", "recovery_required"
+  ],
+  "active_plan_states": ["starting", "running", "stopping", "stop_requested"],
+  "blocking_plan_states": ["starting", "running", "stopping", "stop_requested", "recovery_required"],
+  "claimable_plan_states": ["scheduled", "delayed"],
+  "terminal_plan_states": ["completed", "failed", "expired", "cancelled"],
+  "transitions": [
+    {"event": "accept", "from": [null], "to": "scheduled", "reason": "accepted"},
+    {"event": "accept", "from": [null], "to": "cancelled", "reason": "accepted", "when": "payload.status == cancelled"},
+    {"event": "accept_higher_revision", "from": ["scheduled", "delayed"], "to": "scheduled", "reason": "higher_revision"},
+    {"event": "plan_due_claim", "from": ["scheduled", "delayed"], "to": "starting", "reason": "claimed"},
+    {"event": "gate_failed", "from": ["starting"], "to": "delayed", "reason": "<delay_reason>"},
+    {"event": "start_observed_running", "from": ["starting"], "to": "running"},
+    {"event": "target_reached", "from": ["running"], "to": "stopping", "reason": "duration_target_reached|volume_target_reached"},
+    {"event": "tracking_fault", "from": ["running"], "to": "stopping", "reason": "<failure_reason>"},
+    {"event": "client_cancel", "from": ["scheduled", "delayed"], "to": "cancelled", "reason": "cancelled_by_client"},
+    {"event": "client_cancel", "from": ["starting", "running", "stopping"], "to": "stop_requested", "reason": "stop_requested_by_client"},
+    {"event": "stop_dispatched", "from": ["stop_requested"], "to": "stopping", "reason": "cancel_stop_dispatched"},
+    {"event": "terminal_observed", "from": ["running", "stopping", "stop_requested"], "to": "completed", "reason": "sequence_completed|cancelled"},
+    {"event": "terminal_observed", "from": ["running", "stopping", "stop_requested"], "to": "failed", "reason": "<failure_reason>"},
+    {"event": "sequencer_fault", "from": ["starting", "running"], "to": "failed", "reason": "sequencer_fault"},
+    {"event": "valid_until_elapsed", "from": ["scheduled", "delayed"], "to": "expired", "reason": "valid_until_elapsed"},
+    {"event": "process_restart", "from": ["starting", "running", "stopping", "stop_requested"], "to": "recovery_required", "reason": "restart_reconciliation"}
+  ],
+  "delay_reasons": [
+    "clock_unsynchronized", "executor_gate_failed", "pump_run_active",
+    "meter_unavailable", "unsupported_volume_target", "unsupported_duration_unit",
+    "unsupported_volume_unit"
+  ],
+  "stop_reasons": ["duration_target_reached", "volume_target_reached", "cancel_stop_dispatched"],
+  "failure_reasons": [
+    "meter_unavailable", "meter_total_regressed", "monotonic_clock_regressed",
+    "hard_runtime_limit", "unsupported_volume_target", "sequencer_fault",
+    "sequencer_dispatch_uncertain", "start_outcome_uncertain",
+    "sequencer_observation_failed", "tracking_start_missing", "meter_baseline_missing"
+  ],
+  "event_types": [
+    "plan_accepted", "plan_replaced", "plan_claimed", "claim_delayed", "plan_delayed",
+    "plan_cancelled", "attempt_state", "meter_baseline_captured",
+    "target_tracking_started", "plan_expired", "restart_reconciliation"
+  ],
+  "pagination": {
+    "order": ["start_at", "plan_id"],
+    "default_limit": 50,
+    "max_limit": 100,
+    "cursor": "opaque base64url of {start_at, plan_id}",
+    "next_cursor_null_when_complete": true
+  },
+  "record_projection": {
+    "public": "tools/watering_plan_record.js publicPlan (JS) and tools/watering_plan_api.py _public_plan (Python) must stay identical",
+    "execution_fields": ["operation_id", "actual_started_at", "actual_ended_at", "actual_volume_m3", "stop_reason"],
+    "delay_reason_source": "plan.last_delay_reason"
+  }
+}

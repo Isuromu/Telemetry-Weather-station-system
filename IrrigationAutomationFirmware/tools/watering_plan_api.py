@@ -16,9 +16,11 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 try:
+    from watering_plan_rules import load_rules, status_for
     from watering_plan_scheduler import WateringPlanScheduler
     from watering_plan_store import PlanNotFound, PlanStoreError, WateringPlanStore
 except ImportError:  # pragma: no cover
+    from .watering_plan_rules import load_rules, status_for
     from .watering_plan_scheduler import WateringPlanScheduler
     from .watering_plan_store import PlanNotFound, PlanStoreError, WateringPlanStore
 
@@ -33,6 +35,8 @@ class AuthError(ValidationError):
 
 
 class WateringPlanService:
+    KNOWN_PATHS = ("/api/v1/health", "/api/v1/device-state", "/api/v1/watering-plans")
+
     def __init__(self, store: WateringPlanStore, token: str,
                  validator_options: Optional[Dict[str, Any]] = None,
                  node: str = "node", validator_cli: Optional[str] = None,
@@ -95,7 +99,15 @@ class WateringPlanService:
         self._scheduler_thread.start()
 
     def handle(self, method: str, path: str, headers: Dict[str, str], body: bytes = b"") -> Tuple[int, Dict[str, Any]]:
-        request_id = uuid.uuid4().hex
+        # Echo the caller's X-Request-ID when present (per API_PROTOCOL_SPEC.md);
+        # it names one HTTP attempt and is never an idempotency key.
+        request_id = ""
+        for key, value in headers.items():
+            if key.lower() == "x-request-id":
+                request_id = str(value).strip()[:128]
+                break
+        if not request_id:
+            request_id = uuid.uuid4().hex
         try:
             self._authorize(headers)
             parsed = urlparse(path)
@@ -115,7 +127,12 @@ class WateringPlanService:
                 return self._success(request_id, result)
             plan_id, action = self._plan_route(route)
             if plan_id is None:
-                return self._error(request_id, 404, "not_found", "API path was not found")
+                # A known path with an unsupported method is 405; anything else
+                # is an unknown path. Both come from api-protocol.rules.json.
+                if route in self.KNOWN_PATHS:
+                    return self._error(request_id, status_for("method_not_allowed", 405),
+                                       "method_not_allowed", "HTTP method is not supported")
+                return self._error(request_id, status_for("not_found", 404), "not_found", "API path was not found")
             if method == "GET" and action is None:
                 return self._success(request_id, self._public_plan(
                     self.store.get_plan(plan_id, include_history=True)))
@@ -123,27 +140,27 @@ class WateringPlanService:
                 payload = self._json_body(body)
                 validation = self._validate(payload, plan_id)
                 result = self.store.accept_plan(validation)
-                status = 201 if result.get("created") else 200
+                accept = load_rules()["write_outcomes"]["accept"]
+                status = accept["created"] if result.get("created") else accept["idempotent"]
                 return self._success(request_id, self._public_plan(result), status)
             if method == "POST" and action == "cancel":
                 result = self.store.cancel_plan(plan_id)
-                status = 202 if result["state"] == "stop_requested" else 200
-                return self._success(request_id, self._public_plan(result), status)
-            return self._error(request_id, 405, "method_not_allowed", "HTTP method is not supported")
+                cancel = load_rules()["write_outcomes"]["cancel"]
+                outcome = cancel["active"] if result["state"] == "stop_requested" else cancel["future"]
+                return self._success(request_id, self._public_plan(result), outcome["status"])
+            return self._error(request_id, status_for("method_not_allowed", 405), "method_not_allowed", "HTTP method is not supported")
         except AuthError as error:
-            return self._error(request_id, 401, error.code, error.message, error.details)
+            return self._error(request_id, status_for(error.code, 401), error.code, error.message, error.details)
         except ValidationError as error:
-            status = 500 if error.code == "validator_unavailable" else 422
-            return self._error(request_id, status, error.code, error.message, error.details)
+            return self._error(request_id, status_for(error.code, 422), error.code, error.message, error.details)
         except PlanNotFound as error:
-            return self._error(request_id, 404, error.code, error.message, error.details)
+            return self._error(request_id, status_for(error.code, 404), error.code, error.message, error.details)
         except PlanStoreError as error:
-            status = 400 if error.code == "invalid_cursor" else 409
-            return self._error(request_id, status, error.code, error.message, error.details)
+            return self._error(request_id, status_for(error.code, 409), error.code, error.message, error.details)
         except (ValueError, json.JSONDecodeError) as error:
-            return self._error(request_id, 400, "invalid_json", str(error))
+            return self._error(request_id, status_for("invalid_json", 400), "invalid_json", str(error))
         except Exception:
-            return self._error(request_id, 500, "internal_error", "Unexpected internal error")
+            return self._error(request_id, status_for("internal_error", 500), "internal_error", "Unexpected internal error")
 
     def _authorize(self, headers: Dict[str, str]) -> None:
         value = headers.get("Authorization", headers.get("authorization", ""))

@@ -453,6 +453,13 @@ stop requested; `400` malformed request; `401` missing/invalid credential;
 unexpected internal failure. A client must display the named error code or
 translate it, rather than treating it as a successful plan.
 
+The normative, language-neutral definition of these statuses, the lifecycle
+state machine, and the reason vocabularies now lives in
+[`api-protocol.rules.json`](api-protocol.rules.json), described by
+[`API_PROTOCOL_SPEC.md`](API_PROTOCOL_SPEC.md) and exercised by
+`tools/test_watering_plan_backend.py`. Where this document and that rules file
+differ, the rules file wins.
+
 `GET /api/v1/device-state` is pull-only in version 1. Its `data` contains a
 server/Node-RED aggregation of the most recent InfluxDB records, an overall
 `generated_at` time, and an `observed_at` time for each device or field. It

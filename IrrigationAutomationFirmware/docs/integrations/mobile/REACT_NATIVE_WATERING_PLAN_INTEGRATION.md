@@ -32,10 +32,17 @@ export type IrrigationConnectionProfile = {
 
 | Profile | `baseUrl` | Credential | Use |
 |---|---|---|---|
+| `localFake` | `http://<dev-machine-lan-ip>:8088` | `test-token` | Reference fake backend on a laptop during app work. Temporary; never a production profile. |
 | `temporaryLan` | Node-RED API on the Pi LAN address | QR-provisioned prototype token | Current onsite testing. |
 | `production` | Server URL | Server-issued access token | After server launch. |
 
-Both profiles send `Authorization: Bearer <token>` and call the same paths.
+All profiles send `Authorization: Bearer <token>` and call the same paths.
+
+`localFake` runs `python3 tools/mock_watering_plan_api.py --host 0.0.0.0
+--real-time`, which serves the same `/api/v1` contract over the portable rules
+in `../watering-plan/api-protocol.rules.json` and simulates plan runs, so the app
+can exercise a full lifecycle without Node-RED or the Pi. Remove the profile
+before any real deployment.
 Store the profile credential in iOS Keychain / Android Keystore through the
 application's secure-storage library. Do not store it in AsyncStorage, logs,
 analytics, screenshots, or repository configuration.

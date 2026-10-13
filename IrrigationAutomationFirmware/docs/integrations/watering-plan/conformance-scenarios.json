@@ -1,0 +1,85 @@
+{
+  "spec": "API_PROTOCOL_SPEC.md",
+  "rules": "api-protocol.rules.json",
+  "time_mode": "virtual",
+  "note": "Portable lifecycle vectors. tools/test_watering_plan_backend.py interprets them against the reference fake backend. time_mode=virtual changes only WHEN ticks happen, never what a rule does, so a real backend can run the same vectors with real time.",
+  "plan_defaults": {
+    "schema_version": 1,
+    "revision": 1,
+    "status": "scheduled",
+    "source": "ai",
+    "timezone": "Asia/Tashkent",
+    "targets": {"mode": "selected", "field_ids": ["field-001"]},
+    "run_mode": "parallel",
+    "stop": {"type": "duration", "value": 30, "unit": "seconds"},
+    "hard_max_runtime_sec": 3600
+  },
+  "scenarios": [
+    {
+      "name": "duration_run_completes",
+      "plan": {"stop": {"type": "duration", "value": 30, "unit": "seconds"}},
+      "actions": [{"advance": 1}, {"assert_state": "running"}, {"run_until_terminal": true}],
+      "expect": {"final_state": "completed", "execution_stop_reason": "duration_target_reached", "actual_runtime_ms": 30000}
+    },
+    {
+      "name": "duration_expires_before_start",
+      "plan": {"stop": {"type": "duration", "value": 30, "unit": "seconds"}, "valid_offset": 60},
+      "actions": [
+        {"gate": "pump_run_active"}, {"advance": 5}, {"assert_state": "delayed"},
+        {"assert_delay_reason": "pump_run_active"}, {"advance": 70}
+      ],
+      "expect": {"final_state": "expired"}
+    },
+    {
+      "name": "volume_run_completes",
+      "plan": {"stop": {"type": "volume", "value": 0.04, "unit": "m3"}},
+      "actions": [{"advance": 1}, {"assert_state": "running"}, {"run_until_terminal": true}],
+      "expect": {"final_state": "completed", "execution_stop_reason": "volume_target_reached", "delivered_m3": 0.04}
+    },
+    {
+      "name": "active_cancel",
+      "plan": {"stop": {"type": "duration", "value": 600, "unit": "seconds"}},
+      "actions": [{"advance": 1}, {"assert_state": "running"}, {"cancel": true}, {"run_until_terminal": true}],
+      "expect": {"final_state": "completed", "execution_stop_reason": "cancel_stop_dispatched"}
+    },
+    {
+      "name": "delayed_by_gate_then_recovers",
+      "plan": {"stop": {"type": "duration", "value": 20, "unit": "seconds"}},
+      "actions": [
+        {"gate": "pump_run_active"}, {"advance": 1}, {"assert_state": "delayed"},
+        {"clear_gate": true}, {"run_until_terminal": true}
+      ],
+      "expect": {"final_state": "completed", "execution_stop_reason": "duration_target_reached"}
+    },
+    {
+      "name": "restart_recovery_required",
+      "plan": {"stop": {"type": "duration", "value": 600, "unit": "seconds"}},
+      "actions": [{"advance": 1}, {"assert_state": "running"}, {"restart": true}, {"assert_state": "recovery_required"}],
+      "expect": {"final_state": "recovery_required", "safe_stops_min": 1}
+    },
+    {
+      "name": "meter_loss_fails_after_ordered_stop",
+      "plan": {"stop": {"type": "volume", "value": 0.04, "unit": "m3"}},
+      "actions": [
+        {"advance": 1}, {"assert_state": "running"}, {"advance": 5},
+        {"inject": {"meter_unavailable": true}}, {"advance": 2}, {"run_until_terminal": true}
+      ],
+      "expect": {"final_state": "failed", "execution_stop_reason": "meter_unavailable"}
+    },
+    {
+      "name": "hard_runtime_limit",
+      "plan": {"stop": {"type": "duration", "value": 3600, "unit": "seconds"}, "hard_max_runtime_sec": 3},
+      "actions": [{"advance": 1}, {"assert_state": "running"}, {"run_until_terminal": true}],
+      "expect": {"final_state": "failed", "execution_stop_reason": "hard_runtime_limit"}
+    },
+    {
+      "name": "monotonic_regression",
+      "plan": {"stop": {"type": "duration", "value": 600, "unit": "seconds"}},
+      "actions": [
+        {"advance": 1}, {"assert_state": "running"}, {"regress_monotonic": 10000},
+        {"advance": 1}, {"run_until_terminal": true}
+      ],
+      "expect": {"final_state": "failed", "execution_stop_reason": "monotonic_clock_regressed"}
+    }
+  ]
+}

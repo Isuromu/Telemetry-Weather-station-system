@@ -232,4 +232,19 @@ function validatePlan(payload, options) {
   };
 }
 
-module.exports = { canonicalJson, canonicalDigest, validatePlan };
+// The authoritative set of codes validatePlan can return. The API rules file
+// (docs/integrations/watering-plan/api-protocol.rules.json) carries the same
+// list as contract_error_codes, and the conformance suite asserts the two are
+// equal in both directions. Keep this sorted for a readable diff.
+const ERROR_CODES = Object.freeze([
+  'clock_unsynchronized', 'duplicate_target', 'gateway_configuration_invalid',
+  'invalid_hard_max_runtime', 'invalid_payload', 'invalid_plan_id',
+  'invalid_revision', 'invalid_source', 'invalid_status', 'invalid_stop_rule',
+  'invalid_targets', 'invalid_timestamp', 'invalid_time_window', 'invalid_timezone',
+  'meter_unavailable', 'no_enabled_targets', 'parallel_capacity_not_commissioned',
+  'plan_id_mismatch', 'unknown_or_disabled_field', 'unsupported_duration_unit',
+  'unsupported_run_mode', 'unsupported_schema_version', 'unsupported_stop_type',
+  'unsupported_volume_target', 'unsupported_volume_unit',
+]);
+
+module.exports = { canonicalJson, canonicalDigest, validatePlan, ERROR_CODES };

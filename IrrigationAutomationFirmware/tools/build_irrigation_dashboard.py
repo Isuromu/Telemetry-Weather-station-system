@@ -1,5 +1,6 @@
 """Build the single-page Node-RED Dashboard 2 irrigation flow."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -43,6 +44,23 @@ def _inline_module(relative_path):
 
 PLAN_CONTRACT_SOURCE = _inline_module("tools/watering_plan_contract.js")
 PLAN_RECORD_SOURCE = _inline_module("tools/watering_plan_record.js")
+
+
+def _status_map_js():
+    """Emit the generated flow's error-code -> status map from the rules file.
+
+    docs/integrations/watering-plan/api-protocol.rules.json is the single source
+    for the mapping; the mobile route function carries it as a literal. The
+    build fails if the transport/lifecycle code sets and the status table drift
+    apart, so the flow can never ship a status the rules do not define.
+    """
+    rules = json.loads((ROOT / "docs/integrations/watering-plan/api-protocol.rules.json")
+                       .read_text(encoding="utf-8"))
+    codes = set(rules["contract_error_codes"]) | set(rules["transport_error_codes"]) | set(rules["store_error_codes"])
+    missing = codes - set(rules["error_status"])
+    if missing:
+        raise SystemExit("api-protocol.rules.json error_status is missing codes: %s" % sorted(missing))
+    return "{" + ",".join("%s:%d" % (code, rules["error_status"][code]) for code in sorted(codes)) + "}"
 
 
 SETTINGS = r'''// Edit all site thresholds, limits and timeouts here (seconds unless noted).
@@ -546,20 +564,12 @@ if (detailMatch&&method==='PUT') {
 }
 return respond(404,null,{code:'not_found',message:'API path was not found',details:[]});''')
 
-MOBILE_API_RESULT = ('const planRecord=' + PLAN_RECORD_SOURCE + ';\n' + r'''// The single place a mobile API response envelope is built. The route node sets
+MOBILE_API_RESULT = ('const planRecord=' + PLAN_RECORD_SOURCE + ';\n' +
+                     'const STATUS=' + _status_map_js() + ';\n' + r'''// The single place a mobile API response envelope is built. The route node sets
 // msg.mobileStatus/mobileData/mobileError for its own replies; the store leaves
-// its {ok,action,result} payload. The branches below cover both.
+// its {ok,action,result} payload. The branches below cover both. STATUS comes
+// from docs/integrations/watering-plan/api-protocol.rules.json at build time.
 const requestId=String(msg.mobileRequestId||'unknown');
-const STATUS={unauthorized:401,not_found:404,method_not_allowed:405,
-  invalid_payload:400,invalid_plan_id:400,invalid_cursor:400,invalid_timestamp:400,plan_id_mismatch:400,
-  plan_not_found:404,
-  revision_conflict:409,stale_revision:409,active_revision_conflict:409,active_plan_revision_conflict:409,
-  unsupported_schema_version:422,invalid_revision:422,invalid_status:422,invalid_source:422,invalid_timezone:422,
-  invalid_time_window:422,clock_unsynchronized:422,unsupported_run_mode:422,invalid_hard_max_runtime:422,
-  parallel_capacity_not_commissioned:422,invalid_stop_rule:422,unsupported_duration_unit:422,unsupported_volume_unit:422,
-  unsupported_volume_target:422,meter_unavailable:422,unsupported_stop_type:422,invalid_targets:422,duplicate_target:422,
-  no_enabled_targets:422,unknown_or_disabled_field:422,gateway_configuration_invalid:422,
-  validator_unavailable:500,internal_error:500};
 const send=(status,error,data)=>{msg.statusCode=status;msg.headers={'Content-Type':'application'+'/json'};msg.payload=error?{api_version:'v1',request_id:requestId,error}:{api_version:'v1',request_id:requestId,data};return msg;};
 if (typeof msg.payload?.ok!=='boolean') {
   if (msg.mobileError) return send(STATUS[msg.mobileError.code]||msg.mobileStatus||500,msg.mobileError,null);

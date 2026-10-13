@@ -50,7 +50,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(len(body["data"]["items"]), 1)
         status, body = self.call("PUT", "/api/v1/watering-plans/wrong", payload())
-        self.assertEqual(status, 422)
+        self.assertEqual(status, 400)  # invalid_path_id class, per api-protocol.rules.json
         self.assertEqual(body["error"]["code"], "plan_id_mismatch")
         status, body = self.call("POST", "/api/v1/watering-plans/plan-api/cancel")
         self.assertEqual(status, 200)

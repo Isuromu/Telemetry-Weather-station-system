@@ -4,13 +4,13 @@
 
 This plan follows v1 contract in [AI Watering Plan roadmap](AI_WATERING_PLAN_ROADMAP.md) and [mobile integration guide](../mobile/REACT_NATIVE_WATERING_PLAN_INTEGRATION.md). Test runner sends the same HTTP requests the planned React Native client will send; no app required.
 
-**Important:** repository now generates Node-RED `/api/v1` watering-plan HTTP routes backed by local `watering-plan-store` SQLite custom node. They are not live-Pi verified until package installation, flow deployment, and explicit `--live` test run complete. `tools/watering_plan_api.py` remains Python reference prototype, not route implementation. Mock tests prove runner/mock behavior only; generated-flow tests prove topology only. Do not describe either as deployed Node-RED or hardware proof. See [native deployment](NODE_RED_NATIVE_API_DEPLOYMENT.md).
+**Important:** repository now generates Node-RED `/api/v1` watering-plan HTTP routes backed by local `watering-plan-store` SQLite custom node. They are not live-Pi verified until package installation, flow deployment, and explicit `--live` test run complete. `tools/watering_plan_api.py` is the Python reference protocol implementation. The rules themselves are portable and language-neutral: [api-protocol.rules.json](api-protocol.rules.json) owns transport and lifecycle, [API_PROTOCOL_SPEC.md](API_PROTOCOL_SPEC.md) describes them, and [conformance-scenarios.json](conformance-scenarios.json) is the shared vector set. `tools/mock_watering_plan_api.py` is a thin HTTP adapter over the reference fake backend. Runner tests prove client/runner behavior only; generated-flow tests prove topology only. Do not describe either as deployed Node-RED or hardware proof. See [native deployment](NODE_RED_NATIVE_API_DEPLOYMENT.md).
 
 Confidence labels below:
 
 - **Roadmap contract** — documented expected behavior, not proof of deployed implementation.
 - **Python prototype** — implemented and covered in the checked-in Python service/store; still not Node-RED proof.
-- **Mock only** — deterministic scenario fixture, intentionally not evidence of production behavior.
+- **Reference fake** — deterministic fake backend plus the portable lifecycle vectors in `conformance-scenarios.json`; still not production behavior.
 - **Node-RED generated** — route/store implementation exists in generated flow but has not been deployed and observed on Pi.
 - **Node-RED live verified** — use only after authorized `--live` evidence.
 
@@ -70,24 +70,38 @@ Plan writes are idempotent by exact `plan_id` + `revision` + content. On timeout
 
 For every error, assert non-2xx status, `api_version == "v1"`, nonempty `request_id`, and `error.code/message/details`; do not parse error response as a plan. Roadmap status map: 400 malformed, 401 auth, 404 unknown, 409 revision/active replacement conflict, 422 valid JSON violating scheduling/capability rule, 500 unexpected internal failure. Server must not echo credentials. Exact field validation, status code for each validation edge, rate limiting, and request-ID generation remain Node-RED implementation details to verify against deployment.
 
-## Runnable mock scenarios
+## Runnable reference fake backend
 
-Requires Python 3.8+, no third-party packages. From repository root:
+Requires Python 3.8+, no third-party packages beyond the repository tools. From
+repository root:
 
 ```sh
-python tools/test_mobile_watering_plan_api.py
+python tools/test_mobile_watering_plan_api.py     # HTTP client scenarios
+PYTHONPATH=tools python tools/test_watering_plan_backend.py   # protocol + lifecycle conformance
 ```
 
-This starts and stops an in-process mock HTTP server, runs client-shaped requests, and exits nonzero on assertion failure. Expected ending: `PASS: ... scenario tests; mode=mock`.
+The first starts and stops an in-process server, runs client-shaped requests,
+and exits nonzero on assertion failure (expected ending: `PASS: ... mode=mock`).
+The second drives the portable lifecycle vectors (`conformance-scenarios.json`)
+against the same backend and is the suite a real backend must also pass.
 
-Optional standalone mock for manual inspection in another terminal:
+Standalone fake backend for a phone on the same Wi-Fi (advances the clock so
+plans start and finish):
 
 ```sh
-python tools/mock_watering_plan_api.py --host 127.0.0.1 --port 8088
+python tools/mock_watering_plan_api.py --host 0.0.0.0 --real-time
 curl -i -H 'Authorization: Bearer test-token' -H 'Accept: application/json' http://127.0.0.1:8088/api/v1/health
 ```
 
-Mock scenarios cover auth, envelopes, health/device snapshot, create, same-content retry, changed duplicate conflict, stale/higher revision, schema/path/target/time validation, list/detail/pagination, future cancel, simulated active stop request, unknown plan, and server error. Timeout case deliberately stores then closes connection; runner retries exact same body/ID/revision with a fresh request ID. `X-Mock-Scenario` is test-only and must never be added to app requests. Mock keeps state in memory; restarting resets it. It does not schedule plans, call Node-RED sequencer, query InfluxDB, or actuate valves.
+Scenarios cover auth, envelopes, health/device snapshot, create, same-content
+retry, changed duplicate conflict, stale/higher revision, schema/path/target/time
+validation, list/detail/pagination, future cancel, and active stop request; the
+conformance suite adds the full run lifecycle (duration, expiry, volume + meter,
+active cancel, delayed + recovery, and the fault paths). The timeout case
+deliberately stores then closes the connection; the runner retries the exact same
+body/ID/revision with a fresh request ID. `X-Mock-Scenario` is test-only and must
+never be added to app requests. The fake backend simulates the sequencer and
+meter; it does not query InfluxDB or actuate valves.
 
 ## Live deployed endpoint mode
 
@@ -106,6 +120,7 @@ Equivalent flags exist, but environment variables preferred. Script never prints
 ```sh
 PYTHONPATH=tools python -m unittest test_watering_plan_api test_watering_plan_store test_watering_plan_scheduler -v
 node tools/test_watering_plan_contract.js
+PYTHONPATH=tools python tools/test_watering_plan_backend.py
 ```
 
 Report results in three separate lines: mock scenario result; Python prototype regression result; live Node-RED result (`not run`, `unavailable`, or observed pass/fail). Passing first two does not establish Node-RED route behavior. Before release, execute live suite plus manual cases for active stop acknowledgement, Pi restart, radio/meter loss, and no auto-resume on commissioned hardware.

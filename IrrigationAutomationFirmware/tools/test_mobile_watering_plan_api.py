@@ -200,13 +200,20 @@ class ScenarioTests(unittest.TestCase):
         self.assert_envelope(self.client.request("GET", "/watering-plans/not-found"), 404)
         self.assert_envelope(self.client.request("POST", "/watering-plans/not-found/cancel", {}), 404)
 
-    def test_mock_error_envelope_and_active_cancel_semantics(self):
+    def test_forced_error_and_active_cancel_semantics(self):
         if ARGS.live:
-            self.skipTest("mock-only: does not actuate or simulate real scheduler")
+            self.skipTest("fake-only: does not actuate hardware")
+        backend = self.server.backend
         plan = new_plan("active")
+        # Due now in the fake backend's virtual time, so the scheduler starts it
+        # when the clock advances rather than in two real days.
+        plan["created_at"] = backend.clock.now()
+        plan["start_at"] = backend.clock.now()
+        plan["valid_until"] = backend.clock.now_plus(3600)
+        plan["stop"] = {"type": "duration", "value": 600, "unit": "seconds"}
         self.assert_envelope(self.put(plan), 201)
-        with self.server.state.lock:
-            self.server.state.plans[plan["plan_id"]]["state"] = "running"
+        backend.advance(1)
+        self.assertEqual(backend.store.get_plan(plan["plan_id"])["state"], "running")
         result = self.client.request("POST", "/watering-plans/" + plan["plan_id"] + "/cancel", {})
         self.assert_envelope(result, 202)
         self.assertEqual(result[1]["data"]["state"], "stop_requested")

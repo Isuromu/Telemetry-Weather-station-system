@@ -7,6 +7,13 @@ backed by the local `watering-plan-store` custom node. The routes persist, read
 and cancel plans only. They **do not schedule or actuate watering**: no public
 route reaches MQTT or the `CONTROL` sequencer.
 
+The transport and lifecycle rules the routes implement are defined once, in
+[`api-protocol.rules.json`](api-protocol.rules.json) (see
+[`API_PROTOCOL_SPEC.md`](API_PROTOCOL_SPEC.md)); the flow's status map is
+generated from it at build time. `tools/test_watering_plan_backend.py` exercises
+those rules against the reference fake backend and is the conformance suite a
+future backend must also pass.
+
 The dashboard reads the same store, so a mobile-submitted plan appears on the
 plan panel without a second copy and without any outbound HTTP client.
 
