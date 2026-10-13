@@ -434,6 +434,9 @@ if (s.phase==='wait_main_close') {
     else if(timed(cfg.mainCommandTimeoutSec)){s.phase='fault';s.notice='Main valve close unconfirmed; inspect system';}}
 }
 const gate=tickedValves();
+// Telemetry freshness always stays visible. Selection controls readiness only:
+// an unselected stale valve must not block a selected-zone run, but must never
+// be presented as live.
 s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?ready(gate):'Select at least one field valve'):ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
 s.wateringPlans=flow.get('watering_plan_snapshot')||[];s.planApiStatus=(flow.get('watering_plan_api_status')||'Waiting for plan service')+(flow.get('watering_plan_action_status')?' · '+flow.get('watering_plan_action_status'):'');
 flow.set('irrigation',s);

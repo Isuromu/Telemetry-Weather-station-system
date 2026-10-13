@@ -624,6 +624,27 @@ assert.equal(gateTick({phase:'fault',selection:{valve1:true,valve2:false},
   devices:{...staleOpenValve2,valve1:{at:base-(valveOpenAge+1)*1000,pcv_last_commanded:'open'}}}).check,
   'Valve 1 status unavailable or stale',
   'a fault retry is judged on the chosen set too, since the start branch re-checks it');
+const unselectedStaleState=gateTick({selection:{valve1:true,valve2:false},devices:staleOpenValve2});
+assert.equal(unselectedStaleState.devices.valve2.stale,true,
+  'an unselected stale valve must remain visible as stale without blocking the selected zone');
+const selectedStaleState=gateTick({selection:{valve1:true,valve2:true},devices:staleOpenValve2});
+assert.equal(selectedStaleState.devices.valve2.stale,true,
+  'a selected stale valve must remain visible as stale');
+const activeSelectionState=startTick({...teardown({phase:'running',selection:{valve1:true,valve2:true},
+  selected:['valve1'],runAt:base}),devices:staleOpenValve2},{payload:{kind:'tick'}});
+assert.equal(activeSelectionState.devices.valve2.stale,true,
+  'during a run, stale presentation must remain independent of captured selection');
+// The main valve being live proves heartbeat freshness, not command completion: a close
+// without a matching command result must remain an explicit fault, independent of Valve 2.
+const liveMainUnconfirmed=startTick(teardown({phase:'wait_main_close',phaseAt:base-(mainCommandTimeoutSec+1)*1000,
+  selected:['valve1'],step:-1,pending:{device:'main',op:'close',id:509,at:base-(mainCommandTimeoutSec+1)*1000,retried:true},
+  devices:{...commonDevices,valve2:{at:base-(valveOpenAge+1)*1000,pcv_last_commanded:'open'},
+    main:{at:base,actuator_online:true,actuator_fault_code:0,actual_angle_deg:90,valve_moving:false,
+      command_phase:'finished',reported_command_id:400,last_command_id:400}}}),{payload:{kind:'tick'}});
+assert.equal(liveMainUnconfirmed.phase,'fault',
+  'a live MainValve heartbeat without close confirmation must not be treated as a completed close');
+assert.equal(liveMainUnconfirmed.notice,'Main valve close unconfirmed; inspect system',
+  'the unconfirmed close fault must remain explicit');
 // The reason is an operator-facing string, so it must never carry the internal key the
 // flow routes messages by. Anything naming a valve has to come from the label map.
 for (const reason of [gateTick({selection:{valve1:true,valve2:true},devices:staleOpenValve2}).check,
