@@ -1,0 +1,46 @@
+#!/bin/bash
+# Enforces the AGENTS.md "## Commit messages" rule for every agent and every
+# clone that enables it: three or four lines, and no co-author trailer.
+#
+#   git config core.hooksPath .githooks
+#
+# A paragraph-wrapped body ("subject, blank, five wrapped lines") is the default
+# habit of most tools, and nothing used to stop it: three commits had to be
+# reworded by hand on 2026-10-16. This hook makes the rule mechanical.
+set -u
+
+message_file="$1"
+[ -n "${message_file:-}" ] && [ -f "$message_file" ] || exit 0
+
+# Comment lines are stripped by git before the commit; count what remains.
+stripped="$(grep -v '^#' "$message_file" | sed -e 's/[[:space:]]*$//' -e :a -e '/^$/{$d;N;ba' -e '}')"
+subject="$(printf '%s\n' "$stripped" | head -n1)"
+
+# A merge has one line by design, and so do the transient fixup/squash markers.
+case "$subject" in
+  Merge\ *|fixup!\ *|squash!\ *) exit 0 ;;
+esac
+
+# Co-authors and generator credits: the rule is about those two, so a plain
+# Signed-off-by is left alone.
+if printf '%s\n' "$stripped" | grep -qiE '^(co-authored-by|co-developed-by|generated-with):'; then
+  echo "commit-msg: remove the trailer; AGENTS.md forbids co-author/generator lines." >&2
+  exit 1
+fi
+
+lines="$(printf '%s\n' "$stripped" | wc -l)"
+if [ "$lines" -lt 3 ] || [ "$lines" -gt 4 ]; then
+  cat >&2 <<EOF
+commit-msg: message has $lines lines; AGENTS.md allows three or four.
+
+Write a subject, a blank line, then one or two single-line sentences:
+
+  irrigation dashboard: rank finished plans by outcome time
+
+  Sort recent plans by updated_at; a cancelled plan was hidden by start_at order.
+  Keep the whole finished set and count the rows the column does not show.
+EOF
+  exit 1
+fi
+
+exit 0

@@ -6,7 +6,16 @@ and code comments must remain in English.
 ## Commit messages
 
 Every commit message must contain three or four lines and must never include a
-co-author trailer.
+co-author trailer. That is a subject, a blank line, then one or two single-line
+sentences — no paragraph wrapping, which is what agents default to.
+
+`.githooks/commit-msg` enforces both and rejects the commit, for any tool that
+runs `git commit`. Enable it once per clone (the hook directory sits below the
+repository root, so the path is not relative):
+
+```sh
+git config core.hooksPath "$(git rev-parse --show-toplevel)/IrrigationAutomationFirmware/.githooks"
+```
 
 ## Read according to the task
 
