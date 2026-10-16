@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3');
+const { WateringPlanScheduler } = require('./watering-plan-scheduler');
 
 const CLAIMABLE = ['scheduled', 'delayed'];
 const ACTIVE = ['starting', 'running', 'stopping', 'stop_requested'];
@@ -190,7 +191,10 @@ class WateringPlanStore {
     const db = await this.open(); const rows = await WateringPlanStore.all(db, `SELECT * FROM watering_plans${clauses.length ? ' WHERE ' + clauses.join(' AND ') : ''} ORDER BY start_at, plan_id LIMIT ?`, params.concat([limit + 1])); const more = rows.length > limit; const items = rows.slice(0, limit).map(planFromRow); return { items, next_cursor: more ? cursorEncode(items[items.length - 1]) : null };
   }
   async cancel(planId, at) {
-    const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); let target; let reason; if (CLAIMABLE.includes(row.state)) { target = 'cancelled'; reason = 'cancelled_by_client'; } else if (ACTIVE.includes(row.state)) { target = 'stop_requested'; reason = 'stop_requested_by_client'; } else return planFromRow(row); await WateringPlanStore.run(db, 'UPDATE watering_plans SET state=?, updated_at=? WHERE plan_id=? AND state=?', [target, occurredAt, planId, row.state]); await this.event(db, planId, row.revision, 'plan_cancelled', row.state, target, occurredAt, reason); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
+    // A recovery_required plan is the operator's to clear: one interrupted run
+    // otherwise blocks every future claim with no route out. The attempt row
+    // stays recovery_required as the audit trail of what was interrupted.
+    const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); let target; let reason; if (CLAIMABLE.includes(row.state)) { target = 'cancelled'; reason = 'cancelled_by_client'; } else if (ACTIVE.includes(row.state)) { target = 'stop_requested'; reason = 'stop_requested_by_client'; } else if (row.state === 'recovery_required') { target = 'cancelled'; reason = 'recovery_cleared'; } else return planFromRow(row); await WateringPlanStore.run(db, 'UPDATE watering_plans SET state=?, updated_at=? WHERE plan_id=? AND state=?', [target, occurredAt, planId, row.state]); await this.event(db, planId, row.revision, 'plan_cancelled', row.state, target, occurredAt, reason); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
   }
   async claim(at, ownerId) {
     const occurredAt = at ? normalizeTime(at) : now(); const owner = ownerId || crypto.randomUUID();
@@ -211,6 +215,60 @@ class WateringPlanStore {
   async recover(at) {
     const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const rows = await WateringPlanStore.all(db, `SELECT * FROM watering_plans WHERE state IN (${ACTIVE.map(() => '?').join(',')})`, ACTIVE); for (const row of rows) { await WateringPlanStore.run(db, "UPDATE watering_plans SET state='recovery_required', updated_at=? WHERE plan_id=?", [occurredAt, row.plan_id]); if (row.active_attempt_id) await WateringPlanStore.run(db, "UPDATE watering_attempts SET state='recovery_required', actual_ended_at=?, final_reason='restart_reconciliation' WHERE attempt_id=?", [occurredAt, row.active_attempt_id]); await this.event(db, row.plan_id, row.revision, 'restart_reconciliation', row.state, 'recovery_required', occurredAt, 'restart_reconciliation', {}, row.active_attempt_id); } return { recovered: rows.length }; });
   }
+  // ---- Scheduler support -------------------------------------------------
+  // Same semantics as the Python reference store (tools/watering_plan_store.py):
+  // the JSON columns, the stop_requested plan override, COALESCE on final_reason,
+  // and the write-once tracking columns are what the conformance vectors check.
+  async expireDue(at) {
+    const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const rows = await WateringPlanStore.all(db, "SELECT plan_id, revision, state FROM watering_plans WHERE state IN ('scheduled','delayed') AND valid_until <= ?", [occurredAt]); for (const row of rows) { await WateringPlanStore.run(db, "UPDATE watering_plans SET state='expired', updated_at=? WHERE plan_id=?", [occurredAt, row.plan_id]); await this.event(db, row.plan_id, row.revision, 'plan_expired', row.state, 'expired', occurredAt, 'valid_until_elapsed'); } return rows.length; });
+  }
+  async nextDue(at) {
+    // Read-only peek: the tick gates before it claims, so a blocked plan never
+    // writes an attempt row and two events every few seconds.
+    const occurredAt = at ? normalizeTime(at) : now(); const db = await this.open(); const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE state IN (?,?) AND start_at <= ? AND valid_until > ? ORDER BY start_at, accepted_at, plan_id LIMIT 1', [CLAIMABLE[0], CLAIMABLE[1], occurredAt, occurredAt]); return planFromRow(row);
+  }
+  async markDelayed(planId, reason, at, retrySec) {
+    const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); if (!CLAIMABLE.includes(row.state)) return planFromRow(row); const fresh = Number.isFinite(Number(retrySec)) && Date.parse(occurredAt) - Date.parse(row.updated_at) < Number(retrySec) * 1000; if (row.state === 'delayed' && row.last_delay_reason === reason && fresh) return planFromRow(row); await WateringPlanStore.run(db, "UPDATE watering_plans SET state='delayed', last_delay_reason=?, updated_at=? WHERE plan_id=?", [reason, occurredAt, planId]); await this.event(db, planId, row.revision, 'plan_delayed', row.state, 'delayed', occurredAt, reason); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
+  }
+  async releaseClaim(planId, reason, at) {
+    const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); if (row.state !== 'starting') return planFromRow(row); if (row.active_attempt_id) await WateringPlanStore.run(db, "UPDATE watering_attempts SET state='failed', actual_ended_at=?, final_reason=? WHERE attempt_id=?", [occurredAt, reason, row.active_attempt_id]); await WateringPlanStore.run(db, "UPDATE watering_plans SET state='delayed', last_delay_reason=?, active_attempt_id=NULL, updated_at=? WHERE plan_id=?", [reason, occurredAt, planId]); await this.event(db, planId, row.revision, 'claim_delayed', row.state, 'delayed', occurredAt, reason, {}, row.active_attempt_id); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
+  }
+  async activePlan() {
+    const db = await this.open(); const row = await WateringPlanStore.get(db, `SELECT * FROM watering_plans WHERE state IN (${ACTIVE.map(() => '?').join(',')}) ORDER BY updated_at LIMIT 1`, ACTIVE); if (!row) return null; const plan = planFromRow(row); plan.attempt = plan.active_attempt_id ? attemptFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [plan.active_attempt_id])) : null; return plan;
+  }
+  async transitionAttempt(attemptId, state, at, reason, dashboardPhase, dashboardNotice, actualRuntimeMs, deliveredM3) {
+    const occurredAt = at ? normalizeTime(at) : now(); const states = ['starting', 'running', 'stopping', 'stop_requested', 'completed', 'failed', 'recovery_required'];
+    if (!states.includes(state)) throw new StoreError('invalid_state', 'Unsupported attempt state', [state]);
+    if (actualRuntimeMs !== undefined && actualRuntimeMs !== null && actualRuntimeMs < 0) throw new StoreError('invalid_tracking', 'actual runtime cannot be negative');
+    if (deliveredM3 !== undefined && deliveredM3 !== null && deliveredM3 < 0) throw new StoreError('invalid_tracking', 'delivered volume cannot be negative');
+    const terminal = ['completed', 'failed', 'recovery_required'];
+    return this.transaction(async db => {
+      const attempt = await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId]);
+      if (!attempt) throw new StoreError('attempt_not_found', 'Watering attempt was not found', [attemptId]);
+      const plan = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [attempt.plan_id]);
+      // A cancelled-while-active plan must not look like it restarted, and a
+      // terminal attempt releases the plan's active pointer.
+      let planState = state;
+      if (plan.state === 'stop_requested' && (state === 'starting' || state === 'running')) planState = 'stop_requested';
+      if (state === 'completed' && attempt.final_reason === 'cancelled') planState = 'completed';
+      await WateringPlanStore.run(db, "UPDATE watering_attempts SET state=?, actual_started_at=CASE WHEN ?='running' AND actual_started_at IS NULL THEN ? ELSE actual_started_at END, actual_ended_at=CASE WHEN ? IN ('completed','failed','recovery_required') THEN ? ELSE actual_ended_at END, dashboard_phase=COALESCE(?, dashboard_phase), dashboard_notice=COALESCE(?, dashboard_notice), final_reason=COALESCE(final_reason, ?), actual_runtime_ms=COALESCE(?, actual_runtime_ms), delivered_m3=COALESCE(?, delivered_m3) WHERE attempt_id=?", [state, state, occurredAt, state, occurredAt, dashboardPhase === undefined ? null : dashboardPhase, dashboardNotice === undefined ? null : dashboardNotice, reason === undefined ? null : reason, actualRuntimeMs === undefined ? null : actualRuntimeMs, deliveredM3 === undefined ? null : deliveredM3, attemptId]);
+      await WateringPlanStore.run(db, "UPDATE watering_plans SET state=?, updated_at=?, active_attempt_id=CASE WHEN ? IN ('completed','failed','recovery_required') THEN NULL ELSE active_attempt_id END WHERE plan_id=?", [planState, occurredAt, state, plan.plan_id]);
+      await this.event(db, plan.plan_id, plan.revision, 'attempt_state', plan.state, planState, occurredAt, reason === undefined ? null : reason, { dashboard_phase: dashboardPhase === undefined ? null : dashboardPhase }, attemptId);
+      const updated = planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [plan.plan_id])); updated.attempt = attemptFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId])); return updated;
+    });
+  }
+  async startAttemptTracking(attemptId, monotonicStartMs, at) {
+    const occurredAt = at ? normalizeTime(at) : now(); if (monotonicStartMs < 0) throw new StoreError('invalid_tracking', 'monotonic start cannot be negative');
+    return this.transaction(async db => { const attempt = await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId]); if (!attempt) throw new StoreError('attempt_not_found', 'Watering attempt was not found', [attemptId]); if (attempt.monotonic_start_ms === null || attempt.monotonic_start_ms === undefined) { await WateringPlanStore.run(db, 'UPDATE watering_attempts SET monotonic_start_ms=? WHERE attempt_id=?', [monotonicStartMs, attemptId]); await this.event(db, attempt.plan_id, attempt.plan_revision, 'target_tracking_started', attempt.state, attempt.state, occurredAt, 'dashboard_running', { monotonic_start_ms: monotonicStartMs }, attemptId); } return attemptFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId])); });
+  }
+  async setMeterBaseline(attemptId, baselineM3, at) {
+    const occurredAt = at ? normalizeTime(at) : now(); if (baselineM3 < 0) throw new StoreError('invalid_tracking', 'meter baseline cannot be negative');
+    return this.transaction(async db => { const attempt = await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId]); if (!attempt) throw new StoreError('attempt_not_found', 'Watering attempt was not found', [attemptId]); if (attempt.meter_baseline_m3 === null || attempt.meter_baseline_m3 === undefined) { await WateringPlanStore.run(db, 'UPDATE watering_attempts SET meter_baseline_m3=? WHERE attempt_id=?', [baselineM3, attemptId]); await this.event(db, attempt.plan_id, attempt.plan_revision, 'meter_baseline_captured', attempt.state, attempt.state, occurredAt, 'commissioned_positive_total', { meter_baseline_m3: baselineM3 }, attemptId); } return attemptFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId])); });
+  }
+  async recordAttemptProgress(attemptId, actualRuntimeMs, deliveredM3) {
+    if (actualRuntimeMs < 0 || (deliveredM3 !== undefined && deliveredM3 !== null && deliveredM3 < 0)) throw new StoreError('invalid_tracking', 'Attempt progress cannot be negative');
+    return this.transaction(async db => { const attempt = await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId]); if (!attempt) throw new StoreError('attempt_not_found', 'Watering attempt was not found', [attemptId]); await WateringPlanStore.run(db, 'UPDATE watering_attempts SET actual_runtime_ms=?, delivered_m3=COALESCE(?, delivered_m3) WHERE attempt_id=?', [actualRuntimeMs, deliveredM3 === undefined ? null : deliveredM3, attemptId]); return attemptFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_attempts WHERE attempt_id=?', [attemptId])); });
+  }
 }
 
 module.exports = function(RED) {
@@ -223,6 +281,7 @@ module.exports = function(RED) {
       // Log and carry on: a store failure must fail the request, not the runtime.
       onError: error => node.error('Watering plan store error: ' + (error && error.message ? error.message : String(error)))
     });
+    const scheduler = new WateringPlanScheduler({ store });
     let ready = store.initialize(); ready.catch(error => node.error(error));
     node.on('input', async (msg, send, done) => {
       try { await ready; const action = msg.action; let result;
@@ -232,7 +291,17 @@ module.exports = function(RED) {
         else if (action === 'cancel') result = await store.cancel(msg.planId, msg.at);
         else if (action === 'claim') result = await store.claim(msg.at, msg.ownerId);
         else if (action === 'recover') result = await store.recover(msg.at);
-        else throw new StoreError('invalid_action', 'msg.action must be accept, get, list, cancel, claim, or recover');
+        else if (action === 'tick') result = await scheduler.tick(msg.facts);
+        else if (action === 'expire_due') result = await store.expireDue(msg.at);
+        else if (action === 'next_due') result = await store.nextDue(msg.at);
+        else if (action === 'mark_delayed') result = await store.markDelayed(msg.planId, msg.reason, msg.at, msg.retrySec);
+        else if (action === 'release_claim') result = await store.releaseClaim(msg.planId, msg.reason, msg.at);
+        else if (action === 'active_plan') result = await store.activePlan();
+        else if (action === 'transition_attempt') result = await store.transitionAttempt(msg.attemptId, msg.state, msg.at, msg.reason, msg.dashboardPhase, msg.dashboardNotice, msg.actualRuntimeMs, msg.deliveredM3);
+        else if (action === 'start_attempt_tracking') result = await store.startAttemptTracking(msg.attemptId, msg.monotonicStartMs, msg.at);
+        else if (action === 'set_meter_baseline') result = await store.setMeterBaseline(msg.attemptId, msg.baselineM3, msg.at);
+        else if (action === 'record_attempt_progress') result = await store.recordAttemptProgress(msg.attemptId, msg.actualRuntimeMs, msg.deliveredM3);
+        else throw new StoreError('invalid_action', 'msg.action must be accept, get, list, cancel, claim, recover or tick');
         msg.payload = { ok: true, action, result }; send(msg); if (done) done();
       } catch (error) { const safe = { code: error.code || 'store_error', message: error.message || 'Watering plan store failed', details: error.details || [] }; msg.payload = { ok: false, action: msg.action, error: safe }; node.error(error, msg); send(msg); if (done) done(error); }
     });
@@ -240,5 +309,6 @@ module.exports = function(RED) {
   RED.nodes.registerType('watering-plan-store', WateringPlanStoreNode);
 };
 module.exports.WateringPlanStore = WateringPlanStore;
+module.exports.WateringPlanScheduler = WateringPlanScheduler;
 module.exports.StoreError = StoreError;
 module.exports.canonicalDigest = canonicalDigest;

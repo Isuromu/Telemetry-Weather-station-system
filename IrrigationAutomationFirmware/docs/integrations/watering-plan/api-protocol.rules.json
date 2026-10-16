@@ -96,7 +96,7 @@
     {"event": "accept", "from": [null], "to": "cancelled", "reason": "accepted", "when": "payload.status == cancelled"},
     {"event": "accept_higher_revision", "from": ["scheduled", "delayed"], "to": "scheduled", "reason": "higher_revision"},
     {"event": "plan_due_claim", "from": ["scheduled", "delayed"], "to": "starting", "reason": "claimed"},
-    {"event": "gate_failed", "from": ["starting"], "to": "delayed", "reason": "<delay_reason>"},
+    {"event": "gate_failed", "from": ["scheduled", "delayed", "starting"], "to": "delayed", "reason": "<delay_reason>"},
     {"event": "start_observed_running", "from": ["starting"], "to": "running"},
     {"event": "target_reached", "from": ["running"], "to": "stopping", "reason": "duration_target_reached|volume_target_reached"},
     {"event": "tracking_fault", "from": ["running"], "to": "stopping", "reason": "<failure_reason>"},
@@ -107,7 +107,8 @@
     {"event": "terminal_observed", "from": ["running", "stopping", "stop_requested"], "to": "failed", "reason": "<failure_reason>"},
     {"event": "sequencer_fault", "from": ["starting", "running"], "to": "failed", "reason": "sequencer_fault"},
     {"event": "valid_until_elapsed", "from": ["scheduled", "delayed"], "to": "expired", "reason": "valid_until_elapsed"},
-    {"event": "process_restart", "from": ["starting", "running", "stopping", "stop_requested"], "to": "recovery_required", "reason": "restart_reconciliation"}
+    {"event": "process_restart", "from": ["starting", "running", "stopping", "stop_requested"], "to": "recovery_required", "reason": "restart_reconciliation"},
+    {"event": "recovery_cleared", "from": ["recovery_required"], "to": "cancelled", "reason": "recovery_cleared", "when": "operator cancels after inspecting the interrupted run"}
   ],
   "delay_reasons": [
     "clock_unsynchronized", "executor_gate_failed", "pump_run_active",

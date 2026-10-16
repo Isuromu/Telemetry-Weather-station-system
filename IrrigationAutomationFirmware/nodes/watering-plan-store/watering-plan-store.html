@@ -18,5 +18,6 @@ RED.nodes.registerType('watering-plan-store', {
 </script>
 <script type="text/x-red" data-help-name="watering-plan-store">
   <p>Persists accepted watering plans in SQLite using the shared numbered SQL migrations.</p>
-  <p>Set <code>msg.action</code> to <code>accept</code>, <code>get</code>, <code>list</code>, <code>cancel</code>, <code>claim</code>, or <code>recover</code>. Successful results are written to <code>msg.payload.result</code>.</p>
+  <p>Set <code>msg.action</code> to <code>accept</code>, <code>get</code>, <code>list</code>, <code>cancel</code>, <code>claim</code>, <code>recover</code>, or <code>tick</code>. Successful results are written to <code>msg.payload.result</code>.</p>
+  <p><code>tick</code> runs one pass of the scheduling policy — expire, reconcile an active run, gate and claim a due plan — and returns a dispatch decision the flow hands to the sequencer. With <code>msg.facts.enabled</code> not <code>true</code> it writes nothing.</p>
 </script>
