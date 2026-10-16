@@ -107,6 +107,46 @@ stop acknowledgement; device-state is the sequencer snapshot and reports
 `stale`/`unavailable` when that snapshot is absent. Nothing here is evidence
 that watering works.
 
+## 2026-10-16 — a cancelled plan vanished from the dashboard
+
+Operator cancelled `list-f5d92da0-f5dc-460e-9bc3-e563dbc49cf7` from the panel and
+the row disappeared rather than moving to Recent.
+
+**Not data loss.** `GET /api/v1/watering-plans/list-f5d92da0-…` answered
+`state: cancelled` with events `plan_accepted → plan_cancelled`, cancelled
+`2026-10-16T10:07:47Z`; the row was still in the store and in the list response.
+
+**Cause — display only.** The dashboard fetches
+`/api/v1/watering-plans?limit=50` and the store returns rows ordered `start_at,
+plan_id` ascending. The template then built Recent as
+`filter(finished states).slice(-5).reverse()`, which ranks the five with the
+**latest due time**, not the five that finished last. Cancelling removed the plan
+from Upcoming, and its due time (`2026-10-18T09:23:13Z`) was older than 17 other
+finished rows, so the five-row window never contained it: invisible in every
+column while the API still served it. Measured live at the time: 30 rows, 24
+finished, 19 of them in no column at all.
+
+The same code is in the canonical repository template, not a Pi drift:
+`examples/IntegratedDashboard/docs/dashboard_template.html`.
+
+**Fixed** in commit `adaaceb`: finished plans are sorted by `updated_at` (the
+moment they finished; `start_at` only as fallback for older rows), the whole
+finished set is kept so the column can count it, five are shown, and
+"N older finished plans not shown" replaces the silent drop. The dashboard test
+asserts the regression directly — a plan cancelled now whose due time is the
+oldest must rank first — and fails against the old `slice(-5)` logic.
+
+**Deployed to the Pi** by replacing only the `ui-template` node's `format` in
+`~/.node-red/flows.json` (backup `flows.json.bak-pre-recent`), then a service
+restart; the rest of the Pi's older dashboard design was left alone. Verified
+against the live API with the deployed template's own computeds: the cancelled
+plan is now first in Recent, and the column reports 19 hidden.
+
+**Still open.** The panel fetch is `?limit=50` with no pagination, so once the
+store passes 50 rows the oldest plans stop being fetched and no column can show
+them; the count line cannot detect that. Fixing it needs either a larger limit,
+a follow-up page request, or a state filter on the query.
+
 ## Between sessions
 
 - Run the suite three times, not once: the crash above only appeared under

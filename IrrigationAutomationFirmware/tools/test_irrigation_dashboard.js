@@ -122,10 +122,36 @@ assert(!/\bvalue\s*\(/.test(template), 'Dashboard template methods must not shad
 const dashboardScript = template.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
 assert(dashboardScript, 'dashboard Vue script is present');
 const dashboardComponent = new Function(dashboardScript.replace('export default', 'return'))();
+// Vue resolves computed properties; a plain object has to stand them up as
+// getters so recentPlansVisible can read this.recentPlans as an array.
+const planView = items => ({
+  planItems:items,
+  planOutcomeTime:dashboardComponent.methods.planOutcomeTime,
+  get recentPlans() { return dashboardComponent.computed.recentPlans.call(this) },
+  get recentPlansVisible() { return dashboardComponent.computed.recentPlansVisible.call(this) },
+  get recentPlansHidden() { return dashboardComponent.computed.recentPlansHidden.call(this) }
+});
 assert.deepEqual(dashboardComponent.computed.upcomingPlans.call({planItems:[{state:'scheduled'},{state:'completed'}]}),
   [{state:'scheduled'}], 'upcoming section selects only scheduled or delayed plans');
-assert.deepEqual(dashboardComponent.computed.recentPlans.call({planItems:[{state:'failed'}]}),
+assert.deepEqual(dashboardComponent.computed.recentPlans.call(planView([{state:'failed'}])),
   [{state:'failed'}], 'recent section retains terminal plan outcomes');
+// A plan cancelled just now must reach the column even when its due time is older
+// than every other finished plan: ranking by start_at hid it in both columns.
+const justCancelled = {plan_id:'just-cancelled', state:'cancelled', start_at:'2026-10-18T00:00:00Z', updated_at:'2026-10-16T12:00:00Z'};
+const olderOutcomes = Array.from({length:7}, (_, index) => ({
+  plan_id:'older-' + index, state:'cancelled',
+  start_at:'2026-10-18T0' + (index + 1) + ':00:00Z', updated_at:'2026-10-16T0' + (index + 1) + ':00:00Z'
+}));
+const recentView = planView([justCancelled].concat(olderOutcomes));
+assert.equal(dashboardComponent.computed.recentPlans.call(recentView)[0].plan_id, 'just-cancelled',
+  'recent section ranks a new outcome first even when its due time is oldest');
+assert.equal(dashboardComponent.computed.recentPlans.call(recentView).length, 8,
+  'recent section keeps every finished plan for counting, not just the visible five');
+assert.equal(dashboardComponent.computed.recentPlansVisible.call(recentView).length, 5);
+assert.equal(dashboardComponent.computed.recentPlansHidden.call(recentView), 3,
+  'hidden finished plans are counted so the column never drops rows silently');
+assert.equal(dashboardComponent.computed.recentPlansHidden.call(planView([{state:'delayed'}])), 0,
+  'hidden count ignores plans that belong to another column');
 const subscribeNode = byId[IDS.subscribe];
 assert.deepEqual(byId[IDS.tick].wires[0], [IDS.settings]);
 assert.deepEqual(byId[IDS.subscribeTick].wires[0], [IDS.subscribe]);

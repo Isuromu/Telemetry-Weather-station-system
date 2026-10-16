@@ -75,10 +75,11 @@
           <p v-if="!activePlans.length" class="ir-plan-empty">No active plan.</p>
         </div>
         <div class="ir-plan-column"><h3>Recent</h3>
-          <article v-for="p in recentPlans" :key="p.plan_id" class="ir-plan-row ir-plan-recent">
-            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.final_reason || p.last_delay_reason || p.state }}</small></div>
+          <article v-for="p in recentPlansVisible" :key="p.plan_id" class="ir-plan-row ir-plan-recent">
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.final_reason || p.last_delay_reason || p.state }} · {{ planOutcomeTime(p) }}</small></div>
             <span class="ir-plan-state">{{ p.state }}</span>
           </article>
+          <p v-if="recentPlansHidden" class="ir-plan-empty">{{ recentPlansHidden }} older finished plan{{ recentPlansHidden === 1 ? '' : 's' }} not shown.</p>
           <p v-if="!recentPlans.length" class="ir-plan-empty">No completed plans yet.</p>
         </div>
       </div>
@@ -114,7 +115,20 @@ export default {
     planItems() { return Array.isArray(this.state.wateringPlans) ? this.state.wateringPlans : [] },
     upcomingPlans() { return this.planItems.filter(p => ['scheduled','delayed'].includes(p.state)) },
     activePlans() { return this.planItems.filter(p => ['starting','running','stopping','stop_requested','recovery_required'].includes(p.state)) },
-    recentPlans() { return this.planItems.filter(p => ['completed','failed','expired','cancelled'].includes(p.state)).slice(-5).reverse() },
+    // Finished plans, newest outcome first. The feed arrives ordered by start_at,
+    // so taking the last five of it ranked a just-cancelled plan by when it had
+    // been due to run: cancelling it removed it from Upcoming and an older due
+    // time kept it out of Recent, and it vanished from every column while still
+    // in the store. Order by the moment the plan actually finished instead, and
+    // never drop rows silently -- the column shows five and counts the rest.
+    recentPlans() {
+      return this.planItems
+        .filter(p => ['completed','failed','expired','cancelled'].includes(p.state))
+        .slice()
+        .sort((a,b) => this.planOutcomeTime(b,'sort').localeCompare(this.planOutcomeTime(a,'sort')));
+    },
+    recentPlansVisible() { return this.recentPlans.slice(0,5) },
+    recentPlansHidden() { return Math.max(0, this.recentPlans.length - this.recentPlansVisible.length) },
     runText() {
       const sel = Array.isArray(this.state.selected) ? this.state.selected : [];
       const prefix = this.state.phase && this.state.phase !== 'idle' && sel.length
@@ -170,6 +184,10 @@ export default {
     fmt(v,suffix='') { return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(1) + suffix : '—' },
     planTarget(p) { const valves=Array.isArray(p.resolved_valves)?p.resolved_valves:[]; const stop=p.payload?.stop||{}; return `${valves.join(' + ') || 'Target unavailable'} · ${stop.value ?? '—'} ${stop.unit || stop.type || ''}` },
     planTime(v) { const d=new Date(v); return Number.isNaN(d.getTime()) ? 'Time unavailable' : new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Tashkent',dateStyle:'medium',timeStyle:'short'}).format(d) },
+    // updated_at moves on every state change, so it is the moment a finished plan
+    // finished; start_at is only the fallback for rows stored before it existed.
+    // 'sort' returns the raw stamp: ISO-8601 UTC strings sort lexicographically.
+    planOutcomeTime(p, mode) { const stamp = String(p.updated_at || p.ended_at || p.start_at || ''); return mode === 'sort' ? stamp : 'finished ' + this.planTime(stamp) },
     changePlan(p,prompt) { if(this.planBusy||!window.confirm(prompt)) return; this.planBusy=true; this.send({payload:{kind:'plan_cancel',plan_id:p.plan_id}}); window.setTimeout(()=>{this.planBusy=false},5000) },
     invalid(k,d) {
       return (k === 'water' && d.pressure_valid !== true) ||
