@@ -32,6 +32,8 @@ const IDS = {
   mobileDeviceState: '7ad95def01234567', mobileList: '8bea6ef012345678',
   mobileDetail: '9cfb7f0123456789', mobilePut: 'ad0c80123456789a',
   mobileCancel: 'be1d9123456789ab', mobileResponse: 'cf2ea23456789abc',
+  planSchedTick: 'd4c5b9e60a7d8e1f', planSchedRequest: 'e5d6ca071b8e9f20',
+  planSchedResult: 'f6e7db182c9fa031',
   page: 'irrigation_page', group: 'irrigation_group',
   base: 'f53e93e9ba219e63', theme: 'e49416861823a329'
 };
@@ -58,6 +60,7 @@ const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqt
                IDS.planStateIn, IDS.planState, IDS.planStateResponse,
                IDS.planRefreshTick, IDS.planListRequest, IDS.planListResult,
                IDS.planUiRoute, IDS.planCancelRequest, IDS.planCancelResult,
+               IDS.planSchedTick, IDS.planSchedRequest, IDS.planSchedResult,
                IDS.planStoreMux, IDS.mobileStore,
                IDS.mobileRoute, IDS.mobileResult, IDS.mobileHealth,
                IDS.mobileDeviceState, IDS.mobileList, IDS.mobileDetail,
@@ -104,8 +107,8 @@ assert.deepEqual(byId[IDS.mobileRoute].wires[0], [IDS.mobileStore], 'mobile plan
 assert.deepEqual(byId[IDS.mobileRoute].wires[1], [IDS.mobileResult], 'mobile read-only responses bypass store');
 assert.deepEqual(byId[IDS.mobileStore].wires[0], [IDS.planStoreMux], 'the single store feeds the consumer mux');
 assert.deepEqual(byId[IDS.planStoreMux].wires,
-  [[IDS.mobileResult],[IDS.planCancelResult],[IDS.planListResult]],
-  'the mux separates the mobile, dashboard cancel and dashboard list consumers');
+  [[IDS.mobileResult],[IDS.planCancelResult],[IDS.planListResult],[IDS.planSchedResult]],
+  'the mux separates the mobile, dashboard cancel, dashboard list and scheduler consumers');
 assert.deepEqual(byId[IDS.mobileResult].wires[0], [IDS.mobileResponse]);
 assert.deepEqual(byId[IDS.planListRequest].wires[0], [IDS.mobileStore], 'the dashboard list reads the store');
 assert.deepEqual(byId[IDS.planCancelRequest].wires[0], [IDS.mobileStore], 'the dashboard cancel writes the store');
@@ -113,10 +116,34 @@ assert(!byId[IDS.mobileRoute].wires.flat().includes(IDS.control), 'mobile API mu
 assert(!byId[IDS.mobileRoute].func.includes('IRRIGATION_INTERNAL_TOKEN'), 'mobile and internal tokens must remain separate');
 assert(byId[IDS.planCancelResult].wires[0].includes(IDS.control),
   'accepted cancel/stop action re-renders without a function-node cycle through the store');
+// The scheduler tick: one store round trip, and only the dispatch decision may
+// reach CONTROL. Nothing downstream of the result node may re-enter the store --
+// that would be a function-node cycle, which the loop guard above would reject.
+assert.deepEqual(byId[IDS.planSchedTick].wires[0], [IDS.planSchedRequest], 'the tick drives the facts node');
+assert.equal(byId[IDS.planSchedTick].repeat, '5', 'the scheduler cadence is the documented knob');
+assert.deepEqual(byId[IDS.planSchedRequest].wires[0], [IDS.mobileStore], 'the facts node is the store request');
+assert.deepEqual(byId[IDS.planStoreMux].wires[3], [IDS.planSchedResult], 'the scheduler consumer reaches its own result node');
+assert.deepEqual(byId[IDS.planSchedResult].wires[0], [IDS.control], 'only the dispatch node may reach the sequencer');
+assert(!byId[IDS.planSchedResult].wires.flat().includes(IDS.mobileStore), 'a tick result must never re-enter the store');
+assert(byId[IDS.planSchedRequest].func.includes('IRRIGATION_PLAN_EXECUTION_ENABLED'),
+  'plan execution must stay off unless the environment turns it on');
 for (const label of ['Upcoming','Active','Recent','Request stop','Cancel this scheduled plan?'])
   assert(template.includes(label),`dashboard plan section/control missing: ${label}`);
+// The panel reads the public plan record, whose fields are fixed by
+// docs/integrations/watering-plan/api-protocol.rules.json and
+// tools/watering_plan_record.js: a delay is delay_reason, an outcome is
+// execution.stop_reason. Reading the store's own column names renders nothing.
+const { publicPlan: publicPlanForTemplate } = require('./watering_plan_record.js');
+const projectRecord = publicPlanForTemplate({payload:JSON.stringify({plan_id:'p',summary:'s'}),state:'delayed',last_delay_reason:'pump_run_active',attempts:[{operation_id:'op',final_reason:'duration_target_reached'}]});
+assert.equal(projectRecord.delay_reason,'pump_run_active');
+assert.equal(projectRecord.execution.stop_reason,'duration_target_reached');
+assert.equal(projectRecord.last_delay_reason,undefined,'the record has no last_delay_reason');
+assert(template.includes('p.delay_reason')&&template.includes('p.execution?.stop_reason'),
+  'the plan panel must read the record field names the API actually serves');
+assert(!template.includes('last_delay_reason')&&!template.includes('p.attempt?'),
+  'the plan panel must not read raw store columns the API never serves');
 assert(template.includes('p.source')&&template.includes('p.start_at')&&
-  template.includes('p.last_delay_reason')&&template.includes('p.attempt?.final_reason'),
+  template.includes('p.delay_reason')&&template.includes('p.execution?.stop_reason'),
   'plan cards must expose source, due time, delay reason and final outcome');
 assert(!/\bvalue\s*\(/.test(template), 'Dashboard template methods must not shadow Dashboard 2 value context');
 const dashboardScript = template.match(/<script>\s*([\s\S]*?)<\/script>/)?.[1];
@@ -410,6 +437,52 @@ for (const match of contractSource.matchAll(/fail\('([a-z_]+)'/g)) {
 assert.equal(mobileMux({planConsumer:'mobile',payload:{}},{},node,mobileEnv,Buffer,globalCtx)[0].planConsumer, 'mobile');
 assert.equal(mobileMux({planConsumer:'cancel',payload:{}},{},node,mobileEnv,Buffer,globalCtx)[1].planConsumer, 'cancel');
 assert(mobileMux({payload:{}},{},node,mobileEnv,Buffer,globalCtx)[2] !== null, 'an untagged reply goes to the dashboard list');
+assert.equal(mobileMux({planConsumer:'scheduler',payload:{}},{},node,mobileEnv,Buffer,globalCtx)[3].planConsumer, 'scheduler',
+  'a scheduler tick result must reach the dispatch node and nothing else');
+
+// --- Scheduler tick: facts collection, then dispatch ------------------------
+// The policy lives in the store package; these two nodes only collect facts and
+// hand a decision to CONTROL, so what is asserted here is the switch, the fact
+// shape, and the sequencer message a decision becomes.
+const schedMemory = new Map();
+const schedFlow = {get:k=>schedMemory.get(k),set:(k,v)=>schedMemory.set(k,v)};
+const schedValues = {
+  IRRIGATION_PLAN_EXECUTION_ENABLED:'false', IRRIGATION_CLOCK_SYNCHRONIZED:'true',
+  IRRIGATION_PLAN_MAX_STATE_AGE_SEC:'15', IRRIGATION_PLAN_DELAY_RETRY_SEC:'60',
+  IRRIGATION_PLAN_METER_MAX_AGE_SEC:'60'
+};
+const schedEnv = {get:k=>schedValues[k]};
+const noEnv = {get:()=>undefined};
+const factsNode = new Function('msg','flow','node','env','Buffer','global', byId[IDS.planSchedRequest].func);
+const dispatchNode = new Function('msg','flow','node','env','Buffer','global', byId[IDS.planSchedResult].func);
+assert.equal(factsNode({payload:{}},schedFlow,node,schedEnv,Buffer,globalCtx), null,
+  'without a sequencer snapshot there is nothing to judge, and the store must not be asked');
+assert.equal(schedFlow.get('watering_plan_scheduler_status'), 'Sequencer snapshot unavailable');
+schedFlow.set('irrigation', {at:Date.now(),phase:'idle',notice:'',planOperation:null,stopReason:null,readySets:{'valve1':'','valve1,valve2':'Field valve 2 is stale'}});
+const tickMsg = factsNode({payload:{}},schedFlow,node,schedEnv,Buffer,globalCtx);
+assert.equal(tickMsg.action, 'tick');
+assert.equal(tickMsg.planConsumer, 'scheduler');
+assert.equal(tickMsg.facts.enabled, false, 'execution stays off unless the environment turns it on');
+assert.equal(tickMsg.facts.clock_synchronized, true);
+assert.equal(tickMsg.facts.state.phase, 'idle');
+assert.equal(typeof tickMsg.facts.state.age_ms, 'number', 'the gate needs the snapshot age, not just its content');
+assert.equal(tickMsg.facts.state.ready_sets['valve1,valve2'], 'Field valve 2 is stale');
+assert.equal(tickMsg.facts.config.delay_retry_sec, 60);
+// A start decision becomes the sequencer's own start message, operation_id and all.
+const startDecided = dispatchNode({payload:{ok:true,result:{action:'started',boot_id:'boot-a',dispatch:{kind:'start',valve1:true,valve2:false,operation_id:'op-1',plan_id:'plan-1'}}}},schedFlow,node,noEnv,Buffer,globalCtx);
+assert.equal(startDecided.payload.kind, 'start');
+assert.equal(startDecided.payload.valve1, true);
+assert.equal(startDecided.payload.valve2, false);
+assert.equal(startDecided.payload.operation_id, 'op-1');
+assert.equal(schedFlow.get('watering_plan_boot_id'), 'boot-a', 'the tick reports the process identity so a restart is detectable');
+const stopDecided = dispatchNode({payload:{ok:true,result:{action:'cancel_stop_dispatched',dispatch:{kind:'stop',operation_id:'op-1:stop',plan_id:'plan-1'}}}},schedFlow,node,noEnv,Buffer,globalCtx);
+assert.equal(stopDecided.payload.kind, 'stop');
+assert.equal(stopDecided.payload.operation_id, 'op-1:stop', 'the stop keeps the attempt operation id so the row and the command agree');
+// A decision that is not a dispatch never reaches the sequencer.
+assert.equal(dispatchNode({payload:{ok:true,result:{action:'delayed',reason:'pump_run_active'}}},schedFlow,node,noEnv,Buffer,globalCtx), null);
+assert.equal(schedFlow.get('watering_plan_scheduler_status'), 'Plan delayed: pump_run_active');
+assert.equal(dispatchNode({payload:{ok:true,result:{action:'disabled'}}},schedFlow,node,noEnv,Buffer,globalCtx), null);
+assert.equal(schedFlow.get('watering_plan_scheduler_status'), 'Plan execution disabled');
 
 const configure = new Function('msg','flow','node','env','Buffer','global',settings);
 const run = new Function('msg','flow','node','env','Buffer','global',control);
@@ -1499,4 +1572,25 @@ assert.deepEqual(valveClose.p.object.pcv,'close','the close pass must send pcv c
 assert.equal(valveClose.s.valveCmd.valve1,valveClose.p.object.command_id,'the valve frame id must be the one recorded for the echo check');
 
 Date.now=realNow;
+
+// --- The snapshot the scheduler gate reads ----------------------------------
+// ready() answers for the operator's ticked boxes, so a plan targeting a
+// different valve set could not be judged from state.check alone, and a snapshot
+// with no timestamp could be trusted forever. CONTROL publishes both.
+const gateState = take({payload:{kind:'tick'}})[1].payload.state;
+assert.equal(typeof gateState.at, 'number', 'CONTROL must stamp the snapshot so the scheduler can judge its age');
+assert.ok(gateState.readySets && 'valve1' in gateState.readySets && 'valve2' in gateState.readySets,
+  'CONTROL must publish readiness per valve set, not only for the ticked boxes');
+// A plan-driven start is not an operator start: it must not retick the boxes,
+// and it names itself so the scheduler can confirm it is observing its own run.
+const beforeSelection = JSON.stringify(memory.get('irrigation').selection);
+take({payload:{kind:'start',valve1:true,operation_id:'op-plan-1'}});
+const planStartState = memory.get('irrigation');
+assert.equal(planStartState.planOperation, 'op-plan-1', 'a scheduled start must identify itself in the snapshot');
+assert.equal(JSON.stringify(planStartState.selection), beforeSelection,
+  'a scheduled start must not overwrite the operator zone selection');
+// An operator start clears the field: no plan owns a run the panel began.
+take({payload:{kind:'start',valve1:true,valve2:false}});
+assert.equal(memory.get('irrigation').planOperation, null, 'an operator start must not look plan-owned');
+
 console.log('Irrigation sequence smoke test passed');

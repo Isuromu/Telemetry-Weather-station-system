@@ -306,19 +306,28 @@ if (msg.topic && msg.topic.startsWith('application/')) {
   // s.selected is deliberately not touched until the start is honoured: this branch
   // can return, and a teardown in progress is walking s.selected right now.
   const sel=['valve1','valve2'].filter(k=>msg.payload[k]===true);
+  // A start that carries an operation_id comes from the plan scheduler, not the
+  // operator: it must not retick the operator's zone boxes, and the scheduler
+  // reads s.planOperation back to confirm it is observing its own run.
+  const scheduled=typeof msg.payload.operation_id==='string'&&msg.payload.operation_id.length>0;
+  s.planOperation=scheduled?msg.payload.operation_id:null;
   // Remember the operator's choice on the server, so the checkboxes survive leaving
   // and returning to the dashboard page -- but only from a phase where the selection
   // is still editable, the same rule the select branch below uses.
-  if (selectAllowed()) s.selection={valve1:msg.payload.valve1===true,valve2:msg.payload.valve2===true};
+  if (!scheduled&&selectAllowed()) s.selection={valve1:msg.payload.valve1===true,valve2:msg.payload.valve2===true};
   if (s.phase==='running') s.notice='Irrigation is already active';
   else if (!sel.length) s.notice='Select at least one field valve';
   else {const problem=ready(sel);if(problem) s.notice=problem;
-    else if (s.phase==='idle') {s.selected=sel;s.step=0;s.pendingStart=null;advance('open_main');s.notice='Start checks passed';}
+    else if (s.phase==='idle') {s.selected=sel;s.step=0;s.pendingStart=null;s.stopReason=null;advance('open_main');s.notice='Start checks passed';}
     else if (s.phase==='fault') {s.pendingStart=sel;s.selected=['valve1','valve2'];s.step=s.selected.length-1;s.notice='Start queued; retrying the failed close pass first';advance('close_fields');}
     else {s.pendingStart=sel;s.notice='Start queued; watering begins once the field valves are closed';}}
 } else if (msg.payload&&msg.payload.kind==='select') {
   if (selectAllowed()) s.selection={valve1:msg.payload.valve1===true,valve2:msg.payload.valve2===true};
-} else if (msg.payload&&msg.payload.kind==='stop') stop('Operator requested stop');
+} else if (msg.payload&&msg.payload.kind==='stop') {
+  const scheduledStop=typeof msg.payload.operation_id==='string'&&msg.payload.operation_id.length>0;
+  s.planOperation=scheduledStop?msg.payload.operation_id:null;
+  stop(scheduledStop?'Planned run stop requested':'Operator requested stop');
+}
 else if (msg.payload&&msg.payload.kind==='refresh_pump') {
   const previous=Number(s.pumpRefresh?.requestedAt||0);
   if (!configured) s.pumpRefresh={pending:false,result:'Configure the application ID and all six DevEUIs first'};
@@ -482,6 +491,12 @@ const gate=tickedValves();
 // an unselected stale valve must not block a selected-zone run, but must never
 // be presented as live.
 s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?ready(gate):'Select at least one field valve'):ready();s.devices=Object.fromEntries(keys.map(k=>[k,{...device(k),stale:k==='pump'?!pumpLive():isValve(k)?!valveFresh(k):!fresh(k,cfg[k+'MaxAgeSec'])}]));
+// The scheduler needs the readiness of the valve set a plan targets, and the age
+// of this snapshot: ready() is computed for the operator's ticked boxes, so
+// without this the gate could not judge a plan for a different pair of valves,
+// and a stale snapshot would be trusted as a live readiness. ready() is pure,
+// so the extra calls cannot change the phase.
+s.at=now;s.readySets={};[['valve1'],['valve2'],['valve1','valve2']].forEach(set=>{s.readySets[set.join(',')]=ready(set);});
 s.wateringPlans=flow.get('watering_plan_snapshot')||[];s.planApiStatus=(flow.get('watering_plan_api_status')||'Waiting for plan service')+(flow.get('watering_plan_action_status')?' · '+flow.get('watering_plan_action_status'):'');
 flow.set('irrigation',s);
 return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
@@ -581,6 +596,42 @@ if (msg.action==='list') return send(200,null,{items:(result.items||[]).map(plan
 const status=msg.action==='accept'?(result.created?201:200):(msg.action==='cancel'&&result.state==='stop_requested'?202:200);
 return send(status,null,planRecord.publicPlan(result));''')
 
+PLAN_SCHED_REQUEST = r'''// Facts for the scheduler, and nothing else: this node decides no policy and
+// writes no state, so with execution disabled (the deployed default) or with no
+// sequencer snapshot the store is never touched. The policy itself lives in the
+// store package's scheduler, which owns the monotonic anchor and does the whole
+// tick in one store round trip.
+const readJson=(value,fallback)=>{if(typeof value!=='string'||!value)return fallback;try{const parsed=JSON.parse(value);return parsed===undefined?fallback:parsed;}catch(_){return fallback;}};
+const state=flow.get('irrigation');
+if (!state||typeof state!=='object') {flow.set('watering_plan_scheduler_status','Sequencer snapshot unavailable');return null;}
+const enabled=String(env.get('IRRIGATION_PLAN_EXECUTION_ENABLED')||'false').toLowerCase()==='true';
+const nowMs=Date.now();
+const snapshotAt=typeof state.at==='number'?state.at:null;
+msg.facts={enabled,clock_synchronized:String(env.get('IRRIGATION_CLOCK_SYNCHRONIZED')||'false').toLowerCase()==='true',
+  flow_boot_token:flow.get('watering_plan_boot_id')||null,now_ms:nowMs,
+  state:{present:true,age_ms:snapshotAt===null?null:nowMs-snapshotAt,phase:state.phase||null,notice:state.notice||null,
+    plan_operation:state.planOperation||null,stop_reason:state.stopReason||null,ready_sets:state.readySets||{}},
+  meter_status:readJson(env.get('IRRIGATION_METER_STATUS_JSON'),{}),
+  config:{max_state_age_sec:Number(env.get('IRRIGATION_PLAN_MAX_STATE_AGE_SEC'))||15,
+    delay_retry_sec:Number(env.get('IRRIGATION_PLAN_DELAY_RETRY_SEC'))||60,
+    meter_max_age_sec:Number(env.get('IRRIGATION_PLAN_METER_MAX_AGE_SEC'))||60}};
+msg.action='tick';msg.planConsumer='scheduler';return msg;'''
+
+PLAN_SCHED_RESULT = r'''// The only node that acts on a tick. It hands a dispatch to the sequencer and
+// records the scheduler's own status; it never feeds the store again, because a
+// path back into the store would close a function-node cycle.
+const result=(msg.payload&&typeof msg.payload==='object'&&msg.payload.result)||null;
+if (!result) return null;
+if (result.boot_id) flow.set('watering_plan_boot_id',result.boot_id);
+const dispatch=result.dispatch;
+if (dispatch&&dispatch.kind==='start') return {payload:{kind:'start',valve1:dispatch.valve1===true,valve2:dispatch.valve2===true,operation_id:dispatch.operation_id,plan_id:dispatch.plan_id}};
+if (dispatch&&dispatch.kind==='stop') return {payload:{kind:'stop',operation_id:dispatch.operation_id,plan_id:dispatch.plan_id}};
+const status=result.action==='disabled'?'Plan execution disabled'
+  :result.action==='idle'?'Scheduler idle'
+  :result.action==='delayed'?'Plan delayed: '+(result.reason||'unknown reason')
+  :'Scheduler: '+result.action+(result.reason?' ('+result.reason+')':'');
+flow.set('watering_plan_scheduler_status',status);return null;'''
+
 PLAN_LIST_REQUEST = r'''// The dashboard reads the same SQLite store the mobile API writes, so it needs
 // no outbound HTTP client and no bearer token. The store node's single output
 // reaches PLAN_STORE_MUX, which routes msg.planConsumer here.
@@ -594,9 +645,10 @@ PLAN_STORE_MUX = r'''// One durable store, three consumers. The store node only 
 // so msg.planConsumer survives to separate the dashboard list, the dashboard
 // cancel, and the mobile response formatter.
 const consumer=String(msg.planConsumer||'dashboard');
-if (consumer==='mobile') return [msg,null,null];
-if (consumer==='cancel') return [null,msg,null];
-return [null,null,msg];'''
+if (consumer==='scheduler') return [null,null,null,msg];
+if (consumer==='mobile') return [msg,null,null,null];
+if (consumer==='cancel') return [null,msg,null,null];
+return [null,null,msg,null];'''
 
 PLAN_LIST_RESULT = r'''const result=msg.payload&&msg.payload.result;
 if (!msg.payload?.ok||!result) {flow.set('watering_plan_api_status','Plan store unavailable: '+(msg.payload?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};}
@@ -680,6 +732,14 @@ ID_MOBILE_DETAIL = "9cfb7f0123456789"
 ID_MOBILE_PUT = "ad0c80123456789a"
 ID_MOBILE_CANCEL = "be1d9123456789ab"
 ID_MOBILE_RESPONSE = "cf2ea23456789abc"
+ID_PLAN_SCHED_TICK = "d4c5b9e60a7d8e1f"
+ID_PLAN_SCHED_REQUEST = "e5d6ca071b8e9f20"
+ID_PLAN_SCHED_RESULT = "f6e7db182c9fa031"
+
+# How often the scheduler looks for a due plan. One tick is one store round trip,
+# and a duration target is noticed within this window (plus the ordered teardown),
+# so this is the knob that trades write load against how late a stop can be.
+PLAN_SCHED_TICK_SEC = 5
 
 # z only. No tab node ships, so the import dialog's "Import to" list decides
 # which flow the nodes join and no second tab is ever created.
@@ -709,6 +769,7 @@ def build():
                     ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE,
                     ID_PLAN_REFRESH_TICK, ID_PLAN_LIST_REQUEST, ID_PLAN_LIST_RESULT,
                     ID_PLAN_UI_ROUTE, ID_PLAN_CANCEL_REQUEST, ID_PLAN_CANCEL_RESULT,
+                    ID_PLAN_SCHED_TICK, ID_PLAN_SCHED_REQUEST, ID_PLAN_SCHED_RESULT,
                     ID_PLAN_STORE_MUX, ID_MOBILE_STORE,
                     ID_MOBILE_ROUTE, ID_MOBILE_RESULT, ID_MOBILE_HEALTH,
                     ID_MOBILE_DEVICE_STATE, ID_MOBILE_LIST, ID_MOBILE_DETAIL,
@@ -741,7 +802,13 @@ def build():
         # dashboard. It never wires to MQTT or CONTROL; the mux below separates
         # its consumers by msg.planConsumer.
         node(ID_MOBILE_STORE, "watering-plan-store", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan SQLite store", databasePath="/var/lib/node-red/watering-plans.sqlite3", migrationsDir="", x=930, y=780, wires=[[ID_PLAN_STORE_MUX]]),
-        node(ID_PLAN_STORE_MUX, "function", z=FLOW_ID, g=ID_CANVAS, name="Route plan store results", func=PLAN_STORE_MUX, outputs=3, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1120, y=1060, wires=[[ID_MOBILE_RESULT],[ID_PLAN_CANCEL_RESULT],[ID_PLAN_LIST_RESULT]]),
+        node(ID_PLAN_STORE_MUX, "function", z=FLOW_ID, g=ID_CANVAS, name="Route plan store results", func=PLAN_STORE_MUX, outputs=4, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1120, y=1060, wires=[[ID_MOBILE_RESULT],[ID_PLAN_CANCEL_RESULT],[ID_PLAN_LIST_RESULT],[ID_PLAN_SCHED_RESULT]]),
+        # The scheduler tick. Its facts node reads the sequencer snapshot and the
+        # execution switch; with the switch off it returns null and the store is
+        # never written, which is how the deploy stays inert.
+        node(ID_PLAN_SCHED_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Schedule due watering plans", props=[{"p":"payload"}], repeat=str(PLAN_SCHED_TICK_SEC), crontab="", once=True, onceDelay="3", topic="", payload="", payloadType="date", x=250, y=1000, wires=[[ID_PLAN_SCHED_REQUEST]]),
+        node(ID_PLAN_SCHED_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Collect scheduler facts", func=PLAN_SCHED_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=520, y=1000, wires=[[ID_MOBILE_STORE]]),
+        node(ID_PLAN_SCHED_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Dispatch scheduled plan action", func=PLAN_SCHED_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1400, y=1000, wires=[[ID_CONTROL]]),
         node(ID_MOBILE_ROUTE, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize and route mobile watering API", func=MOBILE_API_ROUTE, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=650, y=780, wires=[[ID_MOBILE_STORE],[ID_MOBILE_RESULT]]),
         node(ID_MOBILE_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Format mobile watering API response", func=MOBILE_API_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1200, y=780, wires=[[ID_MOBILE_RESPONSE]]),
         node(ID_MOBILE_HEALTH, "http in", z=FLOW_ID, g=ID_CANVAS, name="Mobile API health", url="/api/v1/health", method="get", upload=False, swaggerDoc="", x=250, y=720, wires=[[ID_MOBILE_ROUTE]]),

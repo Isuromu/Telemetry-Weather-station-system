@@ -60,7 +60,7 @@
       <div class="ir-plan-columns">
         <div class="ir-plan-column"><h3>Upcoming</h3>
           <article v-for="p in upcomingPlans" :key="p.plan_id" class="ir-plan-row">
-            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small v-if="p.last_delay_reason">Delayed: {{ p.last_delay_reason }}</small></div>
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small v-if="p.delay_reason">Delayed: {{ p.delay_reason }}</small></div>
             <span class="ir-plan-state">{{ p.state }}</span>
             <button class="ir-plan-action" :disabled="planBusy" @click="changePlan(p,'Cancel this scheduled plan?')">Cancel</button>
           </article>
@@ -68,7 +68,7 @@
         </div>
         <div class="ir-plan-column"><h3>Active</h3>
           <article v-for="p in activePlans" :key="p.plan_id" class="ir-plan-row">
-            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.dashboard_notice || p.last_delay_reason || p.state }}</small></div>
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.delay_reason || p.state }}</small></div>
             <span class="ir-plan-state">{{ p.state }}</span>
             <button class="ir-plan-action ir-plan-stop" :disabled="planBusy" @click="changePlan(p,'Request the existing ordered stop sequence?')">Request stop</button>
           </article>
@@ -76,7 +76,7 @@
         </div>
         <div class="ir-plan-column"><h3>Recent</h3>
           <article v-for="p in recentPlansVisible" :key="p.plan_id" class="ir-plan-row ir-plan-recent">
-            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.attempt?.final_reason || p.last_delay_reason || p.state }} · {{ planOutcomeTime(p) }}</small></div>
+            <div><b>{{ p.payload?.summary || p.plan_id }}</b><span>{{ planTarget(p) }} · {{ p.source }} · {{ planTime(p.start_at) }}</span><small>{{ p.execution?.stop_reason || p.delay_reason || p.state }} · {{ planOutcomeTime(p) }}</small></div>
             <span class="ir-plan-state">{{ p.state }}</span>
           </article>
           <p v-if="recentPlansHidden" class="ir-plan-empty">{{ recentPlansHidden }} older finished plan{{ recentPlansHidden === 1 ? '' : 's' }} not shown.</p>
