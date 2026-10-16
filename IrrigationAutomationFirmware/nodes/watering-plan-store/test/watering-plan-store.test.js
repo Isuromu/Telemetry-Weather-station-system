@@ -31,7 +31,35 @@ test('canonical digest, migrations, acceptance revisions, get/list/cancel', asyn
     const listed = await store.list({ limit: 1 }); assert.equal(listed.items.length, 1);
     const cancelled = await store.cancel('plan-1'); assert.equal(cancelled.state, 'cancelled');
     const fetched = await store.get('plan-1', true); assert.equal(fetched.events.length, 2);
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('a sqlite error event is reported instead of crashing the runtime', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'watering-plan-store-'));
+  const reported = [];
+  const store = new WateringPlanStore({ databasePath: path.join(directory, 'plans.sqlite3'), migrationsDir, onError: error => reported.push(error.message) });
+  try {
+    await store.initialize();
+    const db = await store.open();
+    // sqlite3 raises this out of band, with no callback to reject, when a WAL
+    // write fails (a full disk). Unhandled it terminates the Node-RED process.
+    db.emit('error', new Error('SQLITE_IOERR: disk I/O error'));
+    assert.deepEqual(reported, ['SQLITE_IOERR: disk I/O error']);
+    assert.equal((await store.list({ limit: 1 })).items.length, 0);
+  } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('overlapping writes share one connection without SQLITE_BUSY', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'watering-plan-store-'));
+  const store = new WateringPlanStore({ databasePath: path.join(directory, 'plans.sqlite3'), migrationsDir });
+  try {
+    await store.initialize();
+    await Promise.all(Array.from({ length: 12 }, (_, index) => store.accept({
+      plan: Object.assign(plan(1), { plan_id: 'plan-' + index, targets: { mode: 'selected', field_ids: ['field-' + index] } }),
+      resolvedValveIds: ['valve1'], acceptedMaxRuntimeSec: 600
+    })));
+    assert.equal((await store.list({ limit: 50 })).items.length, 12);
+  } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('recover marks active plan and its attempt for reconciliation', async () => {
@@ -47,5 +75,5 @@ test('recover marks active plan and its attempt for reconciliation', async () =>
     const recovered = await store.get('plan-1', true);
     assert.equal(recovered.state, 'recovery_required');
     assert.equal(recovered.attempts[0].state, 'recovery_required');
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });

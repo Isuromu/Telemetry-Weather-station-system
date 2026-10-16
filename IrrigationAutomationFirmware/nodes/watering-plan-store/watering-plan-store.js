@@ -73,18 +73,50 @@ class WateringPlanStore {
   constructor(options) {
     this.databasePath = options.databasePath;
     this.migrationsDir = options.migrationsDir;
+    // sqlite3 reports some failures (a full disk during a WAL write, say) as an
+    // 'error' event on the Database rather than through the call callback. An
+    // unhandled 'error' event kills the whole Node-RED process, taking the
+    // irrigation runtime with it, so every opened handle reports here instead.
+    this.onError = options.onError || (() => {});
+    this.dbPromise = null;
+    this.queue = Promise.resolve();
     if (!this.databasePath) throw new StoreError('invalid_configuration', 'databasePath is required');
     if (!this.migrationsDir) throw new StoreError('invalid_configuration', 'migrationsDir is required');
   }
+  // One connection, created once and reused. A connection per request both
+  // churned handles and failed with SQLITE_BUSY when two requests overlapped:
+  // switching journal mode takes an exclusive lock that ignores busy_timeout.
   open() {
+    if (!this.dbPromise) {
+      this.dbPromise = this.connect().catch(error => { this.dbPromise = null; throw error; });
+    }
+    return this.dbPromise;
+  }
+  connect() {
     fs.mkdirSync(path.dirname(this.databasePath), { recursive: true });
     const db = new sqlite3.Database(this.databasePath);
-    return new Promise((resolve, reject) => {
-      db.serialize(() => {
-        db.run('PRAGMA foreign_keys = ON'); db.run('PRAGMA journal_mode = WAL'); db.run('PRAGMA synchronous = FULL'); db.run('PRAGMA busy_timeout = 10000');
-        db.get('SELECT 1', error => error ? reject(error) : resolve(db));
-      });
-    });
+    db.on('error', error => this.onError(error));
+    // Every statement carries a callback: sqlite3 rejects the promise only when
+    // one is given, and an out-of-band statement error ends the process.
+    return WateringPlanStore.exec(db, 'PRAGMA foreign_keys = ON')
+      .then(() => WateringPlanStore.exec(db, 'PRAGMA journal_mode = WAL'))
+      .then(() => WateringPlanStore.exec(db, 'PRAGMA synchronous = FULL'))
+      .then(() => WateringPlanStore.exec(db, 'PRAGMA busy_timeout = 10000'))
+      .then(() => db);
+  }
+  async close() {
+    if (!this.dbPromise) return;
+    const pending = this.dbPromise;
+    this.dbPromise = null;
+    const db = await pending.catch(() => null);
+    if (db) await WateringPlanStore.close(db);
+  }
+  // sqlite3 executes one statement at a time per connection, so transactions
+  // are chained: two overlapping BEGIN IMMEDIATEs on one handle cannot work.
+  serialize(fn) {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.then(() => {}, () => {});
+    return run;
   }
   static run(db, sql, params) { return new Promise((resolve, reject) => db.run(sql, params || [], function(error) { error ? reject(error) : resolve(this); })); }
   static get(db, sql, params) { return new Promise((resolve, reject) => db.get(sql, params || [], (error, row) => error ? reject(error) : resolve(row))); }
@@ -95,23 +127,22 @@ class WateringPlanStore {
     const files = fs.readdirSync(this.migrationsDir).filter(name => /^\d+_.+\.sql$/.test(name)).sort();
     if (!files.length) throw new StoreError('migration_not_found', 'No numbered SQL migrations found', [this.migrationsDir]);
     const db = await this.open();
-    try {
-      await WateringPlanStore.exec(db, 'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
-      const applied = await WateringPlanStore.all(db, 'SELECT version FROM schema_migrations');
-      const versions = new Set(applied.map(row => row.version));
-      for (const file of files) {
-        const version = Number(/^\d+/.exec(file)[0]);
-        // Each migration file records its own version in schema_migrations, so
-        // this loop only runs the files the table does not already list.
-        if (!versions.has(version)) await WateringPlanStore.exec(db, fs.readFileSync(path.join(this.migrationsDir, file), 'utf8'));
-      }
-    } finally { await WateringPlanStore.close(db); }
+    await WateringPlanStore.exec(db, 'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)');
+    const applied = await WateringPlanStore.all(db, 'SELECT version FROM schema_migrations');
+    const versions = new Set(applied.map(row => row.version));
+    for (const file of files) {
+      const version = Number(/^\d+/.exec(file)[0]);
+      // Each migration file records its own version in schema_migrations, so
+      // this loop only runs the files the table does not already list.
+      if (!versions.has(version)) await WateringPlanStore.exec(db, fs.readFileSync(path.join(this.migrationsDir, file), 'utf8'));
+    }
   }
-  async transaction(fn) {
-    const db = await this.open();
-    try { await WateringPlanStore.exec(db, 'BEGIN IMMEDIATE'); const result = await fn(db); await WateringPlanStore.exec(db, 'COMMIT'); return result; }
-    catch (error) { try { await WateringPlanStore.exec(db, 'ROLLBACK'); } catch (_) {} throw error; }
-    finally { await WateringPlanStore.close(db); }
+  transaction(fn) {
+    return this.serialize(async () => {
+      const db = await this.open();
+      try { await WateringPlanStore.exec(db, 'BEGIN IMMEDIATE'); const result = await fn(db); await WateringPlanStore.exec(db, 'COMMIT'); return result; }
+      catch (error) { try { await WateringPlanStore.exec(db, 'ROLLBACK'); } catch (_) {} throw error; }
+    });
   }
   async event(db, planId, revision, type, fromState, toState, occurredAt, reason, details, attemptId) {
     await WateringPlanStore.run(db, 'INSERT INTO watering_plan_events (plan_id, attempt_id, revision, event_type, from_state, to_state, occurred_at, reason_code, details_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [planId, attemptId || null, revision, type, fromState, toState, occurredAt, reason || null, JSON.stringify(details || {})]);
@@ -151,12 +182,12 @@ class WateringPlanStore {
     });
   }
   async get(planId, includeHistory) {
-    const db = await this.open(); try { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); const plan = planFromRow(row); if (includeHistory) { plan.events = await WateringPlanStore.all(db, 'SELECT * FROM watering_plan_events WHERE plan_id=? ORDER BY event_id', [planId]); plan.attempts = (await WateringPlanStore.all(db, 'SELECT * FROM watering_attempts WHERE plan_id=? ORDER BY attempt_number', [planId])).map(attemptFromRow); } return plan; } finally { await WateringPlanStore.close(db); }
+    const db = await this.open(); const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); const plan = planFromRow(row); if (includeHistory) { plan.events = await WateringPlanStore.all(db, 'SELECT * FROM watering_plan_events WHERE plan_id=? ORDER BY event_id', [planId]); plan.attempts = (await WateringPlanStore.all(db, 'SELECT * FROM watering_attempts WHERE plan_id=? ORDER BY attempt_number', [planId])).map(attemptFromRow); } return plan;
   }
   async list(query) {
     query = query || {}; const limit = Math.max(1, Math.min(Number.isInteger(query.limit) ? query.limit : 50, 100)); const clauses = []; const params = [];
     if (query.fromAt) { clauses.push('start_at >= ?'); params.push(normalizeTime(query.fromAt)); } if (query.toAt) { clauses.push('start_at <= ?'); params.push(normalizeTime(query.toAt)); } if (query.cursor) { const cursor = cursorDecode(query.cursor); clauses.push('(start_at > ? OR (start_at = ? AND plan_id > ?))'); params.push(cursor.start_at, cursor.start_at, cursor.plan_id); }
-    const db = await this.open(); try { const rows = await WateringPlanStore.all(db, `SELECT * FROM watering_plans${clauses.length ? ' WHERE ' + clauses.join(' AND ') : ''} ORDER BY start_at, plan_id LIMIT ?`, params.concat([limit + 1])); const more = rows.length > limit; const items = rows.slice(0, limit).map(planFromRow); return { items, next_cursor: more ? cursorEncode(items[items.length - 1]) : null }; } finally { await WateringPlanStore.close(db); }
+    const db = await this.open(); const rows = await WateringPlanStore.all(db, `SELECT * FROM watering_plans${clauses.length ? ' WHERE ' + clauses.join(' AND ') : ''} ORDER BY start_at, plan_id LIMIT ?`, params.concat([limit + 1])); const more = rows.length > limit; const items = rows.slice(0, limit).map(planFromRow); return { items, next_cursor: more ? cursorEncode(items[items.length - 1]) : null };
   }
   async cancel(planId, at) {
     const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); let target; let reason; if (CLAIMABLE.includes(row.state)) { target = 'cancelled'; reason = 'cancelled_by_client'; } else if (ACTIVE.includes(row.state)) { target = 'stop_requested'; reason = 'stop_requested_by_client'; } else return planFromRow(row); await WateringPlanStore.run(db, 'UPDATE watering_plans SET state=?, updated_at=? WHERE plan_id=? AND state=?', [target, occurredAt, planId, row.state]); await this.event(db, planId, row.revision, 'plan_cancelled', row.state, target, occurredAt, reason); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
@@ -186,7 +217,12 @@ module.exports = function(RED) {
   function WateringPlanStoreNode(config) {
     RED.nodes.createNode(this, config); const node = this;
     const migrationsDir = config.migrationsDir || process.env.WATERING_PLAN_MIGRATIONS_DIR || path.resolve(__dirname, '../../docs/integrations/watering-plan/sqlite');
-    const store = new WateringPlanStore({ databasePath: config.databasePath || '/var/lib/node-red/watering-plans.sqlite3', migrationsDir });
+    const store = new WateringPlanStore({
+      databasePath: config.databasePath || '/var/lib/node-red/watering-plans.sqlite3',
+      migrationsDir,
+      // Log and carry on: a store failure must fail the request, not the runtime.
+      onError: error => node.error('Watering plan store error: ' + (error && error.message ? error.message : String(error)))
+    });
     let ready = store.initialize(); ready.catch(error => node.error(error));
     node.on('input', async (msg, send, done) => {
       try { await ready; const action = msg.action; let result;
