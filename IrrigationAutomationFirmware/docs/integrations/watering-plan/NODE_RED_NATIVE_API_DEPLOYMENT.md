@@ -95,12 +95,14 @@ node tools/test_flow_ids.js
 npm test --prefix nodes/watering-plan-store
 ```
 
-Then run the black-box API suite only against an authorized test Pi:
+Then run the black-box API suite only against an authorized test Pi. The
+default 3 s client timeout is too tight for the Pi; record what you observe in
+[PI_LIVE_TEST_LOG.md](PI_LIVE_TEST_LOG.md):
 
 ```sh
 export IRRIGATION_PLAN_API_URL='https://<test-pi>'
 export IRRIGATION_PLAN_API_TOKEN='<test-token>'
-python3 tools/test_mobile_watering_plan_api.py --live
+python3 tools/test_mobile_watering_plan_api.py --live --timeout 15
 ```
 
 Use an isolated LAN or an HTTPS reverse proxy. Expose `/api/v1/*` and the

@@ -124,3 +124,5 @@ PYTHONPATH=tools python tools/test_watering_plan_backend.py
 ```
 
 Report results in three separate lines: mock scenario result; Python prototype regression result; live Node-RED result (`not run`, `unavailable`, or observed pass/fail). Passing first two does not establish Node-RED route behavior. Before release, execute live suite plus manual cases for active stop acknowledgement, Pi restart, radio/meter loss, and no auto-resume on commissioned hardware.
+
+Observed Pi results are kept in [PI_LIVE_TEST_LOG.md](PI_LIVE_TEST_LOG.md); add a dated section there rather than only reporting in a session.
