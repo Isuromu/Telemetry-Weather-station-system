@@ -10,6 +10,11 @@ Raspberry Pi. This is the working plan for Phase 6 of
   It does **not** schedule or execute watering.
 - Phase 6 is **not implemented yet**. This document is the approved design to
   implement.
+- Phase 0 preflight completed on 2026-10-17: 3.0 GB free, backups verified,
+  clock synchronized, scoped InfluxDB tokens and both Phase 6 buckets in place,
+  and the Python venv ready. Measurements are in
+  [`../../deployment/RASPBERRY_PI_SITE_PROFILE.md`](../../deployment/RASPBERRY_PI_SITE_PROFILE.md).
+  P1 can start.
 - Node-RED dashboard, manual controls, and the temporary API stay running
   throughout Phase 6 and after acceptance. No flow removal is part of this
   work.

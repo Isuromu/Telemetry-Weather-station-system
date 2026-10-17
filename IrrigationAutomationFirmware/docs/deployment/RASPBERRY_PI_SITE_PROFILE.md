@@ -157,16 +157,124 @@ RSS by process group (RSS sum; may overcount shared pages):
 - Phase 6 schema: [`../integrations/watering-plan/INFLUX_SCHEMA.md`](../integrations/watering-plan/INFLUX_SCHEMA.md)
   (buckets `irrigation_telemetry` and `irrigation_events`).
 
+## Phase 0 preflight results (2026-10-17)
+
+Executed over SSH as `maxi@192.168.1.116`, the address re-confirmed in this
+session; `192.168.2.217` no longer answers. Node-RED stayed running and no flow
+was changed. Measurements taken 15:53-16:03 local time.
+
+### Disk
+
+| Point | Free | Use |
+|---|---|---|
+| Before | 293 MB | 98% |
+| After cleanup | 3.0 GB | 79% |
+
+Reclaimed:
+
+- `/home/maxi/.rustup` removed: 2.5 GB.
+- `apt-get clean`: 133 MB.
+- User caches removed: `~/.cache/node-gyp` 65 MB, `~/.cache/chromium` 28 MB,
+  `~/.cache/pip` 19 MB.
+- `docker.service`, `containerd.service` and `docker.socket` disabled and
+  stopped (about 215 MB RAM and 36 MB disk). The host actually had one
+  **created, never started** `eclipse-mosquitto` container and its 37 MB image,
+  which the earlier snapshot missed. Both were left in place.
+- `journalctl --vacuum-time=7d` freed 0 B. The 135 MB journal is younger than
+  seven days and was deliberately retained as pump/downlink evidence.
+
+InfluxDB still occupies 2.1 GB under `/var/lib/influxdb`. No existing data was
+deleted: `main_valve` is protected by the plan, and `_monitoring`/`_tasks` carry
+their own retention. The two new buckets have 90-day and 365-day retention from
+creation.
+
+### Clock
+
+`NTPSynchronized=yes`; `systemd-timesyncd` is active and enabled. No offset
+threshold is claimed, because the service reports only a boolean.
+
+### Backups
+
+`/home/maxi/backups/phase6-20261017/` (mode 700) and
+`/home/maxi/backups/phase6-20261017.tar.gz` (mode 600) contain:
+
+- `flows.json` (165 nodes), `flows_cred.json`, `settings.js`,
+  `.config.runtime.json`, `environment`, `package.json`;
+- `watering-plans.sqlite3`, taken with the SQLite backup API while Node-RED was
+  running and verified: `PRAGMA integrity_check` = ok, 33 plans, 73 plan
+  events, 0 attempts, 2 schema migrations.
+
+`~/.node-red/environment` and `flows_cred.json` were world-readable (mode 644)
+and were tightened to 600.
+
+Restore procedure:
+
+1. `sudo systemctl stop nodered`.
+2. Copy the Node-RED files, including `.config.runtime.json`, back to
+   `~/.node-red/` as `maxi:maxi`, mode 600. `.config.runtime.json` matters:
+   without it Node-RED generates a new credential secret and cannot decrypt the
+   backed-up `flows_cred.json`.
+3. Remove `watering-plans.sqlite3-wal` and `-shm`, copy the backed-up
+   `watering-plans.sqlite3` to `/var/lib/node-red/`, and re-run the integrity
+   and row-count checks.
+4. `sudo systemctl start nodered`; check `NRestarts`,
+   `GET /api/v1/health`, and the dashboard.
+
+### Python
+
+- Python 3.13.5 at `/usr/bin/python3`.
+- Venv: `/home/maxi/irrigation-server/.venv` (62 MB). Direct dependencies are
+  pinned in `server/pyproject.toml`; the full resolved set is
+  `server/requirements.lock`.
+- Importing the whole stack measured 60.0 MB maximum RSS. The server's
+  steady-state RSS is recorded after P1 starts serving.
+- Node-RED remained at 163 MB RSS with `NRestarts=0`.
+- Memory after cleanup: 1.6 GiB used, 6.0 GiB available.
+
+### InfluxDB
+
+`GET /health` answers 200. The Phase 6 buckets exist in org `amudario`:
+
+| Bucket | ID | Retention | Shard group |
+|---|---|---|---|
+| `irrigation_telemetry` | `28b3e389bd453fa1` | 90 days (7,776,000 s) | 1 day |
+| `irrigation_events` | `f9e0cc9ca20e3716` | 365 days (31,536,000 s) | 7 days |
+
+`main_valve` was not touched. Two bucket-scoped tokens were created and
+verified by behaviour; no token value is recorded here or in git:
+
+- **Node-RED write:** write to `irrigation_telemetry` and `irrigation_events`;
+  write to `main_valve` is denied (403); no query access.
+- **Server read:** query access to both new buckets; write is denied (403);
+  cannot list buckets or authorizations.
+
+The two org-wide tokens supplied for this step were deactivated after the
+scoped replacements passed verification. Their values appeared in a chat
+session, so treat them as compromised even though they are inactive.
+
+The scoped credentials live only on the Pi, mode 600:
+`/home/maxi/irrigation-server/.env` (server read plus bucket/org settings) and
+`/home/maxi/irrigation-server/.node-red-write.token` (staging for the Node-RED
+credential). `.influx-scope.json` records the bucket and authorization IDs.
+
+The original all-access token (`amudario's Token`, id `1134f10e0b8f4000`) is
+still active and is the credential behind the existing MainValve demo flow.
+P2 must add a **separate** InfluxDB config node for the Phase 6 nodes using the
+scoped write token. Overwriting the legacy config node would break
+`main_valve` and immediately hit the 403 above.
+
 ## Open verification items
 
-- Provision InfluxDB tokens for Node-RED (write) and the server (read) without
-  storing them in git.
-- Confirm InfluxDB bucket retention values after the Phase 6 buckets are
-  created.
+- P2: add the separate InfluxDB config node for the Phase 6 nodes with the
+  scoped write token, then retire the legacy all-access token once the
+  MainValve demo no longer needs it.
 - Whether the kiosk/desktop stack can be retired after the server UI replaces
   the Node-RED dashboard. Node-RED itself stays running.
-- Whether `/home/maxi/.rustup`, Docker, or PostgreSQL are needed by other work on
-  this host.
+- Whether the created `eclipse-mosquitto` Docker container is still wanted.
+  Docker and containerd are disabled; the container and image were left in
+  place.
+- PostgreSQL remains enabled and running; it is not required by the Phase 6
+  server.
 
 ## Read-only reproduction commands
 
