@@ -661,6 +661,11 @@ may be attempted after fresh state observation.
 
 ### Phase 6 — future local-server migration
 
+Detailed implementation plan:
+[`PHASE6_LOCAL_SERVER_PLAN.md`](PHASE6_LOCAL_SERVER_PLAN.md). Host snapshot:
+[`../../deployment/RASPBERRY_PI_SITE_PROFILE.md`](../../deployment/RASPBERRY_PI_SITE_PROFILE.md).
+Influx schema: [`INFLUX_SCHEMA.md`](INFLUX_SCHEMA.md).
+
 1. Move the plan tables, scheduler, and mobile API from Node-RED to the server
    running on the Raspberry Pi.
 2. Read latest device state and command/sequence events only from local
@@ -668,6 +673,10 @@ may be attempted after fresh state observation.
    endpoint that records every acknowledgement and phase under an operation ID.
 3. Keep Node-RED as the hardware execution adapter until its replacement is tested.
 4. Port the polished dashboard to the local server without changing plan payloads or device protocols.
+
+Phase 6 runs the server in parallel with the existing Node-RED dashboard and
+temporary API. Do not remove Node-RED flows during this phase. Real-device
+watering execution is in scope and must be commissioned before acceptance.
 
 ## Remaining commissioning and deployment decisions
 

@@ -147,6 +147,26 @@ store passes 50 rows the oldest plans stop being fetched and no column can show
 them; the count line cannot detect that. Fixing it needs either a larger limit,
 a follow-up page request, or a state filter on the query.
 
+## 2026-10-16 — scheduler tick, local sandbox only (not Pi)
+
+The execution path was added after the three due plans above were found doing
+nothing: the store kept intent, but no node ever claimed a plan. Commits
+`d9de6b6` (store policy and actions) and `7b3cabd` (flow tick, dispatch node and
+the sequencer snapshot the gate reads). Offline proof: 34 store-package tests,
+including the shared conformance vectors from `conformance-scenarios.json`, plus
+the generated-flow test and the flow-id/import checks.
+
+**Sandbox observations** (local Node-RED 5.0.8 on `127.0.0.1:1881`, the same
+generated flow the Pi runs, **not** Pi evidence):
+- Execution off (the default): a plan due immediately stayed `scheduled` for
+  four 5 s ticks — no delay event, no attempt row, no store write at all.
+- Execution on, telemetry absent: the same plan became `delayed` with
+  `executor_gate_failed` and **zero attempt rows** — the gate refuses before
+  claiming, so a blocked plan does not manufacture an attempt every tick.
+- The public record now carries `delay_reason`; the panel had been reading
+  `last_delay_reason`, a store column the API never served, so a delay would
+  have rendered as nothing.
+
 ## Between sessions
 
 - Run the suite three times, not once: the crash above only appeared under
