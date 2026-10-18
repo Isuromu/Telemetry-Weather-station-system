@@ -21,6 +21,10 @@ const IDS = {
   status: '50c3e5351eac102c', control: '1406698c9cd792c5',
   mqttOut: '03424753ad790e6b', ui: 'd490a04f3084b9da',
   planCommandIn: '5e1d4f6c8a9b0c11', planCommand: '6f2e5a7b9c0d1e22',
+  planCommandResult: 'c2d4e6f8091a3b5c',
+  telemetryMap: 'c3e5a7b9d1f20468', telemetryWrite: 'd4f6b8c0e2a31579',
+  eventMap: 'e5a7c9d1f304268b', operationWrite: 'f6b8d0e2a415379c',
+  commandAckWrite: 'a7c9d1f304268bed', phaseWrite: 'b8d0e2a415379cfe',
   planCommandResponse: '7a3f6b8c0d1e2f33', planStateIn: '8b4a7c9d0e1f3044',
   planState: '9c5b8d0e1f203155', planStateResponse: 'ad6c9e1f20314266',
   planRefreshTick: 'be7da2f304253677', planListRequest: 'cf8eb30415263788',
@@ -55,8 +59,9 @@ for (const n of nodes.filter(n => !GLOBAL.has(n.type))) {
 }
 
 const wired = [IDS.tick, IDS.settings, IDS.subscribeTick, IDS.subscribe, IDS.mqttIn,
-               IDS.status, IDS.control, IDS.mqttOut, IDS.ui,
-               IDS.planCommandIn, IDS.planCommand, IDS.planCommandResponse,
+               IDS.telemetryMap, IDS.telemetryWrite, IDS.status, IDS.control, IDS.eventMap,
+               IDS.operationWrite, IDS.commandAckWrite, IDS.phaseWrite, IDS.mqttOut, IDS.ui,
+               IDS.planCommandIn, IDS.planCommand, IDS.planCommandResult, IDS.planCommandResponse,
                IDS.planStateIn, IDS.planState, IDS.planStateResponse,
                IDS.planRefreshTick, IDS.planListRequest, IDS.planListResult,
                IDS.planUiRoute, IDS.planCancelRequest, IDS.planCancelResult,
@@ -107,8 +112,8 @@ assert.deepEqual(byId[IDS.mobileRoute].wires[0], [IDS.mobileStore], 'mobile plan
 assert.deepEqual(byId[IDS.mobileRoute].wires[1], [IDS.mobileResult], 'mobile read-only responses bypass store');
 assert.deepEqual(byId[IDS.mobileStore].wires[0], [IDS.planStoreMux], 'the single store feeds the consumer mux');
 assert.deepEqual(byId[IDS.planStoreMux].wires,
-  [[IDS.mobileResult],[IDS.planCancelResult],[IDS.planListResult],[IDS.planSchedResult]],
-  'the mux separates the mobile, dashboard cancel, dashboard list and scheduler consumers');
+  [[IDS.mobileResult],[IDS.planCancelResult],[IDS.planListResult],[IDS.planSchedResult],[IDS.planCommandResult]],
+  'the mux separates mobile, dashboard, scheduler and durable command consumers');
 assert.deepEqual(byId[IDS.mobileResult].wires[0], [IDS.mobileResponse]);
 assert.deepEqual(byId[IDS.planListRequest].wires[0], [IDS.mobileStore], 'the dashboard list reads the store');
 assert.deepEqual(byId[IDS.planCancelRequest].wires[0], [IDS.mobileStore], 'the dashboard cancel writes the store');
@@ -185,6 +190,24 @@ assert.deepEqual(byId[IDS.subscribeTick].wires[0], [IDS.subscribe]);
 assert.equal(byId[IDS.mqttIn].inputs, 1);
 assert.equal(byId[IDS.mqttIn].topic, '');
 assert.deepEqual(subscribeNode.wires[0], [IDS.mqttIn]);
+assert.deepEqual(byId[IDS.telemetryMap].wires, [[IDS.control],[IDS.telemetryWrite]]);
+assert.deepEqual(byId[IDS.telemetryWrite].wires, []);
+assert.equal(byId[IDS.telemetryWrite].type, 'influxdb out');
+assert.equal(byId[IDS.telemetryWrite].measurement, 'device_telemetry');
+assert.equal(byId[IDS.telemetryWrite].bucket, 'irrigation_telemetry');
+assert.deepEqual(byId[IDS.control].wires, [[IDS.mqttOut],[IDS.ui],[IDS.eventMap]]);
+assert.equal(byId[IDS.control].outputs, 3);
+assert.deepEqual(byId[IDS.eventMap].wires, [[IDS.operationWrite],[IDS.commandAckWrite],[IDS.phaseWrite]]);
+for (const [id,measurement] of [[IDS.operationWrite,'operation_event'],[IDS.commandAckWrite,'command_ack'],[IDS.phaseWrite,'sequencer_phase']]) {
+  assert.equal(byId[id].type,'influxdb out');
+  assert.equal(byId[id].measurement,measurement);
+  assert.equal(byId[id].bucket,'irrigation_events');
+  assert.equal(byId[id].influxdb,'9f8e7d6c5b4a3120','use the workspace-owned scoped write config');
+}
+assert(!nodes.some(n=>n.type==='influxdb'),'flow must reference existing Influx config, not ship another config node');
+assert.deepEqual(byId[IDS.planCommand].wires, [[IDS.mobileStore],[IDS.planCommandResponse]],
+  'internal commands must reserve durable operation IDs before reaching CONTROL');
+assert.deepEqual(byId[IDS.planCommandResult].wires, [[IDS.control],[IDS.planCommandResponse]]);
 
 // The water tile goes stale on the WaterLevel node's own schedule. Re-resolved
 // here rather than imported from tools/water_level_interval.py: a check that
@@ -296,14 +319,69 @@ const env = {get:k=>{
 const node = {status:()=>{}};
 const planEnv = {get:k=>k==='IRRIGATION_INTERNAL_TOKEN'?'secret':env.get(k)};
 const planCommand = new Function('msg','flow','env',byId[IDS.planCommand].func);
+const planCommandResult = new Function('msg','flow',byId[IDS.planCommandResult].func);
 const unauthorized = planCommand({req:{headers:{}},payload:{operation_id:'op-unauth',action:'stop'}},flow,planEnv);
 assert.equal(unauthorized[1].statusCode,401);
-const accepted = planCommand({req:{headers:{authorization:'Bearer secret'}},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
-assert.equal(accepted[1].statusCode,202);
-assert.equal(accepted[0].payload.kind,'start');
-const duplicate = planCommand({req:{headers:{authorization:'Bearer secret'}},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
-assert.equal(duplicate[0],null);
-assert.equal(duplicate[1].payload.data.duplicate,true);
+const accepted = planCommand({req:{headers:{authorization:'Bearer secret'}},res:{},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
+assert.equal(accepted[0].action,'register_operation');
+assert.equal(accepted[0].operation.operationId,'op-1');
+accepted[0].payload={ok:true,result:{duplicate:false}};
+const dispatched = planCommandResult(accepted[0],flow);
+assert.equal(dispatched[0].payload.kind,'start');
+assert.equal(dispatched[1].statusCode,202);
+const duplicate = planCommand({req:{headers:{authorization:'Bearer secret'}},res:{},payload:{operation_id:'op-1',action:'start',valves:{valve1:true}}},flow,planEnv);
+duplicate[0].payload={ok:true,result:{duplicate:true}};
+const duplicateResult = planCommandResult(duplicate[0],flow);
+assert.equal(duplicateResult[0],null);
+assert.equal(duplicateResult[1].statusCode,200);
+assert.equal(duplicateResult[1].payload.data.duplicate,true);
+const conflict = planCommand({req:{headers:{authorization:'Bearer secret'}},res:{},payload:{operation_id:'op-1',action:'stop'}},flow,planEnv);
+conflict[0].payload={ok:false,error:{code:'operation_id_conflict',message:'conflict',details:[]}};
+assert.equal(planCommandResult(conflict[0],flow)[1].statusCode,409);
+
+const telemetryMap = new Function('msg','env','Buffer',byId[IDS.telemetryMap].func);
+const eventMap = new Function('msg','flow','env','Buffer',byId[IDS.eventMap].func);
+const uplink = {time:'2026-10-18T10:00:00Z',fPort:51,fCnt:12,deduplicationId:'delivery-1',rxInfo:[{rssi:-91,snr:7.5}],object:{running:true,flow_total_since_reset_m3:null,communication_ok:false}};
+const telemetryInput = {topic:'application/12345678-1234-1234-1234-123456789abc/device/0000000000000006/event/up',payload:uplink};
+const mappedTelemetry = telemetryMap(telemetryInput,env,Buffer);
+assert.equal(mappedTelemetry[0],telemetryInput,'telemetry mapping must not alter sequencer input');
+// node-red-contrib-influxdb 0.7.0 consumes [fields,tags] (or an array of
+// [fields,tags] pairs); a point object would be written as fields only.
+const telemetryPayload=mappedTelemetry[1].payload;
+assert(Array.isArray(telemetryPayload)&&telemetryPayload.length===2,'one telemetry point is [fields,tags]');
+const telemetryFields=telemetryPayload[0];
+const telemetryTags=telemetryPayload[1];
+assert.equal(telemetryTags.device_id,'pump');
+assert.equal(telemetryTags.device_type,'pump');
+assert.equal(telemetryTags.dev_eui,'0000000000000006');
+assert.equal(telemetryTags.site_id,'s01');
+assert.equal(telemetryTags.field_id,undefined,'empty tags are omitted');
+assert.equal(telemetryFields.running,1);
+assert.equal(telemetryFields.communication_ok,0);
+assert.equal(telemetryFields.rssi_dbm,-91);
+assert.equal(telemetryFields.flow_total_since_reset_m3,undefined,'null meter evidence must stay omitted');
+assert.equal(telemetryFields.time.toISOString(),'2026-10-18T10:00:00.000Z');
+const eventMemory=new Map([['irrigation',{phase:'running',planOperation:'op-event',planId:'plan-event',planRevision:2,notice:'Watering',pending:null,lastCommand:{device:'pump',op:'start',id:7,at:Date.now()-100},devices:{}}]]);
+const eventFlow={get:k=>eventMemory.get(k),set:(k,v)=>eventMemory.set(k,v)};
+const requested=eventMap({payload:{kind:'start',operation_id:'op-event',plan_id:'plan-event'}},eventFlow,env,Buffer);
+// requested has two operation events, so it is an array of [fields,tags] pairs.
+const requestedPoints=requested[0].payload;
+assert(Array.isArray(requestedPoints)&&Array.isArray(requestedPoints[0]),'multiple points are [fields,tags] pairs');
+assert.equal(requestedPoints[0][1].operation_id,'op-event');
+assert.equal(requestedPoints[0][1].plan_revision,'2');
+assert.equal(requestedPoints[0][1].event_type,'requested');
+assert(Array.isArray(requested[2].payload)&&requested[2].payload[0][1].phase==='running','the phase output is a [fields,tags] pair');
+const ack=eventMap({topic:telemetryInput.topic,payload:{...uplink,object:{last_command_id:7,command_result:'accepted'}}},eventFlow,env,Buffer);
+const ackPoint=ack[1].payload[0];
+assert(Array.isArray(ackPoint)&&ackPoint.length===2,'one acknowledgement point is [fields,tags]');
+assert.equal(ackPoint[1].device_id,'pump');
+assert.equal(ackPoint[1].command,'start');
+assert.equal(ackPoint[1].result,'accepted');
+assert.equal(ackPoint[0].reason,'');
+assert(ackPoint[0].latency_ms >= 0);
+assert(ackPoint[0].time instanceof Date);
+const duplicateAck=eventMap({topic:telemetryInput.topic,payload:{...uplink,object:{last_command_id:7,command_result:'accepted'}}},eventFlow,env,Buffer);
+assert.equal(duplicateAck[1],null,'repeated heartbeat must not duplicate same device command acknowledgement');
 
 // --- Public mobile API: execute the generated route and result bodies -------
 // The wiring above says nothing about behaviour, so drive the two functions the
@@ -475,9 +553,10 @@ assert.equal(startDecided.payload.valve1, true);
 assert.equal(startDecided.payload.valve2, false);
 assert.equal(startDecided.payload.operation_id, 'op-1');
 assert.equal(schedFlow.get('watering_plan_boot_id'), 'boot-a', 'the tick reports the process identity so a restart is detectable');
-const stopDecided = dispatchNode({payload:{ok:true,result:{action:'cancel_stop_dispatched',dispatch:{kind:'stop',operation_id:'op-1:stop',plan_id:'plan-1'}}}},schedFlow,node,noEnv,Buffer,globalCtx);
+const stopDecided = dispatchNode({payload:{ok:true,result:{action:'cancel_stop_dispatched',dispatch:{kind:'stop',operation_id:'op-1',plan_id:'plan-1',plan_revision:2}}}},schedFlow,node,noEnv,Buffer,globalCtx);
 assert.equal(stopDecided.payload.kind, 'stop');
-assert.equal(stopDecided.payload.operation_id, 'op-1:stop', 'the stop keeps the attempt operation id so the row and the command agree');
+assert.equal(stopDecided.payload.operation_id, 'op-1', 'start and stop preserve stable run operation ID');
+assert.equal(stopDecided.payload.plan_revision, 2);
 // A decision that is not a dispatch never reaches the sequencer.
 assert.equal(dispatchNode({payload:{ok:true,result:{action:'delayed',reason:'pump_run_active'}}},schedFlow,node,noEnv,Buffer,globalCtx), null);
 assert.equal(schedFlow.get('watering_plan_scheduler_status'), 'Plan delayed: pump_run_active');

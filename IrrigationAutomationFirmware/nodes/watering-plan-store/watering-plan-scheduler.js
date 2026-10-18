@@ -116,7 +116,7 @@ class WateringPlanScheduler {
       detail && detail.deliveredM3 !== undefined ? detail.deliveredM3 : undefined);
     return {
       action: reason + '_stop_dispatched', reason,
-      dispatch: { kind: 'stop', plan_id: plan.plan_id, operation_id: String(attempt.operation_id || '') + ':stop' }
+      dispatch: { kind: 'stop', plan_id: plan.plan_id, plan_revision: plan.revision, operation_id: String(attempt.operation_id || '') }
     };
   }
 
@@ -229,7 +229,7 @@ class WateringPlanScheduler {
     const valves = claimed.resolved_valves || [];
     return {
       action: 'started', phase: 'starting', plan: claimed,
-      dispatch: { kind: 'start', plan_id: claimed.plan_id, operation_id: claimed.attempt.operation_id, valve1: valves.indexOf('valve1') !== -1, valve2: valves.indexOf('valve2') !== -1 }
+      dispatch: { kind: 'start', plan_id: claimed.plan_id, plan_revision: claimed.revision, operation_id: claimed.attempt.operation_id, valve1: valves.indexOf('valve1') !== -1, valve2: valves.indexOf('valve2') !== -1 }
     };
   }
 }

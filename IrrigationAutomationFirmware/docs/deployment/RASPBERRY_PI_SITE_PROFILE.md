@@ -207,6 +207,9 @@ threshold is claimed, because the service reports only a boolean.
 `~/.node-red/environment` and `flows_cred.json` were world-readable (mode 644)
 and were tightened to 600.
 
+A pre-migration-003 database copy and the prior module/migration files are in
+`/home/maxi/backups/phase6-20261018/` (created before the 2026-10-18 update).
+
 Restore procedure:
 
 1. `sudo systemctl stop nodered`.
@@ -258,16 +261,28 @@ The scoped credentials live only on the Pi, mode 600:
 credential). `.influx-scope.json` records the bucket and authorization IDs.
 
 The original all-access token (`amudario's Token`, id `1134f10e0b8f4000`) is
-still active and is the credential behind the existing MainValve demo flow.
-P2 must add a **separate** InfluxDB config node for the Phase 6 nodes using the
-scoped write token. Overwriting the legacy config node would break
-`main_valve` and immediately hit the 403 above.
+still active but is no longer referenced by Node-RED: the MainValve flow was
+removed and the Phase 6 outputs now use `9f8e7d6c5b4a3120`
+(`Irrigation InfluxDB write`). Deactivate the legacy token after operator
+confirmation.
 
 ## Open verification items
 
-- P2: add the separate InfluxDB config node for the Phase 6 nodes with the
-  scoped write token, then retire the legacy all-access token once the
-  MainValve demo no longer needs it.
+- P2 scoped write config (2026-10-18): the Phase 6 flow is deployed, the
+  experimental MainValve tab was removed, and the four outputs use the
+  workspace-owned config `9f8e7d6c5b4a3120` with the scoped write token. The
+  legacy config `6b15b438c5cf6d49` was removed. Scoped writes to
+  `irrigation_events` return 204; `main_valve` writes and queries are denied.
+- P2 store module (2026-10-18): the updated `watering-plan-store` module and
+  `003_irrigation_operations.sql` are installed; the live database is at schema
+  versions 1, 2, 3. The reservation test passed (start, duplicate retry,
+  conflict, stop).
+- Legacy all-access token `1134f10e0b8f4000` is no longer referenced by
+  Node-RED; deactivate it after operator confirmation.
+- Influx token replacement (2026-10-18): active scoped read/write tokens are
+  installed. The read token is in `IRRIGATION_INFLUX_TOKEN`; the write token is
+  in the Node-RED config node `9f8e7d6c5b4a3120`. The four Phase 6 Influx
+  outputs are re-enabled and live telemetry resumed.
 - Whether the kiosk/desktop stack can be retired after the server UI replaces
   the Node-RED dashboard. Node-RED itself stays running.
 - Whether the created `eclipse-mosquitto` Docker container is still wanted.

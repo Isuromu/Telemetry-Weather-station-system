@@ -192,9 +192,10 @@ function command(k,op) {
   // The codec rejects a downlink without an integer command_id, so a valve still
   // gets one; only the main valve and the pump answer with an id we have to match.
   // A PCV is confirmed by the state it reports, so it carries no pending entry.
-  if (isValve(k)) {emit(k,30,{object:{pcv:op,command_id:id}});if(!s.valveCmd)s.valveCmd={};s.valveCmd[k]=id;if(!s.valveSentAt)s.valveSentAt={};s.valveSentAt[k]=now;}
+  if (isValve(k)) {emit(k,30,{object:{pcv:op,command_id:id}});if(!s.valveCmd)s.valveCmd={};s.valveCmd[k]=id;if(!s.valveSentAt)s.valveSentAt={};s.valveSentAt[k]=now;if(!s.valveAction)s.valveAction={};s.valveAction[k]=op;}
   else {
     s.pending={device:k,op,id,at:now,retried:false};
+    s.lastCommand={device:k,op,id,at:now};
     if (k==='main') {const angle=op==='open'?cfg.mainOpenTargetDeg:0, a=Math.round(angle*10);emit(k,30,{data:Buffer.from([1,1,a>>8,a&255,id>>8,id&255]).toString('base64')});}
     else {const code={stop:1,estop:2,frequency:3,start:4}[op];const arg=op==='frequency'?Math.round(cfg.pumpFrequencyHz*100):0;emit(k,50,{data:Buffer.from([1,code,id>>8,id&255,arg>>8,arg&255]).toString('base64')});}
   }
@@ -311,6 +312,8 @@ if (msg.topic && msg.topic.startsWith('application/')) {
   // reads s.planOperation back to confirm it is observing its own run.
   const scheduled=typeof msg.payload.operation_id==='string'&&msg.payload.operation_id.length>0;
   s.planOperation=scheduled?msg.payload.operation_id:null;
+  s.planId=scheduled?String(msg.payload.plan_id||''):null;
+  s.planRevision=scheduled?Number(msg.payload.plan_revision)||null:null;
   // Remember the operator's choice on the server, so the checkboxes survive leaving
   // and returning to the dashboard page -- but only from a phase where the selection
   // is still editable, the same rule the select branch below uses.
@@ -326,6 +329,8 @@ if (msg.topic && msg.topic.startsWith('application/')) {
 } else if (msg.payload&&msg.payload.kind==='stop') {
   const scheduledStop=typeof msg.payload.operation_id==='string'&&msg.payload.operation_id.length>0;
   s.planOperation=scheduledStop?msg.payload.operation_id:null;
+  s.planId=scheduledStop?String(msg.payload.plan_id||''):null;
+  s.planRevision=scheduledStop?Number(msg.payload.plan_revision)||null:null;
   stop(scheduledStop?'Planned run stop requested':'Operator requested stop');
 }
 else if (msg.payload&&msg.payload.kind==='refresh_pump') {
@@ -358,7 +363,7 @@ const timedPhase=(seconds)=>!s.phaseAt||now-s.phaseAt>seconds*1000;
 // close confirms on the repeat while a lost one is simply applied. A fresh id would
 // pulse the valve twice for the first case and give the second a new refusal to survive.
 function resendValve(k,op) {const id=s.valveCmd?.[k];if (id===undefined) {command(k,op);return;}
-  emit(k,30,{object:{pcv:op,command_id:id}});s.valveSentAt[k]=now;}
+  emit(k,30,{object:{pcv:op,command_id:id}});s.valveSentAt[k]=now;if(!s.valveAction)s.valveAction={};s.valveAction[k]=op;}
 // One repeat, strictly between half the deadline and the deadline itself: before half the
 // valve has not had its chance to answer, and after the deadline the wait is over and the
 // failure detector stands.
@@ -499,27 +504,118 @@ s.configured=configured;s.settings=cfg;s.check=selectAllowed()?(gate.length?read
 s.at=now;s.readySets={};[['valve1'],['valve2'],['valve1','valve2']].forEach(set=>{s.readySets[set.join(',')]=ready(set);});
 s.wateringPlans=flow.get('watering_plan_snapshot')||[];s.planApiStatus=(flow.get('watering_plan_api_status')||'Waiting for plan service')+(flow.get('watering_plan_action_status')?' · '+flow.get('watering_plan_action_status'):'');
 flow.set('irrigation',s);
-return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}];'''
+return [downlinks.length ? downlinks : null, {payload:{kind:'state',state:s}}, msg];'''
 
-PLAN_COMMAND = r'''// Internal scheduler seam. Token-gated and never emits device commands itself.
+PLAN_COMMAND = r'''// Internal scheduler seam. Token-gated; durable operation reservation happens
+// before the request can reach CONTROL, so a retry after restart cannot re-actuate.
 const auth=String(msg.req?.headers?.authorization||'');
 const token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');
 const reply=(status,data,error)=>{msg.statusCode=status;msg.payload=error?{api_version:'v1',error}:{api_version:'v1',data};return [null,msg];};
 if (!token||auth!==`Bearer ${token}`) return reply(401,null,{code:'unauthorized',message:'Internal token invalid',details:[]});
 const body=msg.payload&&typeof msg.payload==='object'?msg.payload:{};
 const op=typeof body.operation_id==='string'&&body.operation_id;
-if (!op||!['start','stop'].includes(body.action)) return reply(400,null,{code:'invalid_command',message:'operation_id and action are required',details:[]});
-const seen=flow.get('watering_plan_operations')||{};
-if (seen[op]) {msg.payload={api_version:'v1',data:{accepted:true,duplicate:true,operation_id:op,state:flow.get('irrigation')||{phase:'idle'}}};msg.statusCode=200;return [null,msg];}
+if (!op||op.length>128||!['start','stop'].includes(body.action)) return reply(400,null,{code:'invalid_command',message:'operation_id and action are required',details:[]});
+let valves;
 if (body.action==='start') {
-  const valves=body.valves&&typeof body.valves==='object'?body.valves:{};
-  const selected=['valve1','valve2'].filter(k=>valves[k]===true);
-  if (!selected.length||Object.keys(valves).some(k=>!['valve1','valve2'].includes(k))) return reply(422,null,{code:'unsupported_valve',message:'Only configured dashboard valve keys are supported',details:[]});
-  msg.payload={kind:'start',valve1:valves.valve1===true,valve2:valves.valve2===true,operation_id:op};
-} else msg.payload={kind:'stop',operation_id:op};
-seen[op]={action:body.action,accepted_at:Date.now()};flow.set('watering_plan_operations',seen);
-const state=flow.get('irrigation')||{phase:'idle'};
-return [msg,{statusCode:202,payload:{api_version:'v1',data:{accepted:true,duplicate:false,operation_id:op,state}}}];'''
+  const input=body.valves&&typeof body.valves==='object'&&!Array.isArray(body.valves)?body.valves:{};
+  if (Object.keys(input).some(k=>!['valve1','valve2'].includes(k))||Object.values(input).some(v=>typeof v!=='boolean')) return reply(422,null,{code:'unsupported_valve',message:'Only configured dashboard valve keys are supported',details:[]});
+  valves={valve1:input.valve1===true,valve2:input.valve2===true};
+  if (!valves.valve1&&!valves.valve2) return reply(422,null,{code:'unsupported_valve',message:'Select at least one configured valve',details:[]});
+}
+msg.planConsumer='command';
+msg.action='register_operation';
+msg.operation={operationId:op,action:body.action,valves,planId:body.plan_id||null,planRevision:body.plan_revision||null};
+msg.planCommandPayload=body.action==='start'?{kind:'start',valve1:valves.valve1,valve2:valves.valve2,operation_id:op,plan_id:body.plan_id||null,plan_revision:body.plan_revision||null}:{kind:'stop',operation_id:op,plan_id:body.plan_id||null,plan_revision:body.plan_revision||null};
+msg.planCommandId=op;
+return [msg,null];'''
+
+PLAN_COMMAND_RESULT = r'''const registered=msg.payload&&msg.payload.result;
+const respond=(status,data,error)=>{msg.statusCode=status;msg.payload=error?{api_version:'v1',error}:{api_version:'v1',data};return msg;};
+if (!msg.payload?.ok||!registered) {
+  const error=msg.payload?.error||{code:'operation_store_error',message:'Operation registry failed',details:[]};
+  const status=error.code==='operation_id_conflict'?409:error.code==='invalid_operation'?422:503;
+  return [null,respond(status,null,error)];
+}
+const data={accepted:true,duplicate:registered.duplicate===true,operation_id:msg.planCommandId,state:flow.get('irrigation')||{phase:'idle'}};
+const response={req:msg.req,res:msg.res,_msgid:msg._msgid};
+response.statusCode=registered.duplicate?200:202;
+response.payload={api_version:'v1',data};
+if (registered.duplicate) return [null,response];
+msg.payload=msg.planCommandPayload;
+return [msg,response];'''
+
+TELEMETRY_MAP = r'''// Map one ChirpStack UP to the [fields,tags] shape the installed
+// node-red-contrib-influxdb 0.7.0 output node consumes. It writes the node's
+// configured measurement and reads a field named time as the point timestamp.
+const keys=['water','soil','main','valve1','valve2','pump'];
+const app=String(env.get('IRRIGATION_APP_ID')||'').toLowerCase();
+const ids={};for(const key of keys)ids[key]=String(env.get(key.toUpperCase()+'_DEV_EUI')||'').toLowerCase();
+const parts=String(msg.topic||'').toLowerCase().split('/');
+if(parts.length!==6||parts[0]!=='application'||parts[2]!=='device'||parts[4]!=='event'||parts[5]!=='up'||parts[1]!==app)return [msg,null];
+const key=keys.find(value=>ids[value]===parts[3]);if(!key)return [msg,null];
+let event=msg.payload;try{if(Buffer.isBuffer(event))event=JSON.parse(event.toString('utf8'));else if(typeof event==='string')event=JSON.parse(event);}catch(_){return [msg,null];}
+if(!event||typeof event!=='object'||!event.time)return [msg,null];
+const device={water:'water_level',soil:'soil',main:'main_valve',valve1:'valve1',valve2:'valve2',pump:'pump'}[key];
+const types={water:'water_level',soil:'soil',main:'main_valve',valve1:'valve',valve2:'valve',pump:'pump'};
+const fields={};const decoded=event.object&&typeof event.object==='object'?event.object:{};
+for(const [name,value] of Object.entries(decoded)){if(value===null||value===undefined)continue;if(typeof value==='boolean')fields[name]=value?1:0;else if(typeof value==='number'&&Number.isFinite(value))fields[name]=value;else if(typeof value==='string')fields[name]=value;}
+const rx=Array.isArray(event.rxInfo)&&event.rxInfo[0]?event.rxInfo[0]:{};
+for(const [name,value] of Object.entries({f_port:event.fPort,f_cnt:event.fCnt,rssi_dbm:rx.rssi,snr_db:rx.snr,received_at_ms:Date.now()}))if(typeof value==='number'&&Number.isFinite(value))fields[name]=value;
+const timestamp=new Date(event.time);if(Number.isNaN(timestamp.getTime())||!Object.keys(fields).length)return [msg,null];
+let registry=[];try{registry=JSON.parse(String(env.get('IRRIGATION_FIELD_REGISTRY')||'[]'));}catch(_){}
+const field=Array.isArray(registry)?registry.find(item=>item&&item.enabled!==false&&item.valve_id===device):null;
+const tags={site_id:String(env.get('IRRIGATION_SITE_ID')||'s01'),device_id:device,device_type:types[key],field_id:field&&field.field_id?String(field.field_id):'',dev_eui:ids[key]};
+for(const name of Object.keys(tags))if(!tags[name])delete tags[name];
+fields.time=timestamp;
+return [msg,{payload:[fields,tags]}];'''
+
+EVENT_MAP = r'''// Route operation, acknowledgement and phase points in the [fields,tags] shape
+// the installed node-red-contrib-influxdb 0.7.0 output node consumes. Each
+// output node owns the measurement and bucket; time in fields sets the point
+// timestamp, and empty tag values are dropped rather than written.
+const event=msg.payload&&typeof msg.payload==='object'?msg.payload:{};
+const state=flow.get('irrigation')||{};const operationId=String(state.planOperation||event.operation_id||'');
+const site=String(env.get('IRRIGATION_SITE_ID')||'s01');const now=new Date();const points=[[],[],[]];
+const wire=(fields,tags,timestamp)=>{const copy={...tags};for(const name of Object.keys(copy))if(copy[name]===undefined||copy[name]===null||copy[name]==='')delete copy[name];fields.time=timestamp||now;return [fields,copy];};
+const operationPoint=(id,planId,revision,type,outcome,message,duplicate)=>wire({message:String(message||''),duplicate:duplicate?1:0},{site_id:site,operation_id:String(id),plan_id:String(planId||''),plan_revision:String(revision||''),event_type:type,source:'node_red',outcome:outcome||undefined},now);
+if(['start','stop'].includes(event.kind)&&event.operation_id){
+  const planId=event.plan_id||state.planId;const revision=event.plan_revision||state.planRevision;
+  points[0].push(operationPoint(event.operation_id,planId,revision,event.kind==='start'?'requested':'stopping','',event.kind+' requested',false));
+  if(event.kind==='start'&&state.phase==='idle')points[0].push(operationPoint(event.operation_id,planId,revision,'refused','refused',state.notice||'start refused',false));
+}
+const phaseMap={open_main:'open',wait_main_open:'open',open_fields:'open',wait_field_open:'open',set_frequency:'start',wait_frequency:'start',start_pump:'start',wait_pump_start:'start',running:'running',stop_pump:'stop',wait_pump_stop:'stop',close_fields:'close',wait_field_close:'close',close_main:'close',wait_main_close:'close',idle:'teardown',fault:'fault'};
+const previous=flow.get('irrigation_influx_phase');
+if(state.phase&&state.phase!==previous){
+  flow.set('irrigation_influx_phase',state.phase);
+  const phase=phaseMap[state.phase]||'readiness';const pending=state.pending||{};
+  points[2].push(wire({ok:state.phase==='fault'?0:1,detail:String(state.notice||'')},{site_id:site,operation_id:operationId||'none',phase,device_id:pending.device||''},now));
+  if(operationId&&state.phase==='running')points[0].push(operationPoint(operationId,state.planId,state.planRevision,'started','ok',state.notice||'watering started',false));
+  if(operationId&&(state.phase==='idle'||state.phase==='fault'))points[0].push(operationPoint(operationId,state.planId,state.planRevision,state.phase==='idle'?'stopped':'failed',state.phase==='idle'?'ok':'error',state.notice||state.phase,false));
+}
+const last=state.lastCommand;const lostKey=operationId+'/'+String(last&&last.device)+'/'+String(last&&last.id);
+if(last&&/unconfirmed|timeout/i.test(String(state.notice||''))&&flow.get('irrigation_influx_lost_ack')!==lostKey){flow.set('irrigation_influx_lost_ack',lostKey);const deviceId={main:'main_valve'}[last.device]||last.device;points[1].push(wire({latency_ms:Math.max(0,Date.now()-last.at),reason:String(state.notice)},{site_id:site,operation_id:operationId||'none',device_id:deviceId,command:last.op,result:'lost'},now));}
+const topic=String(msg.topic||'').toLowerCase().split('/');
+if(topic.length===6&&topic[4]==='event'&&topic[5]==='up'){
+  let uplink=msg.payload;try{if(Buffer.isBuffer(uplink))uplink=JSON.parse(uplink.toString('utf8'));else if(typeof uplink==='string')uplink=JSON.parse(uplink);}catch(_){uplink=null;}
+  const body=uplink&&uplink.object;
+  if(body&&typeof body==='object'){
+    const id=body.reported_command_id??body.last_command_id;const device=['water','soil','main','valve1','valve2','pump'].find(k=>String(env.get(k.toUpperCase()+'_DEV_EUI')||'').toLowerCase()===topic[3])||'unknown';
+    const pending=state.pending&&Number(state.pending.id)===Number(id)?state.pending:null;
+    const last=state.lastCommand&&Number(state.lastCommand.id)===Number(id)?state.lastCommand:null;
+    const valveId=state.valveCmd&&Number(state.valveCmd[device])===Number(id);
+    const tracked=!!pending||!!last||!!valveId;
+    const command=pending?pending.op:last?last.op:valveId&&state.valveAction&&state.valveAction[device]||'status';
+    const raw=String(body.command_phase||body.command_result||body.status_reason||body.pcv_last_commanded||'');
+    const refused=/rejected|failed|invalid|actuation_failed/i.test(raw);
+    const accepted=['finished','accepted','duplicate','open','closed'].includes(raw);
+    const result=refused?'refused':accepted?'accepted':null;const deviceId={water:'water_level',main:'main_valve'}[device]||device;
+    const sentAt=pending&&pending.at||last&&last.at||state.valveSentAt&&state.valveSentAt[device];
+    const fields={reason:String(body.reason||body.status_reason||'')};
+    if(typeof sentAt==='number')fields.latency_ms=Math.max(0,Date.now()-sentAt);
+    if(device!=='unknown'&&tracked&&id!==undefined&&id!==null&&result){const seen=flow.get('irrigation_influx_ack_ids')||{};if(seen[device]!==Number(id)){seen[device]=Number(id);flow.set('irrigation_influx_ack_ids',seen);points[1].push(wire(fields,{site_id:site,operation_id:operationId||'none',device_id:deviceId,command,result},uplink.time?new Date(uplink.time):now));}}
+  }
+}
+return points.map(payload=>payload.length?{payload}:null);'''
 
 PLAN_STATE = r'''const auth=String(msg.req?.headers?.authorization||'');
 const token=String(env.get('IRRIGATION_INTERNAL_TOKEN')||'');
@@ -624,8 +720,8 @@ const result=(msg.payload&&typeof msg.payload==='object'&&msg.payload.result)||n
 if (!result) return null;
 if (result.boot_id) flow.set('watering_plan_boot_id',result.boot_id);
 const dispatch=result.dispatch;
-if (dispatch&&dispatch.kind==='start') return {payload:{kind:'start',valve1:dispatch.valve1===true,valve2:dispatch.valve2===true,operation_id:dispatch.operation_id,plan_id:dispatch.plan_id}};
-if (dispatch&&dispatch.kind==='stop') return {payload:{kind:'stop',operation_id:dispatch.operation_id,plan_id:dispatch.plan_id}};
+if (dispatch&&dispatch.kind==='start') return {payload:{kind:'start',valve1:dispatch.valve1===true,valve2:dispatch.valve2===true,operation_id:dispatch.operation_id,plan_id:dispatch.plan_id,plan_revision:dispatch.plan_revision}};
+if (dispatch&&dispatch.kind==='stop') return {payload:{kind:'stop',operation_id:dispatch.operation_id,plan_id:dispatch.plan_id,plan_revision:dispatch.plan_revision}};
 const status=result.action==='disabled'?'Plan execution disabled'
   :result.action==='idle'?'Scheduler idle'
   :result.action==='delayed'?'Plan delayed: '+(result.reason||'unknown reason')
@@ -641,14 +737,13 @@ PLAN_CANCEL_REQUEST = r'''const id=String(msg.payload?.plan_id||'');
 if (!id||id.length>128) {flow.set('watering_plan_action_status','Plan action unavailable: plan id invalid');return null;}
 msg.action='cancel';msg.planId=id;msg.planConsumer='cancel';return msg;'''
 
-PLAN_STORE_MUX = r'''// One durable store, three consumers. The store node only rewrites msg.payload,
-// so msg.planConsumer survives to separate the dashboard list, the dashboard
-// cancel, and the mobile response formatter.
+PLAN_STORE_MUX = r'''// One durable store serves all consumers; command requests reserve IDs in SQLite.
 const consumer=String(msg.planConsumer||'dashboard');
-if (consumer==='scheduler') return [null,null,null,msg];
-if (consumer==='mobile') return [msg,null,null,null];
-if (consumer==='cancel') return [null,msg,null,null];
-return [null,null,msg,null];'''
+if (consumer==='scheduler') return [null,null,null,msg,null];
+if (consumer==='command') return [null,null,null,null,msg];
+if (consumer==='mobile') return [msg,null,null,null,null];
+if (consumer==='cancel') return [null,msg,null,null,null];
+return [null,null,msg,null,null];'''
 
 PLAN_LIST_RESULT = r'''const result=msg.payload&&msg.payload.result;
 if (!msg.payload?.ok||!result) {flow.set('watering_plan_api_status','Plan store unavailable: '+(msg.payload?.error?.message||'invalid response'));return {payload:{kind:'plan_snapshot'}};}
@@ -712,6 +807,15 @@ ID_GLOBAL_CONFIG = "c7c03261e21b3272"
 ID_PLAN_COMMAND_IN = "5e1d4f6c8a9b0c11"
 ID_PLAN_COMMAND = "6f2e5a7b9c0d1e22"
 ID_PLAN_COMMAND_RESPONSE = "7a3f6b8c0d1e2f33"
+ID_PLAN_COMMAND_RESULT = "c2d4e6f8091a3b5c"
+ID_TELEMETRY_MAP = "c3e5a7b9d1f20468"
+ID_TELEMETRY_WRITE = "d4f6b8c0e2a31579"
+ID_EVENT_MAP = "e5a7c9d1f304268b"
+ID_OPERATION_EVENT_WRITE = "f6b8d0e2a415379c"
+ID_COMMAND_ACK_WRITE = "a7c9d1f304268bed"
+ID_SEQUENCER_PHASE_WRITE = "b8d0e2a415379cfe"
+# Workspace-owned InfluxDB config node carrying the bucket-scoped write token.
+ID_INFLUX_WRITE = "9f8e7d6c5b4a3120"
 ID_PLAN_STATE_IN = "8b4a7c9d0e1f3044"
 ID_PLAN_STATE = "9c5b8d0e1f203155"
 ID_PLAN_STATE_RESPONSE = "ad6c9e1f20314266"
@@ -764,8 +868,10 @@ BREAKPOINTS = [{"name": "Default", "px": "0", "cols": "3"},
 
 def build():
     canvas_nodes = [ID_TICK, ID_SETTINGS, ID_SUBSCRIBE_TICK, ID_SUBSCRIBE,
-                    ID_MQTT_IN, ID_STATUS, ID_CONTROL, ID_MQTT_OUT, ID_UI,
-                    ID_PLAN_COMMAND_IN, ID_PLAN_COMMAND, ID_PLAN_COMMAND_RESPONSE,
+                    ID_MQTT_IN, ID_TELEMETRY_MAP, ID_TELEMETRY_WRITE, ID_STATUS, ID_CONTROL, ID_EVENT_MAP,
+                    ID_OPERATION_EVENT_WRITE, ID_COMMAND_ACK_WRITE, ID_SEQUENCER_PHASE_WRITE,
+                    ID_MQTT_OUT, ID_UI,
+                    ID_PLAN_COMMAND_IN, ID_PLAN_COMMAND, ID_PLAN_COMMAND_RESULT, ID_PLAN_COMMAND_RESPONSE,
                     ID_PLAN_STATE_IN, ID_PLAN_STATE, ID_PLAN_STATE_RESPONSE,
                     ID_PLAN_REFRESH_TICK, ID_PLAN_LIST_REQUEST, ID_PLAN_LIST_RESULT,
                     ID_PLAN_UI_ROUTE, ID_PLAN_CANCEL_REQUEST, ID_PLAN_CANCEL_RESULT,
@@ -781,9 +887,15 @@ def build():
         node(ID_SETTINGS, "function", z=FLOW_ID, g=ID_CANVAS, name="Irrigation settings — edit limits here", func=SETTINGS, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=860, y=140, wires=[[ID_CONTROL]]),
         node(ID_SUBSCRIBE_TICK, "inject", z=FLOW_ID, g=ID_CANVAS, name="Refresh ChirpStack subscription", props=[{"p":"payload"}], repeat="", crontab="", once=True, onceDelay="0.5", topic="", payload="", payloadType="date", x=250, y=100, wires=[[ID_SUBSCRIBE]]),
         node(ID_SUBSCRIBE, "function", z=FLOW_ID, g=ID_CANVAS, name="Subscribe to configured ChirpStack application", func=SUBSCRIBE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=400, y=160, wires=[[ID_MQTT_IN]]),
-        node(ID_MQTT_IN, "mqtt in", z=FLOW_ID, g=ID_CANVAS, name="All six ChirpStack uplinks", topic="", qos="0", datatype="auto-detect", broker=BROKER, nl=False, rap=True, rh=0, inputs=1, x=730, y=220, wires=[[ID_CONTROL]]),
+        node(ID_MQTT_IN, "mqtt in", z=FLOW_ID, g=ID_CANVAS, name="All six ChirpStack uplinks", topic="", qos="0", datatype="auto-detect", broker=BROKER, nl=False, rap=True, rh=0, inputs=1, x=730, y=220, wires=[[ID_TELEMETRY_MAP]]),
+        node(ID_TELEMETRY_MAP, "function", z=FLOW_ID, g=ID_CANVAS, name="Map ChirpStack telemetry", func=TELEMETRY_MAP, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=900, y=220, wires=[[ID_CONTROL],[ID_TELEMETRY_WRITE]]),
+        node(ID_TELEMETRY_WRITE, "influxdb out", z=FLOW_ID, g=ID_CANVAS, name="Write device telemetry", influxdb=ID_INFLUX_WRITE, measurement="device_telemetry", precision="", retentionPolicy="", database="database", precisionV18FluxV20="ms", retentionPolicyV18Flux="", org="amudario", bucket="irrigation_telemetry", x=1120, y=180, wires=[]),
         node(ID_STATUS, "status", z=FLOW_ID, g=ID_CANVAS, name="MQTT connection", scope=[ID_MQTT_IN, ID_MQTT_OUT], x=710, y=300, wires=[[ID_CONTROL]]),
-        node(ID_CONTROL, "function", z=FLOW_ID, g=ID_CANVAS, name="Safety checks and irrigation sequence", func=CONTROL, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1090, y=280, wires=[[ID_MQTT_OUT],[ID_UI]]),
+        node(ID_CONTROL, "function", z=FLOW_ID, g=ID_CANVAS, name="Safety checks and irrigation sequence", func=CONTROL, outputs=3, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1090, y=280, wires=[[ID_MQTT_OUT],[ID_UI],[ID_EVENT_MAP]]),
+        node(ID_EVENT_MAP, "function", z=FLOW_ID, g=ID_CANVAS, name="Map operation events and acknowledgements", func=EVENT_MAP, outputs=3, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1320, y=380, wires=[[ID_OPERATION_EVENT_WRITE],[ID_COMMAND_ACK_WRITE],[ID_SEQUENCER_PHASE_WRITE]]),
+        node(ID_OPERATION_EVENT_WRITE, "influxdb out", z=FLOW_ID, g=ID_CANVAS, name="Write operation events", influxdb=ID_INFLUX_WRITE, measurement="operation_event", precision="", retentionPolicy="", database="database", precisionV18FluxV20="ms", retentionPolicyV18Flux="", org="amudario", bucket="irrigation_events", x=1570, y=380, wires=[]),
+        node(ID_COMMAND_ACK_WRITE, "influxdb out", z=FLOW_ID, g=ID_CANVAS, name="Write command acknowledgements", influxdb=ID_INFLUX_WRITE, measurement="command_ack", precision="", retentionPolicy="", database="database", precisionV18FluxV20="ms", retentionPolicyV18Flux="", org="amudario", bucket="irrigation_events", x=1570, y=440, wires=[]),
+        node(ID_SEQUENCER_PHASE_WRITE, "influxdb out", z=FLOW_ID, g=ID_CANVAS, name="Write sequencer phases", influxdb=ID_INFLUX_WRITE, measurement="sequencer_phase", precision="", retentionPolicy="", database="database", precisionV18FluxV20="ms", retentionPolicyV18Flux="", org="amudario", bucket="irrigation_events", x=1570, y=500, wires=[]),
         node(ID_MQTT_OUT, "mqtt out", z=FLOW_ID, g=ID_CANVAS, name="ChirpStack downlinks", topic="", qos="", retain="", respTopic="", contentType="", userProps="", correl="", expiry="", broker=BROKER, x=1410, y=240, wires=[]),
         node(ID_UI, "ui-template", z=FLOW_ID, g=ID_CANVAS, group=GROUP, page="", ui="", name="Compact irrigation dashboard", order=1, width="12", height="30", head="", format=TEMPLATE, storeOutMessages=True, passthru=False, resendOnRefresh=True, templateScope="local", className="", x=1420, y=320, wires=[[ID_PLAN_UI_ROUTE]]),
         node(ID_PLAN_UI_ROUTE, "function", z=FLOW_ID, g=ID_CANVAS, name="Route watering-plan dashboard actions", func=PLAN_UI_ROUTE, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1640, y=360, wires=[[ID_CONTROL],[ID_PLAN_CANCEL_REQUEST]]),
@@ -793,8 +905,9 @@ def build():
         node(ID_PLAN_CANCEL_REQUEST, "function", z=FLOW_ID, g=ID_CANVAS, name="Request plan cancellation or stop", func=PLAN_CANCEL_REQUEST, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1840, y=420, wires=[[ID_MOBILE_STORE]]),
         node(ID_PLAN_CANCEL_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Record plan action and refresh", func=PLAN_CANCEL_RESULT, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=2240, y=420, wires=[[ID_CONTROL]]),
         node(ID_PLAN_COMMAND_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal watering-plan command", url="/internal/irrigation/command", method="post", upload=False, swaggerDoc="", x=260, y=420, wires=[[ID_PLAN_COMMAND]]),
-        node(ID_PLAN_COMMAND, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize watering-plan command", func=PLAN_COMMAND, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=420, wires=[[ID_CONTROL],[ID_PLAN_COMMAND_RESPONSE]]),
-        node(ID_PLAN_COMMAND_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan command response", statusCode="", headers={}, x=760, y=460, wires=[]),
+        node(ID_PLAN_COMMAND, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize and reserve watering-plan command", func=PLAN_COMMAND, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=420, wires=[[ID_MOBILE_STORE],[ID_PLAN_COMMAND_RESPONSE]]),
+        node(ID_PLAN_COMMAND_RESULT, "function", z=FLOW_ID, g=ID_CANVAS, name="Dispatch durable watering-plan command", func=PLAN_COMMAND_RESULT, outputs=2, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1240, y=460, wires=[[ID_CONTROL],[ID_PLAN_COMMAND_RESPONSE]]),
+        node(ID_PLAN_COMMAND_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan command response", statusCode="", headers={}, x=1460, y=500, wires=[]),
         node(ID_PLAN_STATE_IN, "http in", z=FLOW_ID, g=ID_CANVAS, name="Internal irrigation state", url="/internal/irrigation/state", method="get", upload=False, swaggerDoc="", x=260, y=520, wires=[[ID_PLAN_STATE]]),
         node(ID_PLAN_STATE, "function", z=FLOW_ID, g=ID_CANVAS, name="Authorize irrigation state", func=PLAN_STATE, outputs=1, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=500, y=520, wires=[[ID_PLAN_STATE_RESPONSE]]),
         node(ID_PLAN_STATE_RESPONSE, "http response", z=FLOW_ID, g=ID_CANVAS, name="Irrigation state response", statusCode="", headers={}, x=760, y=560, wires=[]),
@@ -802,7 +915,7 @@ def build():
         # dashboard. It never wires to MQTT or CONTROL; the mux below separates
         # its consumers by msg.planConsumer.
         node(ID_MOBILE_STORE, "watering-plan-store", z=FLOW_ID, g=ID_CANVAS, name="Watering-plan SQLite store", databasePath="/var/lib/node-red/watering-plans.sqlite3", migrationsDir="", x=930, y=780, wires=[[ID_PLAN_STORE_MUX]]),
-        node(ID_PLAN_STORE_MUX, "function", z=FLOW_ID, g=ID_CANVAS, name="Route plan store results", func=PLAN_STORE_MUX, outputs=4, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1120, y=1060, wires=[[ID_MOBILE_RESULT],[ID_PLAN_CANCEL_RESULT],[ID_PLAN_LIST_RESULT],[ID_PLAN_SCHED_RESULT]]),
+        node(ID_PLAN_STORE_MUX, "function", z=FLOW_ID, g=ID_CANVAS, name="Route plan store results", func=PLAN_STORE_MUX, outputs=5, timeout=0, noerr=0, initialize="", finalize="", libs=[], x=1120, y=1060, wires=[[ID_MOBILE_RESULT],[ID_PLAN_CANCEL_RESULT],[ID_PLAN_LIST_RESULT],[ID_PLAN_SCHED_RESULT],[ID_PLAN_COMMAND_RESULT]]),
         # The scheduler tick. Its facts node reads the sequencer snapshot and the
         # execution switch; with the switch off it returns null and the store is
         # never written, which is how the deploy stays inert.
@@ -825,7 +938,7 @@ def build():
         # rather than adding another base or theme.
         node(UI_BASE, "ui-base", name="My Dashboard", path="/dashboard", appIcon="", includeClientData=True, acceptsClientConfig=["ui-notification", "ui-control"], showPathInSidebar=False, headerContent="page", navigationStyle="fixed", titleBarStyle="default", showReconnectNotification=True, notificationDisplayTime=1, showDisconnectNotification=True, allowInstall=True),
         node(UI_THEME, "ui-theme", name="MyTheme", colors={"surface": "#ffffff", "primary": "#0094ce", "bgPage": "#eeeeee", "groupBg": "#ffffff", "groupOutline": "#cccccc"}, sizes={"density": "default", "pagePadding": "12px", "groupGap": "12px", "groupBorderRadius": "4px", "widgetGap": "12px"}),
-        node(ID_GLOBAL_CONFIG, "global-config", env=[], modules={"@flowfuse/node-red-dashboard": "1.30.2"}),
+        node(ID_GLOBAL_CONFIG, "global-config", env=[], modules={"@flowfuse/node-red-dashboard": "1.30.2", "node-red-contrib-influxdb": "0.7.0"}),
     ]
     write_flow(nodes, OUTPUT, indent=2, trailing_newline=True)
 

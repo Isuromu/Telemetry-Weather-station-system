@@ -81,6 +81,7 @@ test('a due plan claims and dispatches a start for its valves', async () => {
     const claimed = await store.activePlan();
     assert.equal(claimed.state, 'starting');
     assert.equal(result.dispatch.operation_id, claimed.attempt.operation_id);
+    assert.equal(result.dispatch.plan_revision, claimed.revision);
   });
 });
 
@@ -126,7 +127,9 @@ test('a running start anchors tracking, then stops on the duration target', asyn
     const stopping = await scheduler.tick(runningFacts({ plan_operation: started.dispatch.operation_id }));
     assert.equal(stopping.action, 'duration_target_reached_stop_dispatched');
     assert.equal(stopping.dispatch.kind, 'stop');
-    assert.equal(stopping.dispatch.operation_id, started.dispatch.operation_id + ':stop');
+    assert.equal(stopping.dispatch.operation_id, started.dispatch.operation_id,
+      'start and stop share stable run ID; durable deduplication is scoped by action');
+    assert.equal(stopping.dispatch.plan_revision, 1);
     assert.equal((await store.get('plan-1')).state, 'stopping');
 
     const completed = await scheduler.tick(facts());

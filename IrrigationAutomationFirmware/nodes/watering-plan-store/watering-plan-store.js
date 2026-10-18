@@ -196,6 +196,49 @@ class WateringPlanStore {
     // stays recovery_required as the audit trail of what was interrupted.
     const occurredAt = at ? normalizeTime(at) : now(); return this.transaction(async db => { const row = await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId]); if (!row) throw new StoreError('plan_not_found', 'Watering plan was not found', [planId]); let target; let reason; if (CLAIMABLE.includes(row.state)) { target = 'cancelled'; reason = 'cancelled_by_client'; } else if (ACTIVE.includes(row.state)) { target = 'stop_requested'; reason = 'stop_requested_by_client'; } else if (row.state === 'recovery_required') { target = 'cancelled'; reason = 'recovery_cleared'; } else return planFromRow(row); await WateringPlanStore.run(db, 'UPDATE watering_plans SET state=?, updated_at=? WHERE plan_id=? AND state=?', [target, occurredAt, planId, row.state]); await this.event(db, planId, row.revision, 'plan_cancelled', row.state, target, occurredAt, reason); return planFromRow(await WateringPlanStore.get(db, 'SELECT * FROM watering_plans WHERE plan_id=?', [planId])); });
   }
+  async registerOperation(input) {
+    const operationId = input && input.operationId;
+    const action = input && input.action;
+    const valves = input && input.valves;
+    if (typeof operationId !== 'string' || !operationId || operationId.length > 128 || !['start', 'stop'].includes(action)) {
+      throw new StoreError('invalid_operation', 'operationId and a supported action are required');
+    }
+    const request = { action };
+    if (input.planId !== undefined && input.planId !== null && input.planId !== '') {
+      if (typeof input.planId !== 'string' || input.planId.length > 128) throw new StoreError('invalid_operation', 'planId must be a string');
+      request.plan_id = input.planId;
+    }
+    if (input.planRevision !== undefined && input.planRevision !== null) {
+      if (!Number.isInteger(input.planRevision) || input.planRevision < 1) throw new StoreError('invalid_operation', 'planRevision must be a positive integer');
+      request.plan_revision = input.planRevision;
+    }
+    if (action === 'start') {
+      if (!valves || typeof valves !== 'object' || Array.isArray(valves) ||
+          Object.keys(valves).some(key => !['valve1', 'valve2'].includes(key)) ||
+          Object.values(valves).some(value => typeof value !== 'boolean') ||
+          !Object.values(valves).some(Boolean)) {
+        throw new StoreError('invalid_operation', 'start requires at least one boolean valve selection');
+      }
+      request.valves = { valve1: valves.valve1 === true, valve2: valves.valve2 === true };
+    }
+    const requestJson = JSON.stringify(request);
+    const registeredAt = input.registeredAt ? normalizeTime(input.registeredAt) : now();
+    return this.transaction(async db => {
+      const existing = await WateringPlanStore.get(db, 'SELECT * FROM irrigation_operations WHERE operation_id=? AND action=?', [operationId, action]);
+      if (existing) {
+        if (existing.request_json !== requestJson) {
+          throw new StoreError('operation_id_conflict', 'operation_id/action was already registered with different command content', [operationId, action]);
+        }
+        return { operation_id: operationId, action, request: JSON.parse(existing.request_json), registered_at: existing.registered_at, duplicate: true };
+      }
+      await WateringPlanStore.run(db, 'INSERT INTO irrigation_operations (operation_id, action, request_json, registered_at) VALUES (?, ?, ?, ?)', [operationId, action, requestJson, registeredAt]);
+      return { operation_id: operationId, action, request, registered_at: registeredAt, duplicate: false };
+    });
+  }
+  async operation(operationId, action) {
+    const rows = await WateringPlanStore.all(await this.open(), 'SELECT * FROM irrigation_operations WHERE operation_id=?' + (action ? ' AND action=?' : '') + ' ORDER BY action', action ? [operationId, action] : [operationId]);
+    return rows.map(row => ({ operation_id: row.operation_id, action: row.action, request: JSON.parse(row.request_json), registered_at: row.registered_at }));
+  }
   async claim(at, ownerId) {
     const occurredAt = at ? normalizeTime(at) : now(); const owner = ownerId || crypto.randomUUID();
     return this.transaction(async db => {
@@ -289,6 +332,8 @@ module.exports = function(RED) {
         else if (action === 'get') result = await store.get(msg.planId, msg.includeHistory === true);
         else if (action === 'list') result = await store.list(msg.query);
         else if (action === 'cancel') result = await store.cancel(msg.planId, msg.at);
+        else if (action === 'register_operation') result = await store.registerOperation(msg.operation);
+        else if (action === 'get_operation') result = await store.operation(msg.operationId, msg.operationAction);
         else if (action === 'claim') result = await store.claim(msg.at, msg.ownerId);
         else if (action === 'recover') result = await store.recover(msg.at);
         else if (action === 'tick') result = await scheduler.tick(msg.facts);
@@ -301,7 +346,7 @@ module.exports = function(RED) {
         else if (action === 'start_attempt_tracking') result = await store.startAttemptTracking(msg.attemptId, msg.monotonicStartMs, msg.at);
         else if (action === 'set_meter_baseline') result = await store.setMeterBaseline(msg.attemptId, msg.baselineM3, msg.at);
         else if (action === 'record_attempt_progress') result = await store.recordAttemptProgress(msg.attemptId, msg.actualRuntimeMs, msg.deliveredM3);
-        else throw new StoreError('invalid_action', 'msg.action must be accept, get, list, cancel, claim, recover or tick');
+        else throw new StoreError('invalid_action', 'msg.action must be a supported watering-plan, operation registry or scheduler action');
         msg.payload = { ok: true, action, result }; send(msg); if (done) done();
       } catch (error) { const safe = { code: error.code || 'store_error', message: error.message || 'Watering plan store failed', details: error.details || [] }; msg.payload = { ok: false, action: msg.action, error: safe }; node.error(error, msg); send(msg); if (done) done(error); }
     });

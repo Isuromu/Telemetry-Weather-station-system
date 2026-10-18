@@ -57,6 +57,8 @@ class DashboardHttpSequencer:
         response = self._request("POST", "/internal/irrigation/command", {
             "operation_id": attempt.get("operation_id") or uuid.uuid4().hex,
             "action": "start",
+            "plan_id": plan.get("plan_id"),
+            "plan_revision": attempt.get("plan_revision"),
             "valves": {valve: True for valve in plan.get("resolved_valves", [])},
         })
         return self._state(response)
@@ -64,8 +66,10 @@ class DashboardHttpSequencer:
     def stop(self, plan: Dict[str, Any]) -> Dict[str, Any]:
         attempt = plan.get("attempt", {})
         response = self._request("POST", "/internal/irrigation/command", {
-            "operation_id": (attempt.get("operation_id") or uuid.uuid4().hex) + ":stop",
+            "operation_id": attempt.get("operation_id") or uuid.uuid4().hex,
             "action": "stop",
+            "plan_id": plan.get("plan_id"),
+            "plan_revision": attempt.get("plan_revision"),
         })
         return self._state(response)
 

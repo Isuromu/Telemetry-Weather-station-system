@@ -141,6 +141,32 @@ test('overlapping writes share one connection without SQLITE_BUSY', async () => 
   } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('operation reservations deduplicate durably across store restart', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'watering-plan-store-'));
+  const databasePath = path.join(directory, 'plans.sqlite3');
+  let store = new WateringPlanStore({ databasePath, migrationsDir });
+  try {
+    await store.initialize();
+    const command = { operationId: 'operation-1', action: 'start', valves: { valve1: true, valve2: false }, registeredAt: '2026-10-18T10:00:00Z' };
+    const first = await store.registerOperation(command);
+    assert.equal(first.duplicate, false);
+    await store.close();
+
+    store = new WateringPlanStore({ databasePath, migrationsDir });
+    await store.initialize();
+    const duplicate = await store.registerOperation(command);
+    assert.equal(duplicate.duplicate, true);
+    assert.equal(duplicate.registered_at, first.registered_at);
+    assert.deepEqual(await store.operation('operation-1', 'start'), [{
+      operation_id: 'operation-1', action: 'start', request: { action: 'start', valves: command.valves }, registered_at: first.registered_at
+    }]);
+    const stop = await store.registerOperation({ operationId: 'operation-1', action: 'stop', registeredAt: '2026-10-18T10:01:00Z' });
+    assert.equal(stop.duplicate, false, 'same run ID may reserve one stop as well as one start');
+    assert.equal((await store.registerOperation({ operationId: 'operation-1', action: 'stop' })).duplicate, true);
+    await assert.rejects(() => store.registerOperation({ operationId: 'operation-1', action: 'start', valves: { valve2: true } }), error => error.code === 'operation_id_conflict');
+  } finally { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('recover marks active plan and its attempt for reconciliation', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'watering-plan-store-'));
   const store = new WateringPlanStore({ databasePath: path.join(directory, 'plans.sqlite3'), migrationsDir });
